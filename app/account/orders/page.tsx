@@ -324,8 +324,7 @@ export default function AccountOrdersPage() {
 
   return (
     <>
-      <main className="min-h-screen bg-transparent px-4 py-8 text-white md:px-6 md:py-10">
-        <section className="mx-auto max-w-7xl">
+<main className="min-h-screen bg-transparent text-white">        <section className="mx-auto max-w-6xl px-4 md:px-6 py-6">
           <div className="rounded-[28px] border border-white/10 bg-slate-800/80 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-md md:p-6">
             <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
               <div>
@@ -356,7 +355,7 @@ export default function AccountOrdersPage() {
               Filtrar por fecha
             </p>
 
-            <div className="mt-5 grid gap-4 md:grid-cols-[1fr_1fr_auto]">
+            <div className="mt-5 grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-[1fr_1fr_auto]">
               <div>
                 <label className="mb-2 block text-sm font-medium text-white/70">
                   Desde
@@ -417,9 +416,9 @@ export default function AccountOrdersPage() {
               <div className="divide-y divide-white/10">
                 {filteredOrders.map((order) => (
                   <div
-                    key={order.id}
-                    className="flex flex-col gap-4 px-5 py-5 lg:flex-row lg:items-center lg:justify-between md:px-6"
-                  >
+  key={order.id}
+  className="flex flex-col gap-4 px-4 py-4 md:px-6 md:py-5 lg:flex-row lg:items-center lg:justify-between"
+>
                     <div className="flex items-start gap-4">
                       <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/5 text-white">
                         <svg
@@ -450,8 +449,7 @@ export default function AccountOrdersPage() {
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-3">
-                      <span
+<div className="flex flex-col md:flex-row md:items-center gap-3 w-full md:w-auto">                      <span
                         className={`rounded-full px-4 py-2 text-sm font-semibold ${getStatusClasses(
                           order.status
                         )}`}
@@ -464,10 +462,10 @@ export default function AccountOrdersPage() {
                       </span>
 
                       <button
-                        type="button"
-                        onClick={() => setSelectedOrder(order)}
-                        className="rounded-2xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-500"
-                      >
+  type="button"
+  onClick={() => setSelectedOrder(order)}
+  className="w-full md:w-auto text-center rounded-2xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-500"
+>
                         Ver comprobante
                       </button>
                     </div>
@@ -486,7 +484,7 @@ export default function AccountOrdersPage() {
             onClick={() => setSelectedOrder(null)}
           />
 
-          <div className="relative z-10 w-full max-w-3xl overflow-hidden rounded-[28px] border border-white/10 bg-[#0b1220]/95 shadow-[0_30px_90px_rgba(0,0,0,0.65)] backdrop-blur-2xl">
+          <div className="relative z-10 w-full max-w-3xl max-h-[90vh] overflow-hidden rounded-[28px] border border-white/10 bg-[#0b1220]/95 shadow-[0_30px_90px_rgba(0,0,0,0.65)] backdrop-blur-2xl">
             <div className="flex items-center justify-between border-b border-white/10 px-5 py-5 md:px-6">
               <div>
                 <h3 className="text-2xl font-bold text-white">
@@ -506,7 +504,7 @@ export default function AccountOrdersPage() {
               </button>
             </div>
 
-            <div className="max-h-[80vh] overflow-y-auto p-5 md:p-6">
+           <div className="max-h-[75vh] overflow-y-auto p-4 md:p-6">
               <section className="grid gap-4 md:grid-cols-4">
                 <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                   <p className="text-xs uppercase tracking-[0.14em] text-white/35">
