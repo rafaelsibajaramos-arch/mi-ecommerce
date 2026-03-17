@@ -443,7 +443,7 @@ export default function ProductDetailPage() {
   if (loading) {
     return (
       <main className="min-h-screen bg-transparent text-white">
-        <div className="mx-auto max-w-6xl px-4 py-10 text-white/60">
+        <div className="mx-auto max-w-6xl px-5 py-10 text-sm text-white/60 md:px-6 md:text-base">
           Cargando producto...
         </div>
       </main>
@@ -453,13 +453,13 @@ export default function ProductDetailPage() {
   if (!product) {
     return (
       <main className="min-h-screen bg-transparent text-white">
-        <div className="mx-auto max-w-6xl space-y-4 px-4 py-10">
+        <div className="mx-auto max-w-6xl space-y-4 px-5 py-10 md:px-6">
           <div className="text-white/70">{message}</div>
           <Link
-            href="/product"
-            className="inline-block rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2 text-white"
+            href="/#catalogo"
+            className="inline-block rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2 text-white transition hover:bg-white/[0.06]"
           >
-            Volver a productos
+            Volver al catálogo
           </Link>
         </div>
       </main>
@@ -472,65 +472,67 @@ export default function ProductDetailPage() {
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.03),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(255,255,255,0.02),transparent_26%)]" />
         <div className="absolute inset-0 opacity-[0.055] [background-image:linear-gradient(to_right,#ffffff_1px,transparent_1px),linear-gradient(to_bottom,#ffffff_1px,transparent_1px)] [background-size:44px_44px]" />
 
-        <div className="relative mx-auto max-w-6xl px-4 py-10 md:px-6 md:py-14">
-          <div className="mb-6">
+        <div className="relative mx-auto max-w-6xl px-5 py-8 md:px-6 md:py-12">
+          <div className="mb-5 md:mb-6">
             <Link
-              href="/product"
-              className="inline-block rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2 text-white transition hover:bg-white/[0.06]"
+              href="/#catalogo"
+              className="inline-flex items-center rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm font-medium text-white transition hover:bg-white/[0.06]"
             >
-              Volver
+              Volver al catálogo
             </Link>
           </div>
 
-          <div className="grid grid-cols-1 items-start gap-10 lg:grid-cols-2">
-            <div className="overflow-hidden rounded-3xl border border-white/10 bg-white/[0.03] backdrop-blur-md">
+          <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-[minmax(0,1fr)_460px] lg:gap-10">
+            <div className="overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.03] backdrop-blur-md">
               <div className="aspect-square bg-white/[0.02]">
                 {product.image_url ? (
                   <img
                     src={product.image_url}
                     alt={product.name}
-                    className="h-full w-full object-cover"
+                    className="h-full w-full object-contain"
                   />
                 ) : (
-                  <div className="flex h-full w-full items-center justify-center text-white/35">
+                  <div className="flex h-full w-full items-center justify-center text-sm text-white/35 md:text-base">
                     Sin imagen
                   </div>
                 )}
               </div>
             </div>
 
-            <div className="space-y-5">
+            <div className="space-y-4 md:space-y-5">
               <div>
-                <p className="text-sm uppercase tracking-[0.2em] text-white/45">
+                <p className="text-xs uppercase tracking-[0.18em] text-white/45 md:text-sm md:tracking-[0.2em]">
                   {product.category || "Sin categoría"}
                 </p>
 
-                <h1 className="mt-2 text-4xl font-extrabold text-white">
+                <h1 className="mt-2 text-3xl font-extrabold text-white sm:text-4xl md:text-5xl">
                   {product.name}
                 </h1>
               </div>
 
-              <div className="text-3xl font-extrabold text-white">
+              <div className="text-2xl font-extrabold text-white sm:text-3xl md:text-4xl">
                 ${visiblePrice.toLocaleString()}
               </div>
 
               <div>
                 {visibleStock > 0 ? (
-                  <span className="inline-flex rounded-full border border-emerald-400/20 bg-emerald-400/10 px-4 py-2 text-sm font-semibold text-emerald-300">
+                  <span className="inline-flex rounded-full border border-emerald-400/20 bg-emerald-400/10 px-4 py-2 text-xs font-semibold text-emerald-300 sm:text-sm">
                     Disponible - Stock: {visibleStock}
                   </span>
                 ) : (
-                  <span className="inline-flex rounded-full border border-red-400/20 bg-red-400/10 px-4 py-2 text-sm font-semibold text-red-300">
+                  <span className="inline-flex rounded-full border border-red-400/20 bg-red-400/10 px-4 py-2 text-xs font-semibold text-red-300 sm:text-sm">
                     Agotado
                   </span>
                 )}
               </div>
 
               {product.product_type === "variable" && variants.length > 0 && (
-                <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 backdrop-blur-md">
-                  <h2 className="mb-3 text-lg font-bold text-white">Variantes</h2>
+                <div className="rounded-[26px] border border-white/10 bg-white/[0.03] p-4 backdrop-blur-md md:p-5">
+                  <h2 className="mb-3 text-base font-bold text-white md:text-lg">
+                    Variantes
+                  </h2>
 
-                  <div className="flex flex-wrap gap-3">
+                  <div className="flex flex-wrap gap-2.5 md:gap-3">
                     {variants.map((variant) => {
                       const isSelected = selectedVariantId === variant.id;
 
@@ -539,7 +541,7 @@ export default function ProductDetailPage() {
                           key={variant.id}
                           type="button"
                           onClick={() => setSelectedVariantId(variant.id)}
-                          className={`rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
+                          className={`rounded-2xl border px-4 py-2.5 text-sm font-semibold transition md:px-5 md:py-3 ${
                             isSelected
                               ? "border-white bg-white text-black"
                               : "border-white/10 bg-white/[0.03] text-white hover:bg-white/[0.06]"
@@ -560,8 +562,8 @@ export default function ProductDetailPage() {
               )}
 
               {product.product_type === "composite" && components.length > 0 && (
-                <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 backdrop-blur-md">
-                  <h2 className="mb-3 text-lg font-bold text-white">
+                <div className="rounded-[26px] border border-white/10 bg-white/[0.03] p-4 backdrop-blur-md md:p-5">
+                  <h2 className="mb-3 text-base font-bold text-white md:text-lg">
                     Incluye este combo
                   </h2>
 
@@ -575,16 +577,16 @@ export default function ProductDetailPage() {
                           <img
                             src={item.image_url}
                             alt={item.product_name}
-                            className="h-14 w-14 rounded-xl object-cover"
+                            className="h-12 w-12 rounded-xl object-cover sm:h-14 sm:w-14"
                           />
                         ) : (
-                          <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-white/[0.05] text-xs text-white/40">
+                          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/[0.05] text-[10px] text-white/40 sm:h-14 sm:w-14 sm:text-xs">
                             Sin imagen
                           </div>
                         )}
 
-                        <div className="flex-1">
-                          <p className="font-semibold text-white">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-semibold text-white">
                             {item.quantity} x {item.product_name}
                           </p>
                           {item.variant_name && (
@@ -594,7 +596,7 @@ export default function ProductDetailPage() {
                           )}
                         </div>
 
-                        <div className="text-sm font-semibold text-white/75">
+                        <div className="text-xs font-semibold text-white/75 sm:text-sm">
                           ${Number(item.unit_price).toLocaleString()}
                         </div>
                       </div>
@@ -615,18 +617,20 @@ export default function ProductDetailPage() {
                 </div>
               )}
 
-              <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 backdrop-blur-md">
-                <h2 className="mb-2 text-lg font-bold text-white">
+              <div className="rounded-[26px] border border-white/10 bg-white/[0.03] p-4 backdrop-blur-md md:p-5">
+                <h2 className="mb-2 text-base font-bold text-white md:text-lg">
                   Descripción
                 </h2>
 
-                <p className="leading-7 text-white/65">{visibleDescription}</p>
+                <p className="text-sm leading-7 text-white/65 md:text-base">
+                  {visibleDescription}
+                </p>
               </div>
 
               <button
                 onClick={handleBuyNow}
                 disabled={visibleStock <= 0 || buying}
-                className="w-full rounded-2xl bg-white py-4 font-semibold text-black transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                className="w-full rounded-2xl bg-white py-3.5 text-sm font-semibold text-black transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 md:py-4 md:text-base"
               >
                 {buying
                   ? "Procesando compra..."
