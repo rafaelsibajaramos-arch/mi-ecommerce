@@ -77,6 +77,15 @@ function normalizeLines(text: string) {
   );
 }
 
+const inputClass =
+  "w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 placeholder:text-slate-400 caret-slate-900 outline-none transition focus:border-slate-400 focus:bg-white focus:ring-2 focus:ring-slate-200";
+
+const inputSoftClass =
+  "w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 placeholder:text-slate-400 caret-slate-900 outline-none transition focus:border-slate-400 focus:bg-white focus:ring-2 focus:ring-slate-200";
+
+const fileInputClass =
+  "w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700 outline-none file:mr-4 file:rounded-xl file:border-0 file:bg-slate-900 file:px-4 file:py-2 file:text-white";
+
 function SectionCard({
   title,
   subtitle,
@@ -328,11 +337,16 @@ export default function EditProductPage() {
     }
   }, [loading]);
 
-  // El stock general ahora se detecta SIEMPRE desde las licencias generales
   useEffect(() => {
     const detected = String(normalizeLines(generalLicensesInput).length);
     setStock(detected);
   }, [generalLicensesInput]);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
 
   const addVariant = () => {
     setVariants((prev) => [
@@ -712,7 +726,6 @@ export default function EditProductPage() {
         await supabase.from("product_components").delete().eq("product_id", id);
       }
 
-      // Generales: ahora sincroniza, no solo inserta
       await syncAvailableLicenses({
         productId: id,
         variantId: null,
@@ -720,7 +733,6 @@ export default function EditProductPage() {
         isPriority: false,
       });
 
-      // Variantes: ahora también sincroniza
       for (const item of variants) {
         const variantId = variantIdMapByTempId[item.tempId];
         const priorityLines = normalizeLines(item.priorityLicensesInput);
@@ -752,6 +764,36 @@ export default function EditProductPage() {
 
   return (
     <div className="space-y-6 text-slate-900">
+      <style jsx global>{`
+        input,
+        textarea,
+        select {
+          color: #0f172a !important;
+          -webkit-text-fill-color: #0f172a !important;
+        }
+
+        input::placeholder,
+        textarea::placeholder {
+          color: #94a3b8 !important;
+          opacity: 1;
+          -webkit-text-fill-color: #94a3b8 !important;
+        }
+
+        input:-webkit-autofill,
+        input:-webkit-autofill:hover,
+        input:-webkit-autofill:focus,
+        textarea:-webkit-autofill,
+        textarea:-webkit-autofill:hover,
+        textarea:-webkit-autofill:focus,
+        select:-webkit-autofill,
+        select:-webkit-autofill:hover,
+        select:-webkit-autofill:focus {
+          -webkit-text-fill-color: #0f172a !important;
+          box-shadow: 0 0 0px 1000px #ffffff inset !important;
+          transition: background-color 9999s ease-in-out 0s;
+        }
+      `}</style>
+
       <div className="max-w-5xl">
         <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
           Admin
@@ -789,7 +831,8 @@ export default function EditProductPage() {
                     setName(e.target.value);
                     if (!slug.trim()) setSlug(slugify(e.target.value));
                   }}
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none"
+                  placeholder="Nombre del producto"
+                  className={inputSoftClass}
                 />
               </div>
 
@@ -802,7 +845,7 @@ export default function EditProductPage() {
                   value={slug}
                   onChange={(e) => setSlug(slugify(e.target.value))}
                   placeholder="spotify-premium"
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none"
+                  className={inputSoftClass}
                 />
               </div>
 
@@ -813,7 +856,7 @@ export default function EditProductPage() {
                 <select
                   value={productType}
                   onChange={(e) => setProductType(e.target.value as ProductType)}
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none"
+                  className={inputSoftClass}
                 >
                   <option value="simple">Simple</option>
                   <option value="variable">Variable</option>
@@ -829,7 +872,8 @@ export default function EditProductPage() {
                   rows={5}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none"
+                  placeholder="Descripción del producto"
+                  className={inputSoftClass}
                 />
               </div>
 
@@ -841,7 +885,8 @@ export default function EditProductPage() {
                   type="number"
                   value={price}
                   onChange={(e) => setPrice(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none"
+                  placeholder="50000"
+                  className={inputSoftClass}
                 />
               </div>
 
@@ -853,7 +898,8 @@ export default function EditProductPage() {
                   type="text"
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none"
+                  placeholder="Ej: Streaming"
+                  className={inputSoftClass}
                 />
               </div>
 
@@ -865,7 +911,7 @@ export default function EditProductPage() {
                   type="file"
                   accept="image/*"
                   onChange={(e) => setImageFile(e.target.files?.[0] || null)}
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700 outline-none file:mr-4 file:rounded-xl file:border-0 file:bg-slate-900 file:px-4 file:py-2 file:text-white"
+                  className={fileInputClass}
                 />
 
                 <div className="mt-4 flex gap-4">
@@ -930,10 +976,11 @@ export default function EditProductPage() {
                   type="number"
                   value={stock}
                   onChange={(e) => setStock(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none"
+                  className={inputSoftClass}
                 />
                 <p className="mt-2 text-sm text-slate-500">
-                  Licencias detectadas: {normalizeLines(generalLicensesInput).length}
+                  Licencias detectadas:{" "}
+                  {normalizeLines(generalLicensesInput).length}
                 </p>
               </div>
 
@@ -946,7 +993,7 @@ export default function EditProductPage() {
                   value={generalLicensesInput}
                   onChange={(e) => setGeneralLicensesInput(e.target.value)}
                   placeholder={`correo@gmail.com clave123 perfil1\ncorreo2@gmail.com clave456 perfil2`}
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none"
+                  className={inputSoftClass}
                 />
               </div>
             </div>
@@ -1005,7 +1052,7 @@ export default function EditProductPage() {
                           onChange={(e) =>
                             updateVariant(item.tempId, "name", e.target.value)
                           }
-                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none"
+                          className={inputClass}
                         />
 
                         <input
@@ -1013,9 +1060,13 @@ export default function EditProductPage() {
                           placeholder="Slug variante"
                           value={item.slug}
                           onChange={(e) =>
-                            updateVariant(item.tempId, "slug", slugify(e.target.value))
+                            updateVariant(
+                              item.tempId,
+                              "slug",
+                              slugify(e.target.value)
+                            )
                           }
-                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none"
+                          className={inputClass}
                         />
 
                         <textarea
@@ -1023,9 +1074,13 @@ export default function EditProductPage() {
                           placeholder="Descripción de la variante"
                           value={item.description}
                           onChange={(e) =>
-                            updateVariant(item.tempId, "description", e.target.value)
+                            updateVariant(
+                              item.tempId,
+                              "description",
+                              e.target.value
+                            )
                           }
-                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none"
+                          className={inputClass}
                         />
 
                         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -1036,7 +1091,7 @@ export default function EditProductPage() {
                             onChange={(e) =>
                               updateVariant(item.tempId, "price", e.target.value)
                             }
-                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none"
+                            className={inputClass}
                           />
 
                           <div>
@@ -1047,10 +1102,11 @@ export default function EditProductPage() {
                               onChange={(e) =>
                                 updateVariant(item.tempId, "stock", e.target.value)
                               }
-                              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none"
+                              className={inputClass}
                             />
                             <p className="mt-2 text-sm text-slate-500">
-                              Licencias detectadas: {normalizeLines(item.priorityLicensesInput).length}
+                              Licencias detectadas:{" "}
+                              {normalizeLines(item.priorityLicensesInput).length}
                             </p>
                           </div>
                         </div>
@@ -1060,7 +1116,11 @@ export default function EditProductPage() {
                             type="checkbox"
                             checked={item.is_active}
                             onChange={(e) =>
-                              updateVariant(item.tempId, "is_active", e.target.checked)
+                              updateVariant(
+                                item.tempId,
+                                "is_active",
+                                e.target.checked
+                              )
                             }
                           />
                           Variante activa
@@ -1068,7 +1128,8 @@ export default function EditProductPage() {
 
                         <div>
                           <label className="mb-2 block text-sm font-semibold text-slate-700">
-                            Licencias prioritarias de esta variante (una por línea)
+                            Licencias prioritarias de esta variante (una por
+                            línea)
                           </label>
 
                           <textarea
@@ -1082,7 +1143,7 @@ export default function EditProductPage() {
                               )
                             }
                             placeholder={`correo1@gmail.com clave123 perfil1\ncorreo2@gmail.com clave456 perfil2`}
-                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none"
+                            className={inputClass}
                           />
                         </div>
                       </div>
@@ -1153,7 +1214,7 @@ export default function EditProductPage() {
                               );
                               updateComponent(item.tempId, "child_variant_id", "");
                             }}
-                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none"
+                            className={inputClass}
                           >
                             <option value="">Selecciona un producto</option>
                             {allProducts.map((product) => (
@@ -1165,7 +1226,8 @@ export default function EditProductPage() {
                         </div>
 
                         {item.child_product_id &&
-                          (variantOptionsByProduct[item.child_product_id]?.length || 0) > 0 && (
+                          (variantOptionsByProduct[item.child_product_id]
+                            ?.length || 0) > 0 && (
                             <div>
                               <label className="mb-2 block text-sm font-semibold text-slate-700">
                                 Variante específica (opcional)
@@ -1179,7 +1241,7 @@ export default function EditProductPage() {
                                     e.target.value
                                   )
                                 }
-                                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none"
+                                className={inputClass}
                               >
                                 <option value="">Usar producto general</option>
                                 {variantOptionsByProduct[item.child_product_id].map(
@@ -1202,9 +1264,13 @@ export default function EditProductPage() {
                             min="1"
                             value={item.quantity}
                             onChange={(e) =>
-                              updateComponent(item.tempId, "quantity", e.target.value)
+                              updateComponent(
+                                item.tempId,
+                                "quantity",
+                                e.target.value
+                              )
                             }
-                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none"
+                            className={inputClass}
                           />
                         </div>
 
@@ -1217,7 +1283,9 @@ export default function EditProductPage() {
                                 <>
                                   {" "}
                                   - Variante:{" "}
-                                  <strong>{variantNameMap[item.child_variant_id]}</strong>
+                                  <strong>
+                                    {variantNameMap[item.child_variant_id]}
+                                  </strong>
                                 </>
                               )}
                             </>

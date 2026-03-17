@@ -104,7 +104,7 @@ export default function NewProductPage() {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 text-slate-900">
       <div>
         <p className="text-sm uppercase tracking-[0.2em] text-gray-500">
           Admin
@@ -120,15 +120,15 @@ export default function NewProductPage() {
       </div>
 
       {message && (
-        <div className="rounded-2xl border bg-white p-4 text-sm text-gray-700">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700 shadow-sm">
           {message}
         </div>
       )}
 
-      <div className="max-w-2xl rounded-3xl border bg-white p-6 shadow-sm">
+      <div className="max-w-2xl rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
-            <label className="mb-2 block text-sm font-semibold text-gray-700">
+            <label className="mb-2 block text-sm font-semibold text-slate-700">
               Nombre
             </label>
             <input
@@ -136,12 +136,12 @@ export default function NewProductPage() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Nombre del producto"
-              className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 outline-none"
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-400 focus:bg-white"
             />
           </div>
 
           <div>
-            <label className="mb-2 block text-sm font-semibold text-gray-700">
+            <label className="mb-2 block text-sm font-semibold text-slate-700">
               Descripción
             </label>
             <textarea
@@ -149,13 +149,13 @@ export default function NewProductPage() {
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Descripción del producto"
               rows={4}
-              className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 outline-none"
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-400 focus:bg-white"
             />
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
-              <label className="mb-2 block text-sm font-semibold text-gray-700">
+              <label className="mb-2 block text-sm font-semibold text-slate-700">
                 Precio
               </label>
               <input
@@ -165,36 +165,47 @@ export default function NewProductPage() {
                 value={price}
                 onChange={(e) => setPrice(e.target.value)}
                 placeholder="50000"
-                className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 outline-none"
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-400 focus:bg-white"
               />
             </div>
 
             <div>
-              <label className="mb-2 block text-sm font-semibold text-gray-700">
+              <label className="mb-2 block text-sm font-semibold text-slate-700">
                 Stock manual inicial
               </label>
               <input
                 type="number"
                 min="0"
-                step="1"
                 value={stock}
                 onChange={(e) => setStock(e.target.value)}
                 placeholder="0"
-                className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 outline-none"
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-400 focus:bg-white"
               />
             </div>
           </div>
 
           <div>
-            <label className="mb-2 block text-sm font-semibold text-gray-700">
-              Imagen del producto
+            <label className="mb-2 block text-sm font-semibold text-slate-700">
+              Categoría
             </label>
+            <input
+              type="text"
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              placeholder="Ej: Streaming"
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-400 focus:bg-white"
+            />
+          </div>
 
+          <div>
+            <label className="mb-2 block text-sm font-semibold text-slate-700">
+              Imagen
+            </label>
             <input
               type="file"
               accept="image/*"
               onChange={(e) => setImageFile(e.target.files?.[0] || null)}
-              className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 outline-none"
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700 outline-none file:mr-4 file:rounded-xl file:border-0 file:bg-slate-900 file:px-4 file:py-2 file:text-white"
             />
 
             {previewUrl && (
@@ -202,56 +213,28 @@ export default function NewProductPage() {
                 <img
                   src={previewUrl}
                   alt="Vista previa"
-                  className="h-32 w-32 rounded-2xl border object-cover"
+                  className="h-24 w-24 rounded-xl border border-slate-200 object-cover"
                 />
               </div>
             )}
           </div>
 
-          <div>
-            <label className="mb-2 block text-sm font-semibold text-gray-700">
-              Categoría
-            </label>
+          <label className="flex items-center gap-3 text-sm text-slate-700">
             <input
-              type="text"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              placeholder="Streaming, Cuentas, Suscripciones..."
-              className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 outline-none"
-            />
-          </div>
-
-          <div className="flex items-center gap-3">
-            <input
-              id="is_active"
               type="checkbox"
               checked={isActive}
               onChange={(e) => setIsActive(e.target.checked)}
-              className="h-4 w-4"
             />
-            <label
-              htmlFor="is_active"
-              className="text-sm font-medium text-gray-700"
-            >
-              Producto activo
-            </label>
-          </div>
+            Producto activo
+          </label>
 
-          <div className="flex gap-3">
+          <div className="pt-2">
             <button
               type="submit"
               disabled={saving}
-              className="rounded-2xl bg-[#050816] px-5 py-3 font-semibold text-white disabled:opacity-70"
+              className="rounded-2xl bg-slate-900 px-6 py-3 font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {saving ? "Guardando..." : "Crear producto"}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => router.push("/admin/products")}
-              className="rounded-2xl border px-5 py-3 font-semibold text-gray-700"
-            >
-              Cancelar
             </button>
           </div>
         </form>
