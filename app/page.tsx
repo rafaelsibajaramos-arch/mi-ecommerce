@@ -207,41 +207,42 @@ export default function HomePage() {
   };
 
   const handleAddToCart = (
-  e: React.MouseEvent<HTMLButtonElement>,
-  product: Product
-) => {
-  e.stopPropagation();
+    e: React.MouseEvent<HTMLButtonElement>,
+    product: Product
+  ) => {
+    e.stopPropagation();
 
-  if (product.product_type === "variable") {
-    const selectedVariant = getSelectedVariant(product.id);
+    if (product.product_type === "variable") {
+      const selectedVariant = getSelectedVariant(product.id);
 
-    if (!selectedVariant || Number(selectedVariant.stock) <= 0) return;
+      if (!selectedVariant || Number(selectedVariant.stock) <= 0) return;
+
+      addToCart({
+        id: product.id,
+        name: `${product.name} - ${selectedVariant.name}`,
+        price: Number(selectedVariant.price),
+        image: product.image_url || "",
+        description: selectedVariant.description || product.description || "",
+        variantId: selectedVariant.id,
+        variantName: selectedVariant.name,
+      });
+
+      return;
+    }
+
+    if (product.stock <= 0) return;
 
     addToCart({
       id: product.id,
-      name: `${product.name} - ${selectedVariant.name}`,
-      price: Number(selectedVariant.price),
+      name: product.name,
+      price: Number(product.price),
       image: product.image_url || "",
-      description: selectedVariant.description || product.description || "",
-      variantId: selectedVariant.id,
-      variantName: selectedVariant.name,
+      description: product.description || "",
+      variantId: null,
+      variantName: null,
     });
+  };
 
-    return;
-  }
-
-  if (product.stock <= 0) return;
-
-  addToCart({
-    id: product.id,
-    name: product.name,
-    price: Number(product.price),
-    image: product.image_url || "",
-    description: product.description || "",
-    variantId: null,
-    variantName: null,
-  });
-};
   const handleOpenProduct = (productId: string) => {
     router.push(`/product/${productId}`);
   };
@@ -251,74 +252,73 @@ export default function HomePage() {
       <section className="relative overflow-hidden border-b border-white/10 bg-transparent">
         <div className="hero-glow"></div>
 
-        <div className="relative mx-auto flex min-h-[78vh] max-w-7xl flex-col items-center justify-center px-6 pb-20 pt-24 text-center md:min-h-[82vh] md:pt-28">
-          <h1 className="mt-1 text-5xl font-extrabold leading-[0.40] tracking-[0.02em] md:text-7xl">
+        <div className="relative mx-auto flex min-h-[62vh] max-w-7xl flex-col items-center justify-center px-5 pb-14 pt-16 text-center sm:px-6 md:min-h-[70vh] md:pb-16 md:pt-20">
+          <h1 className="text-4xl font-extrabold leading-none tracking-[0.01em] sm:text-5xl md:text-6xl lg:text-7xl">
             STREAMINGMAYOR
           </h1>
 
-          <p className="mt-8 max-w-4xl text-xl leading-8 text-white/50 md:text-1xl">
+          <p className="mt-5 max-w-3xl text-base leading-7 text-white/60 sm:text-lg md:mt-6 md:text-xl">
             Plataforma confiable para comprar servicios digitales,
-            entretenimiento y productos online de forma segura y rápida
+            entretenimiento y productos online de forma segura y rápida.
           </p>
 
-          <div className="mt-10">
+          <div className="mt-8 md:mt-10">
             <a
               href="#catalogo"
-              className="inline-flex h-14 items-center justify-center rounded-2xl bg-white px-8 text-base font-bold text-black transition hover:bg-slate-100"
+              className="inline-flex h-12 items-center justify-center rounded-2xl bg-white px-7 text-sm font-bold text-black transition hover:bg-slate-100 md:h-14 md:px-8 md:text-base"
             >
-              Explorar catalogo
+              Explorar catálogo
             </a>
           </div>
 
-          <div className="mt-20 grid w-full gap-6 md:grid-cols-3">
-            <div className="rounded-[28px] border border-white/10 bg-gradient-to-b from-white/[0.055] to-white/[0.02] p-7 text-left backdrop-blur">
+          <div className="mt-12 grid w-full gap-5 md:mt-14 md:grid-cols-3">
+            <div className="rounded-[24px] border border-white/10 bg-gradient-to-b from-white/[0.055] to-white/[0.02] p-5 text-left backdrop-blur md:p-6">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <h3 className="text-2xl font-black text-white">
+                  <h3 className="text-xl font-black text-white md:text-2xl">
                     ENTREGA INMEDIATA
                   </h3>
-                  <p className="mt-3 text-base leading-7 text-white/55">
+                  <p className="mt-3 text-sm leading-6 text-white/55 md:text-base md:leading-7">
                     Recibe tus servicios digitales de forma rápida y sin
                     complicaciones.
                   </p>
                 </div>
 
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-white/70">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-white/70 md:h-11 md:w-11">
                   ◧
                 </div>
               </div>
             </div>
 
-            <div className="rounded-[28px] border border-white/10 bg-gradient-to-b from-white/[0.055] to-white/[0.02] p-7 text-left backdrop-blur">
+            <div className="rounded-[24px] border border-white/10 bg-gradient-to-b from-white/[0.055] to-white/[0.02] p-5 text-left backdrop-blur md:p-6">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <h3 className="text-2xl font-black text-white">
+                  <h3 className="text-xl font-black text-white md:text-2xl">
                     SOPORTE CONFIABLE
                   </h3>
-                  <p className="mt-3 text-base leading-7 text-white/55">
+                  <p className="mt-3 text-sm leading-6 text-white/55 md:text-base md:leading-7">
                     Estamos disponibles para ayudarte en cada paso de tu compra.
                   </p>
                 </div>
 
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-white/70">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-white/70 md:h-11 md:w-11">
                   ✦
                 </div>
               </div>
             </div>
 
-            <div className="rounded-[28px] border border-white/10 bg-gradient-to-b from-white/[0.055] to-white/[0.02] p-7 text-left backdrop-blur">
+            <div className="rounded-[24px] border border-white/10 bg-gradient-to-b from-white/[0.055] to-white/[0.02] p-5 text-left backdrop-blur md:p-6">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <h3 className="text-2xl font-black text-white">
-                    ENTREGA INMEDIATA
+                  <h3 className="text-xl font-black text-white md:text-2xl">
+                    COMPRA SEGURA
                   </h3>
-                  <p className="mt-3 text-base leading-7 text-white/55">
-                    Recibe tus servicios digitales de forma rápida y sin
-                    complicaciones.
+                  <p className="mt-3 text-sm leading-6 text-white/55 md:text-base md:leading-7">
+                    Compra con confianza en una plataforma rápida, moderna y confiable.
                   </p>
                 </div>
 
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-white/70">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-white/70 md:h-11 md:w-11">
                   ○
                 </div>
               </div>
@@ -327,21 +327,18 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section
-        id="catalogo"
-        className="mx-auto max-w-7xl px-6 py-20 md:py-20"
-      >
-        <div className="mb-12 max-w-2xl">
-          <p className="text-3xl font-bold uppercase tracking-[0.20em] text-white">
+      <section id="catalogo" className="mx-auto max-w-7xl px-5 py-14 md:px-6 md:py-16">
+        <div className="mb-10 max-w-2xl">
+          <p className="text-2xl font-bold uppercase tracking-[0.16em] text-white md:text-3xl">
             CATÁLOGO
           </p>
-          <p className="mt-5 text-lg leading-8 text-white/62">
+          <p className="mt-4 text-base leading-7 text-white/62 md:text-lg">
             Gran variedad de servicios digitales en un solo lugar.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-8 lg:grid-cols-[300px_minmax(0,1fr)]">
-          <aside className="h-fit rounded-[30px] border border-white/10 bg-white/[0.025] p-6 backdrop-blur-md">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
+          <aside className="h-fit rounded-[26px] border border-white/10 bg-white/[0.025] p-5 backdrop-blur-md md:p-6">
             <div>
               <div className="mb-4 flex items-center gap-3">
                 <svg
@@ -355,19 +352,19 @@ export default function HomePage() {
                   <path d="m20 20-3.5-3.5"></path>
                 </svg>
 
-                <p className="text-xl font-black uppercase tracking-[0.08em] text-white">
+                <p className="text-lg font-black uppercase tracking-[0.08em] text-white md:text-xl">
                   BÚSQUEDA
                 </p>
               </div>
 
-              <div className="rounded-[20px] border border-blue-500 bg-white/[0.03] px-4 py-4 shadow-[0_0_0_1px_rgba(59,130,246,0.18)]">
+              <div className="rounded-[18px] border border-blue-500 bg-white/[0.03] px-4 py-3 shadow-[0_0_0_1px_rgba(59,130,246,0.18)]">
                 <div className="flex items-center gap-3">
                   <input
                     type="text"
                     placeholder="Filtrar productos..."
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    className="w-full bg-transparent text-base text-white outline-none placeholder:text-white/35"
+                    className="w-full bg-transparent text-sm text-white outline-none placeholder:text-white/35 md:text-base"
                   />
 
                   <svg
@@ -399,7 +396,7 @@ export default function HomePage() {
                   <rect x="14" y="14" width="7" height="7" rx="1"></rect>
                 </svg>
 
-                <p className="text-xl font-black uppercase tracking-[0.08em] text-white">
+                <p className="text-lg font-black uppercase tracking-[0.08em] text-white md:text-xl">
                   CATEGORÍAS
                 </p>
               </div>
@@ -475,10 +472,10 @@ export default function HomePage() {
                     <article
                       key={product.id}
                       onClick={() => handleOpenProduct(product.id)}
-                      className="group flex h-full cursor-pointer flex-col overflow-hidden rounded-[30px] border border-white/10 bg-white/[0.035] backdrop-blur-md transition duration-300 hover:-translate-y-1 hover:border-white/20"
+                      className="group flex h-full cursor-pointer flex-col overflow-hidden rounded-[26px] border border-white/10 bg-white/[0.035] backdrop-blur-md transition duration-300 hover:-translate-y-1 hover:border-white/20"
                     >
                       <div className="p-4 pb-0">
-                        <div className="aspect-square w-full overflow-hidden rounded-[22px]">
+                        <div className="aspect-square w-full overflow-hidden rounded-[20px]">
                           {product.image_url ? (
                             <img
                               src={product.image_url}
@@ -488,7 +485,7 @@ export default function HomePage() {
                           ) : (
                             <div className="flex h-full w-full items-center justify-center bg-white/[0.02]">
                               <div className="text-center">
-                                <p className="text-xl font-bold text-white/80">
+                                <p className="text-lg font-bold text-white/80 md:text-xl">
                                   Producto digital
                                 </p>
                                 <p className="mt-1 text-sm text-white/35">
@@ -501,8 +498,8 @@ export default function HomePage() {
                       </div>
 
                       <div className="flex flex-1 flex-col p-5">
-                        <div className="flex min-h-[72px] items-start justify-between gap-3">
-                          <h3 className="max-w-[70%] text-[15px] font-extrabold uppercase leading-8 text-white md:text-[17px]">
+                        <div className="flex min-h-[64px] items-start justify-between gap-3">
+                          <h3 className="max-w-[70%] text-[15px] font-extrabold uppercase leading-6 text-white md:text-[17px] md:leading-7">
                             {product.name}
                           </h3>
 
@@ -546,7 +543,7 @@ export default function HomePage() {
                               <p className="text-xs uppercase tracking-[0.20em] text-white/30">
                                 Precio
                               </p>
-                              <p className="mt-1 text-2xl font-black text-white">
+                              <p className="mt-1 text-xl font-black text-white md:text-2xl">
                                 ${Number(visiblePrice).toLocaleString()}
                               </p>
 
@@ -561,7 +558,7 @@ export default function HomePage() {
                               type="button"
                               onClick={(e) => handleAddToCart(e, product)}
                               disabled={visibleStock <= 0}
-                              className="inline-flex h-12 items-center justify-center rounded-2xl bg-white px-5 text-sm font-bold text-black transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                              className="inline-flex h-11 items-center justify-center rounded-2xl bg-white px-4 text-sm font-bold text-black transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 md:h-12 md:px-5"
                             >
                               Agregar al carrito
                             </button>
