@@ -68,8 +68,7 @@ export default function LoginPage() {
     }
 
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: "http://localhost:3000/reset-password",
-    });
+redirectTo: "https://streamingmayor1.com/reset-password",    });
 
     if (error) {
       setMessage(error.message);

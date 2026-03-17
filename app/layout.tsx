@@ -4,9 +4,10 @@ import { CartProvider } from "../context/CartContext";
 import CartDrawer from "../components/CartDrawer";
 import Navbar from "../components/Navbar";
 import ShootingStars from "../components/ShootingStars";
+import AuthGuard from "../components/AuthGuard";
 
 export const metadata: Metadata = {
-  title: "Mi Ecommerce",
+  title: "StreamingMayor",
   description: "Tienda online moderna",
 };
 
@@ -37,9 +38,11 @@ export default function RootLayout({
         <ShootingStars />
 
         <CartProvider>
-          <Navbar />
-          <div className="relative z-10">{children}</div>
-          <CartDrawer />
+          <AuthGuard>
+            <Navbar />
+            <div className="relative z-10">{children}</div>
+            <CartDrawer />
+          </AuthGuard>
         </CartProvider>
       </body>
     </html>

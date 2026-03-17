@@ -21,6 +21,16 @@ export default function UserDropdown() {
 
   useEffect(() => {
     loadProfile();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(() => {
+      loadProfile();
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -40,7 +50,10 @@ export default function UserDropdown() {
       data: { user },
     } = await supabase.auth.getUser();
 
-    if (!user) return;
+    if (!user) {
+      setProfile(null);
+      return;
+    }
 
     const { data } = await supabase
       .from("profiles")
@@ -55,7 +68,7 @@ export default function UserDropdown() {
 
   const logout = async () => {
     await supabase.auth.signOut();
-    router.push("/");
+    router.push("/login");
     router.refresh();
   };
 
@@ -70,13 +83,13 @@ export default function UserDropdown() {
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="flex h-[56px] items-center gap-4 rounded-2xl border border-white/15 bg-white/[0.03] px-4 text-white transition hover:bg-white/[0.06]"
+        className="flex h-[50px] items-center gap-3 rounded-2xl border border-white/15 bg-white/[0.03] px-4 text-white transition hover:bg-white/[0.06]"
       >
-        <span className="text-[17px] font-semibold text-white/95">
+        <span className="text-[16px] font-semibold text-white/95">
           $ {balance}
         </span>
 
-        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-black">
+        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-black">
           <svg
             viewBox="0 0 24 24"
             className="h-4 w-4"
@@ -99,8 +112,7 @@ export default function UserDropdown() {
       </button>
 
       {open && (
-        <div 
-        className="absolute right-0 top-[70px] z-50 w-[380px] overflow-hidden rounded-[28px] border border-white/10 bg-[#050816]/95 shadow-[0_30px_90px_rgba(0,0,0,0.7)] backdrop-blur-2xl">
+        <div className="absolute right-0 top-[64px] z-50 w-[360px] overflow-hidden rounded-[26px] border border-white/10 bg-[#050816]/95 shadow-[0_30px_90px_rgba(0,0,0,0.7)] backdrop-blur-2xl">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.07),transparent_38%),radial-gradient(circle_at_bottom_right,rgba(255,255,255,0.03),transparent_34%)]" />
 
           <div className="relative z-10 p-6">
@@ -113,8 +125,8 @@ export default function UserDropdown() {
               </div>
 
               <span className="shrink-0 rounded-full border border-blue-400/40 bg-blue-500/15 px-4 py-[6px] text-sm font-semibold text-blue-300 capitalize shadow-[0_0_12px_rgba(59,130,246,0.35)]">
-  {profile.role || "user"}
-</span>
+                {profile.role || "user"}
+              </span>
             </div>
 
             <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-4">
@@ -146,11 +158,11 @@ export default function UserDropdown() {
                     <circle cx="12" cy="7" r="4" />
                   </svg>
                 </span>
-                <span>Mi Perfil</span>
+                <span>Mi perfil</span>
               </Link>
 
               <Link
-  href="/account/wallet"
+                href="/account/wallet"
                 onClick={() => setOpen(false)}
                 className="flex items-center gap-3 rounded-2xl px-3 py-3 text-[15px] font-medium text-white/85 transition hover:bg-white/[0.05] hover:text-white"
               >
@@ -169,7 +181,7 @@ export default function UserDropdown() {
                     <path d="M16 13h.01" />
                   </svg>
                 </span>
-                <span>Mi Billetera</span>
+                <span>Mi billetera</span>
               </Link>
 
               <Link
