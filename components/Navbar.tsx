@@ -84,8 +84,12 @@ export default function Navbar() {
         <div className="flex items-center gap-2 md:gap-3">
           <button
             type="button"
-            onClick={openCart}
-            className="relative flex h-[46px] w-[46px] items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-white transition hover:bg-white/[0.07] md:h-[50px] md:w-[50px]"
+            onClick={() => {
+              if (!isLoggedIn) return;
+              openCart();
+            }}
+            disabled={!isLoggedIn}
+            className="relative flex h-[46px] w-[46px] items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-white transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-40 md:h-[50px] md:w-[50px]"
           >
             <svg
               viewBox="0 0 24 24"
@@ -101,7 +105,7 @@ export default function Navbar() {
               <path d="M3 4h2l2.2 10.2a1 1 0 0 0 1 .8h9.9a1 1 0 0 0 1-.8L21 7H7" />
             </svg>
 
-            {totalItems > 0 && (
+            {isLoggedIn && totalItems > 0 && (
               <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-white px-1 text-[10px] font-bold text-black md:h-6 md:min-w-6 md:text-[11px]">
                 {totalItems}
               </span>
