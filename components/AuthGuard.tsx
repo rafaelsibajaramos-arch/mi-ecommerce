@@ -244,230 +244,259 @@ export default function AuthGuard({
       </div>
 
       {isAuthBlocked && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/45 px-4 py-6 backdrop-blur-sm">
-          <div className="w-full max-w-[760px] overflow-hidden rounded-[32px] border border-white/10 bg-white shadow-2xl">
-            <div className="grid lg:grid-cols-2">
-              <div className="relative hidden bg-black p-10 text-white lg:flex lg:flex-col lg:justify-between">
-                <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.12),transparent_40%),radial-gradient(circle_at_bottom_right,rgba(255,255,255,0.05),transparent_40%)]" />
-                <div className="pointer-events-none absolute -left-20 -top-20 h-96 w-96 rounded-full bg-white/5 blur-3xl" />
-                <div className="pointer-events-none absolute -bottom-20 -right-20 h-96 w-96 rounded-full bg-white/5 blur-3xl" />
+        <div className="fixed inset-0 z-[120] bg-black/50 px-3 py-4 backdrop-blur-sm sm:px-4 sm:py-6">
+          <div className="flex min-h-full items-center justify-center">
+            <div className="max-h-[95vh] w-full max-w-5xl overflow-hidden rounded-[28px] border border-white/10 bg-white shadow-2xl">
+              <div className="grid max-h-[95vh] overflow-y-auto lg:grid-cols-2">
+                <div className="relative overflow-hidden bg-black p-6 text-white sm:p-8 lg:flex lg:min-h-full lg:flex-col lg:justify-between lg:p-10">
+                  <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.12),transparent_35%),radial-gradient(circle_at_bottom_right,rgba(59,130,246,0.08),transparent_35%)]" />
+                  <div className="pointer-events-none absolute -left-20 -top-20 h-96 w-96 rounded-full bg-white/5 blur-3xl" />
+                  <div className="pointer-events-none absolute -bottom-20 -right-20 h-96 w-96 rounded-full bg-blue-500/10 blur-3xl" />
+                  <div className="pointer-events-none absolute inset-0 opacity-[0.08] bg-[linear-gradient(to_right,#ffffff_1px,transparent_1px),linear-gradient(to_bottom,#ffffff_1px,transparent_1px)] [background-size:34px_34px]" />
 
-                <div className="relative z-10">
-                  <p className="mb-4 text-sm uppercase tracking-[0.3em] text-white/50">
-                    StreamingMayor
-                  </p>
+                  <span className="pointer-events-none absolute left-[12%] top-[18%] h-1 w-1 rounded-full bg-white/80 shadow-[0_0_12px_rgba(255,255,255,0.9)]" />
+                  <span className="pointer-events-none absolute left-[22%] top-[30%] h-1.5 w-1.5 rounded-full bg-white/60 shadow-[0_0_14px_rgba(255,255,255,0.8)]" />
+                  <span className="pointer-events-none absolute right-[18%] top-[22%] h-1 w-1 rounded-full bg-blue-200/80 shadow-[0_0_12px_rgba(191,219,254,0.8)]" />
+                  <span className="pointer-events-none absolute right-[28%] bottom-[28%] h-1 w-1 rounded-full bg-white/70 shadow-[0_0_10px_rgba(255,255,255,0.7)]" />
+                  <span className="pointer-events-none absolute left-[18%] bottom-[22%] h-1.5 w-1.5 rounded-full bg-white/70 shadow-[0_0_12px_rgba(255,255,255,0.8)]" />
 
-                  <h2 className="text-5xl font-extrabold leading-tight">
+                  <span className="pointer-events-none absolute left-[8%] top-[16%] h-px w-24 rotate-[25deg] bg-gradient-to-r from-white/0 via-white/70 to-white/0 opacity-70 animate-[shootingStar_6s_linear_infinite]" />
+                  <span className="pointer-events-none absolute right-[12%] top-[38%] h-px w-20 rotate-[25deg] bg-gradient-to-r from-blue-200/0 via-blue-200/80 to-blue-200/0 opacity-60 animate-[shootingStar_8s_linear_infinite]" />
+                  <span className="pointer-events-none absolute left-[30%] bottom-[24%] h-px w-16 rotate-[25deg] bg-gradient-to-r from-white/0 via-white/60 to-white/0 opacity-60 animate-[shootingStar_7s_linear_infinite]" />
+
+                  <div className="relative z-10">
+                    <p className="mb-3 text-[11px] uppercase tracking-[0.32em] text-white/50 sm:mb-4 sm:text-sm">
+                      StreamingMayor
+                    </p>
+
+                    <h2 className="text-4xl font-extrabold leading-tight sm:text-5xl">
+                      {mode === "login" ? (
+                        <>
+                          Bienvenido
+                        </>
+                      ) : (
+                        <>
+                          Crea tu cuenta
+                        </>
+                      )}
+                    </h2>
+
+                    <p className="mt-4 max-w-md text-base leading-7 text-white/72 sm:mt-6 sm:text-lg sm:leading-8">
+                      {mode === "login"
+                        ? "Accede y continúa tu experiencia digital."
+                        : "Regístrate y empieza en segundos."}
+                    </p>
+                  </div>
+
+                  <div className="relative z-10 mt-6 overflow-hidden rounded-[24px] border border-white/10 bg-white/[0.04] p-5 backdrop-blur-md sm:mt-8 sm:p-6">
+                    <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.08),transparent_45%)]" />
+                    <div className="pointer-events-none absolute inset-0 opacity-[0.06] bg-[linear-gradient(to_right,#ffffff_1px,transparent_1px),linear-gradient(to_bottom,#ffffff_1px,transparent_1px)] [background-size:26px_26px]" />
+
+                    <span className="pointer-events-none absolute left-[14%] top-[26%] h-1 w-1 rounded-full bg-white/80 shadow-[0_0_10px_rgba(255,255,255,0.8)]" />
+                    <span className="pointer-events-none absolute right-[16%] top-[22%] h-1 w-1 rounded-full bg-blue-200/70 shadow-[0_0_10px_rgba(191,219,254,0.8)]" />
+                    <span className="pointer-events-none absolute left-[28%] bottom-[24%] h-1 w-1 rounded-full bg-white/70 shadow-[0_0_10px_rgba(255,255,255,0.8)]" />
+                    <span className="pointer-events-none absolute right-[26%] bottom-[30%] h-px w-12 rotate-[25deg] bg-gradient-to-r from-white/0 via-white/70 to-white/0 opacity-60 animate-[shootingStar_5s_linear_infinite]" />
+
+                    <div className="relative z-10">
+                      <p className="mb-2 text-[11px] uppercase tracking-[0.22em] text-white/50 sm:mb-3 sm:text-sm">
+                        Plataforma
+                      </p>
+
+                      <h3 className="text-xl font-bold leading-tight sm:text-2xl">
+                        {mode === "login"
+                          ? "Todo en un solo lugar"
+                          : "Acceso rápido y seguro"}
+                      </h3>
+
+                      <p className="mt-3 max-w-sm text-sm leading-6 text-white/68 sm:text-base sm:leading-7">
+                        {mode === "login"
+                          ? "Compra, gestiona y sigue tus pedidos fácilmente."
+                          : "Crea tu cuenta y empieza a comprar sin complicaciones."}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white px-5 py-6 sm:px-8 sm:py-8 md:px-10">
+                  <div className="mx-auto w-full max-w-md">
                     {mode === "login" ? (
                       <>
-                        Inicia
-                        <br />
-                        sesión
+                        <p className="mb-2 text-sm uppercase tracking-[0.2em] text-gray-500">
+                          Bienvenido
+                        </p>
+
+                        <h1 className="text-3xl font-extrabold text-gray-900 sm:text-4xl">
+                          Iniciar sesión
+                        </h1>
+
+                        <p className="mt-3 text-sm text-gray-500 sm:text-base">
+                          Ingresa a tu cuenta para continuar.
+                        </p>
+
+                        <form className="mt-7 space-y-4 sm:mt-8 sm:space-y-5" onSubmit={handleLogin}>
+                          <div>
+                            <label className="mb-2 block text-sm font-semibold text-gray-700">
+                              Correo electrónico
+                            </label>
+
+                            <input
+                              type="email"
+                              placeholder="tucorreo@email.com"
+                              value={loginEmail}
+                              onChange={(e) => setLoginEmail(e.target.value)}
+                              required
+                              className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:py-4"
+                            />
+                          </div>
+
+                          <div>
+                            <div className="mb-2 flex items-center justify-between gap-3">
+                              <label className="block text-sm font-semibold text-gray-700">
+                                Contraseña
+                              </label>
+
+                              <button
+                                type="button"
+                                onClick={handleForgotPassword}
+                                className="text-xs text-blue-600 hover:underline sm:text-sm"
+                              >
+                                ¿Olvidaste tu contraseña?
+                              </button>
+                            </div>
+
+                            <input
+                              type="password"
+                              placeholder="********"
+                              value={loginPassword}
+                              onChange={(e) => setLoginPassword(e.target.value)}
+                              required
+                              className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:py-4"
+                            />
+                          </div>
+
+                          <button
+                            type="submit"
+                            disabled={loginLoading}
+                            className="w-full rounded-2xl bg-[#050816] py-3.5 font-semibold text-white transition hover:opacity-95 disabled:opacity-50 sm:py-4"
+                          >
+                            {loginLoading ? "Entrando..." : "Iniciar sesión"}
+                          </button>
+                        </form>
+
+                        {loginMessage && (
+                          <p className="mt-4 text-center text-sm text-gray-600">
+                            {loginMessage}
+                          </p>
+                        )}
+
+                        <p className="mt-7 text-center text-sm text-gray-500 sm:mt-8">
+                          ¿No tienes cuenta?{" "}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setLoginMessage("");
+                              setMode("register");
+                            }}
+                            className="font-semibold text-blue-600 hover:underline"
+                          >
+                            Regístrate
+                          </button>
+                        </p>
                       </>
                     ) : (
                       <>
-                        Crea tu
-                        <br />
-                        cuenta
-                      </>
-                    )}
-                  </h2>
+                        <p className="mb-2 text-sm uppercase tracking-[0.2em] text-gray-500">
+                          Registro
+                        </p>
 
-                  <p className="mt-6 max-w-md text-lg leading-8 text-white/70">
-                    {mode === "login"
-                      ? "Accede a tu cuenta para comprar, gestionar pedidos y usar la plataforma."
-                      : "Regístrate para comenzar a comprar y administrar todo desde un solo lugar."}
-                  </p>
-                </div>
+                        <h1 className="text-3xl font-extrabold text-gray-900 sm:text-4xl">
+                          Crear cuenta
+                        </h1>
 
-                <div className="relative z-10 rounded-3xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-sm">
-                  <p className="mb-3 text-sm uppercase tracking-[0.2em] text-white/50">
-                    Plataforma
-                  </p>
-                  <h3 className="text-2xl font-bold">Servicios digitales premium</h3>
-                  <p className="mt-3 leading-7 text-white/70">
-                    Compra, recibe saldo, consulta licencias y controla tus pedidos
-                    desde un solo lugar.
-                  </p>
-                </div>
-              </div>
+                        <p className="mt-3 text-sm text-gray-500 sm:text-base">
+                          Completa tus datos para comenzar.
+                        </p>
 
-              <div className="bg-white px-6 py-8 sm:px-8 md:px-10">
-                <div className="mx-auto w-full max-w-md">
-                  {mode === "login" ? (
-                    <>
-                      <p className="mb-2 text-sm uppercase tracking-[0.2em] text-gray-500">
-                        Bienvenido
-                      </p>
+                        <form
+                          className="mt-7 space-y-4 sm:mt-8 sm:space-y-5"
+                          onSubmit={handleRegister}
+                        >
+                          <div>
+                            <label className="mb-2 block text-sm font-semibold text-gray-700">
+                              Nombre completo
+                            </label>
 
-                      <h1 className="text-4xl font-extrabold text-gray-900">
-                        Iniciar sesión
-                      </h1>
+                            <input
+                              type="text"
+                              placeholder="Tu nombre"
+                              value={registerFullName}
+                              onChange={(e) => setRegisterFullName(e.target.value)}
+                              required
+                              className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:py-4"
+                            />
+                          </div>
 
-                      <p className="mt-3 text-gray-500">
-                        Ingresa a tu cuenta para continuar.
-                      </p>
+                          <div>
+                            <label className="mb-2 block text-sm font-semibold text-gray-700">
+                              Correo electrónico
+                            </label>
 
-                      <form className="mt-8 space-y-5" onSubmit={handleLogin}>
-                        <div>
-                          <label className="mb-2 block text-sm font-semibold text-gray-700">
-                            Correo electrónico
-                          </label>
+                            <input
+                              type="email"
+                              placeholder="tucorreo@email.com"
+                              value={registerEmail}
+                              onChange={(e) => setRegisterEmail(e.target.value)}
+                              required
+                              className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:py-4"
+                            />
+                          </div>
 
-                          <input
-                            type="email"
-                            placeholder="tucorreo@email.com"
-                            value={loginEmail}
-                            onChange={(e) => setLoginEmail(e.target.value)}
-                            required
-                            className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4 text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                          />
-                        </div>
-
-                        <div>
-                          <div className="mb-2 flex items-center justify-between gap-3">
-                            <label className="block text-sm font-semibold text-gray-700">
+                          <div>
+                            <label className="mb-2 block text-sm font-semibold text-gray-700">
                               Contraseña
                             </label>
 
-                            <button
-                              type="button"
-                              onClick={handleForgotPassword}
-                              className="text-sm text-blue-600 hover:underline"
-                            >
-                              ¿Olvidaste tu contraseña?
-                            </button>
+                            <input
+                              type="password"
+                              placeholder="********"
+                              value={registerPassword}
+                              onChange={(e) => setRegisterPassword(e.target.value)}
+                              required
+                              className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:py-4"
+                            />
                           </div>
 
-                          <input
-                            type="password"
-                            placeholder="********"
-                            value={loginPassword}
-                            onChange={(e) => setLoginPassword(e.target.value)}
-                            required
-                            className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4 text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                          />
-                        </div>
+                          <button
+                            type="submit"
+                            disabled={registerLoading}
+                            className="w-full rounded-2xl bg-[#050816] py-3.5 font-semibold text-white transition hover:opacity-95 disabled:opacity-50 sm:py-4"
+                          >
+                            {registerLoading ? "Creando cuenta..." : "Crear cuenta"}
+                          </button>
+                        </form>
 
-                        <button
-                          type="submit"
-                          disabled={loginLoading}
-                          className="w-full rounded-2xl bg-[#050816] py-4 font-semibold text-white transition hover:opacity-95 disabled:opacity-50"
-                        >
-                          {loginLoading ? "Entrando..." : "Iniciar sesión"}
-                        </button>
-                      </form>
+                        {registerMessage && (
+                          <p className="mt-4 text-center text-sm text-gray-600">
+                            {registerMessage}
+                          </p>
+                        )}
 
-                      {loginMessage && (
-                        <p className="mt-4 text-center text-sm text-gray-600">
-                          {loginMessage}
+                        <p className="mt-7 text-center text-sm text-gray-500 sm:mt-8">
+                          ¿Ya tienes cuenta?{" "}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRegisterMessage("");
+                              setMode("login");
+                            }}
+                            className="font-semibold text-blue-600 hover:underline"
+                          >
+                            Inicia sesión
+                          </button>
                         </p>
-                      )}
-
-                      <p className="mt-8 text-center text-sm text-gray-500">
-                        ¿No tienes cuenta?{" "}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setLoginMessage("");
-                            setMode("register");
-                          }}
-                          className="font-semibold text-blue-600 hover:underline"
-                        >
-                          Regístrate
-                        </button>
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <p className="mb-2 text-sm uppercase tracking-[0.2em] text-gray-500">
-                        Registro
-                      </p>
-
-                      <h1 className="text-4xl font-extrabold text-gray-900">
-                        Crear cuenta
-                      </h1>
-
-                      <p className="mt-3 text-gray-500">
-                        Completa tus datos para comenzar.
-                      </p>
-
-                      <form className="mt-8 space-y-5" onSubmit={handleRegister}>
-                        <div>
-                          <label className="mb-2 block text-sm font-semibold text-gray-700">
-                            Nombre completo
-                          </label>
-
-                          <input
-                            type="text"
-                            placeholder="Tu nombre"
-                            value={registerFullName}
-                            onChange={(e) => setRegisterFullName(e.target.value)}
-                            required
-                            className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4 text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="mb-2 block text-sm font-semibold text-gray-700">
-                            Correo electrónico
-                          </label>
-
-                          <input
-                            type="email"
-                            placeholder="tucorreo@email.com"
-                            value={registerEmail}
-                            onChange={(e) => setRegisterEmail(e.target.value)}
-                            required
-                            className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4 text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="mb-2 block text-sm font-semibold text-gray-700">
-                            Contraseña
-                          </label>
-
-                          <input
-                            type="password"
-                            placeholder="********"
-                            value={registerPassword}
-                            onChange={(e) => setRegisterPassword(e.target.value)}
-                            required
-                            className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4 text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                          />
-                        </div>
-
-                        <button
-                          type="submit"
-                          disabled={registerLoading}
-                          className="w-full rounded-2xl bg-[#050816] py-4 font-semibold text-white transition hover:opacity-95 disabled:opacity-50"
-                        >
-                          {registerLoading ? "Creando cuenta..." : "Crear cuenta"}
-                        </button>
-                      </form>
-
-                      {registerMessage && (
-                        <p className="mt-4 text-center text-sm text-gray-600">
-                          {registerMessage}
-                        </p>
-                      )}
-
-                      <p className="mt-8 text-center text-sm text-gray-500">
-                        ¿Ya tienes cuenta?{" "}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setRegisterMessage("");
-                            setMode("login");
-                          }}
-                          className="font-semibold text-blue-600 hover:underline"
-                        >
-                          Inicia sesión
-                        </button>
-                      </p>
-                    </>
-                  )}
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

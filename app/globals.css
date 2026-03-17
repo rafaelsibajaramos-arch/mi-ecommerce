@@ -151,3 +151,20 @@ body {
     0 0 22px rgba(255, 255, 255, 0.28);
 }
 
+@keyframes shootingStar {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(25deg);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  45% {
+    transform: translate3d(140px, 140px, 0) rotate(25deg);
+    opacity: 0;
+  }
+  100% {
+    transform: translate3d(140px, 140px, 0) rotate(25deg);
+    opacity: 0;
+  }
+}
