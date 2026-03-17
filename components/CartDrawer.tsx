@@ -56,7 +56,7 @@ const generateRandomOrderNumber = () => {
 async function getUniqueOrderNumber() {
   let attempts = 0;
 
-  while (attempts < 20) {
+  while (attempts < 25) {
     const candidate = generateRandomOrderNumber();
 
     const { data, error } = await supabase
@@ -106,14 +106,15 @@ export default function CartDrawer() {
 
   const trackRef = useRef<HTMLDivElement | null>(null);
   const knobRef = useRef<HTMLButtonElement | null>(null);
-  const dragValueRef = useRef(0);
-  const startOffsetRef = useRef(0);
+  const dragXRef = useRef(0);
+  const pointerOffsetRef = useRef(0);
+  const maxXRef = useRef(0);
 
   const [dragX, setDragX] = useState(0);
 
   const resetSlider = () => {
-    dragValueRef.current = 0;
-    startOffsetRef.current = 0;
+    dragXRef.current = 0;
+    pointerOffsetRef.current = 0;
     setDragX(0);
   };
 
@@ -132,8 +133,8 @@ export default function CartDrawer() {
 
       if (userError || !user) {
         setMessage("Debes iniciar sesión para completar la compra.");
-        setProcessing(false);
         resetSlider();
+        setProcessing(false);
         return;
       }
 
@@ -145,8 +146,8 @@ export default function CartDrawer() {
 
       if (profileError || !profileData) {
         setMessage("No se pudo cargar tu perfil.");
-        setProcessing(false);
         resetSlider();
+        setProcessing(false);
         return;
       }
 
@@ -175,15 +176,15 @@ export default function CartDrawer() {
 
       if (productsError) {
         setMessage("No se pudieron validar los productos.");
-        setProcessing(false);
         resetSlider();
+        setProcessing(false);
         return;
       }
 
       if (variantsError) {
         setMessage("No se pudieron validar las variantes.");
-        setProcessing(false);
         resetSlider();
+        setProcessing(false);
         return;
       }
 
@@ -202,8 +203,8 @@ export default function CartDrawer() {
 
         if (!product || !product.is_active) {
           setMessage(`El producto "${item.name}" ya no está disponible.`);
-          setProcessing(false);
           resetSlider();
+          setProcessing(false);
           return;
         }
 
@@ -212,30 +213,28 @@ export default function CartDrawer() {
 
           if (!variant || !variant.is_active) {
             setMessage(`La variante de "${item.name}" ya no está disponible.`);
-            setProcessing(false);
             resetSlider();
+            setProcessing(false);
             return;
           }
 
           if (Number(variant.stock) < item.quantity) {
             setMessage(`No hay stock suficiente para "${item.name}".`);
-            setProcessing(false);
             resetSlider();
+            setProcessing(false);
             return;
           }
 
-          const unitPrice = Number(variant.price);
-          validatedTotal += unitPrice * item.quantity;
+          validatedTotal += Number(variant.price) * item.quantity;
         } else {
           if (Number(product.stock) < item.quantity) {
             setMessage(`No hay stock suficiente para "${item.name}".`);
-            setProcessing(false);
             resetSlider();
+            setProcessing(false);
             return;
           }
 
-          const unitPrice = Number(product.price);
-          validatedTotal += unitPrice * item.quantity;
+          validatedTotal += Number(product.price) * item.quantity;
         }
       }
 
@@ -245,8 +244,8 @@ export default function CartDrawer() {
             profile.balance
           ).toLocaleString()} y el total es $${validatedTotal.toLocaleString()}.`
         );
-        setProcessing(false);
         resetSlider();
+        setProcessing(false);
         return;
       }
 
@@ -266,9 +265,11 @@ export default function CartDrawer() {
         .single();
 
       if (orderError || !orderData) {
-        setMessage("No se pudo crear el pedido.");
-        setProcessing(false);
+        setMessage(
+          orderError?.message || "No se pudo crear el pedido."
+        );
         resetSlider();
+        setProcessing(false);
         return;
       }
 
@@ -282,8 +283,8 @@ export default function CartDrawer() {
       if (balanceUpdateError) {
         await supabase.from("orders").delete().eq("id", orderData.id);
         setMessage("No se pudo descontar el saldo.");
-        setProcessing(false);
         resetSlider();
+        setProcessing(false);
         return;
       }
 
@@ -292,7 +293,6 @@ export default function CartDrawer() {
       for (const item of cart) {
         const product = productsMap[item.id];
         const variant = item.variantId ? variantsMap[item.variantId] : null;
-
         const unitPrice = Number(variant?.price ?? product?.price ?? item.price);
 
         const { data: orderItemData, error: orderItemError } = await supabase
@@ -320,8 +320,8 @@ export default function CartDrawer() {
             .eq("id", user.id);
 
           setMessage("No se pudo guardar el detalle del pedido.");
-          setProcessing(false);
           resetSlider();
+          setProcessing(false);
           return;
         }
 
@@ -333,11 +333,9 @@ export default function CartDrawer() {
         const variant = item.variantId ? variantsMap[item.variantId] : null;
 
         if (item.variantId && variant) {
-          const newStock = Number(variant.stock) - item.quantity;
-
           const { error } = await supabase
             .from("product_variants")
-            .update({ stock: newStock })
+            .update({ stock: Number(variant.stock) - item.quantity })
             .eq("id", variant.id);
 
           if (error) {
@@ -348,16 +346,14 @@ export default function CartDrawer() {
               .eq("id", user.id);
 
             setMessage(`No se pudo actualizar el stock de "${item.name}".`);
-            setProcessing(false);
             resetSlider();
+            setProcessing(false);
             return;
           }
         } else if (product) {
-          const newStock = Number(product.stock) - item.quantity;
-
           const { error } = await supabase
             .from("products")
-            .update({ stock: newStock })
+            .update({ stock: Number(product.stock) - item.quantity })
             .eq("id", product.id);
 
           if (error) {
@@ -368,8 +364,8 @@ export default function CartDrawer() {
               .eq("id", user.id);
 
             setMessage(`No se pudo actualizar el stock de "${item.name}".`);
-            setProcessing(false);
             resetSlider();
+            setProcessing(false);
             return;
           }
         }
@@ -382,11 +378,9 @@ export default function CartDrawer() {
             (orderItem.variant_id || null) === (item.variantId || null)
         );
 
-        if (!matchingOrderItem) {
-          continue;
-        }
+        if (!matchingOrderItem) continue;
 
-        const licenseQuery = supabase
+        let licenseQuery = supabase
           .from("product_licenses")
           .select("id, product_id, variant_id, license_text, status")
           .eq("product_id", item.id)
@@ -395,9 +389,13 @@ export default function CartDrawer() {
           .order("created_at", { ascending: true })
           .limit(item.quantity);
 
-        const { data: licensesData, error: licensesError } = item.variantId
-          ? await licenseQuery.eq("variant_id", item.variantId)
-          : await licenseQuery.is("variant_id", null);
+        if (item.variantId) {
+          licenseQuery = licenseQuery.eq("variant_id", item.variantId);
+        } else {
+          licenseQuery = licenseQuery.is("variant_id", null);
+        }
+
+        const { data: licensesData, error: licensesError } = await licenseQuery;
 
         if (licensesError) {
           await supabase.from("orders").delete().eq("id", orderData.id);
@@ -407,8 +405,8 @@ export default function CartDrawer() {
             .eq("id", user.id);
 
           setMessage(`No se pudieron asignar las licencias de "${item.name}".`);
-          setProcessing(false);
           resetSlider();
+          setProcessing(false);
           return;
         }
 
@@ -422,8 +420,8 @@ export default function CartDrawer() {
             .eq("id", user.id);
 
           setMessage(`No hay suficientes licencias disponibles para "${item.name}".`);
-          setProcessing(false);
           resetSlider();
+          setProcessing(false);
           return;
         }
 
@@ -446,8 +444,8 @@ export default function CartDrawer() {
               .eq("id", user.id);
 
             setMessage(`No se pudo completar la entrega de "${item.name}".`);
-            setProcessing(false);
             resetSlider();
+            setProcessing(false);
             return;
           }
         }
@@ -462,12 +460,11 @@ export default function CartDrawer() {
       );
       resetSlider();
     } catch (error) {
-      const fallback =
+      setMessage(
         error instanceof Error
           ? error.message
-          : "Ocurrió un error inesperado al procesar la compra.";
-
-      setMessage(fallback);
+          : "Ocurrió un error inesperado al procesar la compra."
+      );
       resetSlider();
     } finally {
       setProcessing(false);
@@ -483,49 +480,37 @@ export default function CartDrawer() {
     setSuccessMessage("");
 
     const trackRect = trackRef.current.getBoundingClientRect();
-    startOffsetRef.current = clientX - trackRect.left - dragValueRef.current;
+    const knobWidth = knobRef.current.offsetWidth;
+    const maxX = trackRef.current.offsetWidth - knobWidth - 4;
+    maxXRef.current = maxX;
 
-    const onMove = (moveX: number) => {
-      if (!trackRef.current || !knobRef.current) return;
+    pointerOffsetRef.current = clientX - trackRect.left - dragXRef.current;
 
-      const trackWidth = trackRef.current.offsetWidth;
-      const knobWidth = knobRef.current.offsetWidth;
-      const maxX = trackWidth - knobWidth - 4;
-
+    const updatePosition = (pointerX: number) => {
       const next = Math.min(
-        Math.max(moveX - trackRect.left - startOffsetRef.current, 0),
-        maxX
+        Math.max(pointerX - trackRect.left - pointerOffsetRef.current, 0),
+        maxXRef.current
       );
 
-      dragValueRef.current = next;
+      dragXRef.current = next;
       setDragX(next);
     };
 
-    const handleMouseMove = (e: MouseEvent) => onMove(e.clientX);
+    const handleMouseMove = (e: MouseEvent) => updatePosition(e.clientX);
     const handleTouchMove = (e: TouchEvent) => {
       if (!e.touches[0]) return;
-      onMove(e.touches[0].clientX);
+      updatePosition(e.touches[0].clientX);
     };
 
     const endDrag = async () => {
-      if (!trackRef.current || !knobRef.current) {
-        cleanup();
-        resetSlider();
-        return;
-      }
-
-      const trackWidth = trackRef.current.offsetWidth;
-      const knobWidth = knobRef.current.offsetWidth;
-      const maxX = trackWidth - knobWidth - 4;
-      const threshold = maxX * 0.8;
-
-      const confirmed = dragValueRef.current >= threshold;
+      const threshold = maxXRef.current * 0.78;
+      const confirmed = dragXRef.current >= threshold;
 
       cleanup();
 
       if (confirmed) {
-        dragValueRef.current = maxX;
-        setDragX(maxX);
+        dragXRef.current = maxXRef.current;
+        setDragX(maxXRef.current);
         await handleCheckout();
       } else {
         resetSlider();
@@ -693,7 +678,7 @@ export default function CartDrawer() {
                   className="relative h-[60px] overflow-hidden rounded-2xl border border-white/10 bg-white/[0.06]"
                 >
                   <div
-                    className="absolute inset-y-0 left-0 rounded-2xl bg-gradient-to-r from-blue-500/40 to-cyan-400/30 transition-[width] duration-150"
+                    className="absolute inset-y-0 left-0 rounded-2xl bg-gradient-to-r from-blue-500/40 to-cyan-400/30 transition-[width] duration-75"
                     style={{ width: `${sliderFill}px` }}
                   />
 
@@ -710,7 +695,7 @@ export default function CartDrawer() {
                       if (!e.touches[0]) return;
                       beginDrag(e.touches[0].clientX);
                     }}
-                    className="absolute left-[2px] top-[2px] flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-black shadow-lg transition disabled:opacity-70"
+                    className="absolute left-[2px] top-[2px] flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-black shadow-lg transition-transform duration-75 disabled:opacity-70"
                     style={{ transform: `translateX(${dragX}px)` }}
                   >
                     <svg
