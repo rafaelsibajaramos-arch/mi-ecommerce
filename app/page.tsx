@@ -361,7 +361,10 @@ export default function HomePage() {
           </div>
         </section>
 
-        <section id="catalogo" className="mx-auto max-w-7xl px-4 py-12 md:px-6 md:py-14">
+        <section
+          id="catalogo"
+          className="mx-auto max-w-7xl px-4 py-12 md:px-6 md:py-14"
+        >
           <div className="mb-8 flex flex-col gap-3 md:mb-10">
             <p className="text-2xl font-bold uppercase tracking-[0.14em] text-white md:text-3xl">
               CATÁLOGO
@@ -530,10 +533,7 @@ export default function HomePage() {
                       </div>
 
                       {product.product_type === "variable" && selectedVariant && (
-                        <div
-                          className="mt-2"
-                          onClick={(e) => e.stopPropagation()}
-                        >
+                        <div className="mt-2" onClick={(e) => e.stopPropagation()}>
                           <select
                             value={selectedVariants[product.id] || ""}
                             onChange={(e) => handleVariantChange(e, product.id)}
@@ -590,157 +590,117 @@ export default function HomePage() {
 
       {quickViewProduct && (
         <div
-  className="fixed inset-0 z-[100] flex items-start justify-center bg-black/75 px-3 pb-3 pt-24 backdrop-blur-sm sm:px-4 sm:pb-4 sm:pt-28 md:items-center md:px-4 md:py-6"
-  onClick={handleCloseQuickView}
->
-          <div
-  className="relative w-full max-w-5xl overflow-hidden rounded-[24px] border border-white/10 bg-[#0f1115] shadow-2xl md:max-h-[90vh] md:overflow-y-auto"
-  onClick={(e) => e.stopPropagation()}
->
-            <button
-              type="button"
-              onClick={handleCloseQuickView}
-              className="absolute right-4 top-4 z-10 flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5 text-xl text-white/70 transition hover:bg-white/10 hover:text-white"
-              aria-label="Cerrar vista rápida"
+          className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm"
+          onClick={handleCloseQuickView}
+        >
+          <div className="flex min-h-full items-start justify-center px-3 pb-3 pt-24 sm:px-4 sm:pt-28 md:items-center md:py-6">
+            <div
+              className="relative w-full max-w-4xl overflow-hidden rounded-[24px] border border-white/10 bg-[#0b0f1a] shadow-2xl md:max-h-[88vh]"
+              onClick={(e) => e.stopPropagation()}
             >
-              ×
-            </button>
+              <button
+                type="button"
+                onClick={handleCloseQuickView}
+                className="absolute right-3 top-3 z-20 flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-black/30 text-xl text-white/75 transition hover:bg-white/10 hover:text-white"
+                aria-label="Cerrar vista rápida"
+              >
+                ×
+              </button>
 
-<div className="grid gap-0 md:grid-cols-[1.02fr_0.98fr]">              
-              <div className="p-3 sm:p-4 md:p-6">
-  <div className="overflow-hidden rounded-[20px] border border-white/10 bg-white/[0.03]">
-    {quickViewProduct.image_url ? (
-      <img
-        src={quickViewProduct.image_url}
-        alt={quickViewProduct.name}
-        className="h-[260px] w-full object-contain sm:h-[340px] md:h-[520px]"
-      />
-    ) : (
-      <div className="flex h-[260px] items-center justify-center bg-white/[0.02] sm:h-[340px] md:h-[520px]">
-        <div className="text-center">
-          <p className="text-base font-bold text-white/80 md:text-lg">
-            Producto digital
-          </p>
-          <p className="mt-2 text-sm text-white/35">
-            Sin imagen disponible
-          </p>
-        </div>
-      </div>
-    )}
-  </div>
-</div>
+              <div className="max-h-[calc(100vh-7rem)] overflow-y-auto md:max-h-[88vh]">
+                <div className="grid md:grid-cols-2">
+                  <div className="p-3 sm:p-4 md:p-5">
+                    <div className="overflow-hidden rounded-[20px] border border-white/10 bg-white/[0.03]">
+                      {quickViewProduct.image_url ? (
+                        <img
+                          src={quickViewProduct.image_url}
+                          alt={quickViewProduct.name}
+                          className="h-[220px] w-full object-contain sm:h-[280px] md:h-[430px]"
+                        />
+                      ) : (
+                        <div className="flex h-[220px] items-center justify-center bg-white/[0.02] sm:h-[280px] md:h-[430px]">
+                          <div className="text-center">
+                            <p className="text-base font-bold text-white/80">
+                              Producto digital
+                            </p>
+                            <p className="mt-1 text-sm text-white/35">
+                              Sin imagen disponible
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
 
-<div className="flex flex-col p-4 sm:p-5 md:p-8">
-  <div className="border-b border-white/10 pb-4 md:pb-5">
-    <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-blue-400 sm:text-xs">
-      Quick View
-    </p>
+                  <div className="flex flex-col p-4 sm:p-5 md:p-6">
+                    <div className="border-b border-white/10 pb-4">
+                      <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-blue-400">
+                        Quick View
+                      </p>
 
-    <h2 className="mt-3 text-[1.8rem] font-black uppercase leading-tight text-white sm:text-4xl md:text-5xl">
-      {quickViewProduct.name}
-    </h2>
+                      <h2 className="mt-3 text-[2rem] font-black uppercase leading-tight text-white sm:text-[2.4rem] md:text-[3.1rem]">
+                        {quickViewProduct.name}
+                      </h2>
 
-    <div className="mt-4 flex flex-wrap items-center gap-2.5 md:mt-5 md:gap-3">
-      <span
-        className={
-          quickViewStock > 0
-            ? "rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-bold text-emerald-300"
-            : "rounded-full border border-red-400/20 bg-red-400/10 px-3 py-1 text-xs font-bold text-red-300"
-        }
-      >
-        {quickViewStock > 0 ? "Disponible" : "Agotado"}
-      </span>
+                      <div className="mt-4">
+                        <span
+                          className={
+                            quickViewStock > 0
+                              ? "inline-flex rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-bold text-emerald-300"
+                              : "inline-flex rounded-full border border-red-400/20 bg-red-400/10 px-3 py-1 text-xs font-bold text-red-300"
+                          }
+                        >
+                          {quickViewStock > 0 ? "Disponible" : "Agotado"}
+                        </span>
+                      </div>
+                    </div>
 
-      {quickViewProduct.category && (
-        <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold uppercase tracking-[0.08em] text-white/65">
-          {quickViewProduct.category}
-        </span>
-      )}
-    </div>
-  </div>
+                    <div className="space-y-4 py-4">
+                      <div>
+                        <p className="text-[11px] uppercase tracking-[0.18em] text-white/35">
+                          Precio
+                        </p>
+                        <p className="mt-2 text-4xl font-black text-white sm:text-5xl md:text-6xl">
+                          ${Number(quickViewPrice).toLocaleString()}
+                        </p>
+                      </div>
 
-  <div className="space-y-4 py-4 md:space-y-5 md:py-5">
-    <div>
-      <p className="text-[11px] uppercase tracking-[0.18em] text-white/35">
-        Precio
-      </p>
-      <p className="mt-2 text-4xl font-black text-white sm:text-5xl md:text-6xl">
-        ${Number(quickViewPrice).toLocaleString()}
-      </p>
-    </div>
+                      {quickViewProduct.product_type === "variable" &&
+                        quickViewSelectedVariant && (
+                          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                            <p className="text-[11px] uppercase tracking-[0.18em] text-white/35">
+                              Variante seleccionada
+                            </p>
+                            <p className="mt-2 text-lg font-bold text-white">
+                              {quickViewSelectedVariant.name}
+                            </p>
+                          </div>
+                        )}
 
-    {quickViewProduct.product_type === "variable" && quickViewSelectedVariant && (
-      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-        <p className="text-[11px] uppercase tracking-[0.18em] text-white/35">
-          Variante seleccionada
-        </p>
-        <p className="mt-2 text-lg font-bold text-white">
-          {quickViewSelectedVariant.name}
-        </p>
+                      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                        <p className="text-[11px] uppercase tracking-[0.18em] text-white/35">
+                          Descripción
+                        </p>
+                        <p className="mt-3 text-sm leading-6 text-white/65 md:text-[15px]">
+                          {quickViewProduct.description?.trim()
+                            ? quickViewProduct.description
+                            : "Este producto no tiene descripción disponible por el momento."}
+                        </p>
+                      </div>
+                    </div>
 
-        {quickViewSelectedVariant.description && (
-          <p className="mt-2 text-sm leading-6 text-white/60">
-            {quickViewSelectedVariant.description}
-          </p>
-        )}
-      </div>
-    )}
-
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-        <p className="text-[11px] uppercase tracking-[0.18em] text-white/35">
-          Tipo de producto
-        </p>
-        <p className="mt-2 text-base font-semibold uppercase text-white">
-          {quickViewProduct.product_type || "simple"}
-        </p>
-      </div>
-
-      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-        <p className="text-[11px] uppercase tracking-[0.18em] text-white/35">
-          Disponibilidad
-        </p>
-        <p className="mt-2 text-base font-semibold text-white">
-          {quickViewStock > 0
-            ? `${quickViewStock} disponible(s)`
-            : "Sin stock"}
-        </p>
-      </div>
-    </div>
-
-    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 md:p-5">
-      <p className="text-[11px] uppercase tracking-[0.18em] text-white/35">
-        Descripción
-      </p>
-      <p className="mt-3 text-sm leading-7 text-white/65 md:text-[15px]">
-        {quickViewProduct.description?.trim()
-          ? quickViewProduct.description
-          : "Este producto no tiene descripción disponible por el momento."}
-      </p>
-    </div>
-
-    {isAdmin && (
-      <div className="rounded-2xl border border-blue-400/20 bg-blue-400/10 p-4">
-        <p className="text-[11px] uppercase tracking-[0.18em] text-blue-200/70">
-          Información interna
-        </p>
-        <p className="mt-2 text-sm font-semibold text-blue-100">
-          Stock actual: {quickViewStock}
-        </p>
-      </div>
-    )}
-  </div>
-
-  <div className="mt-auto border-t border-white/10 pt-4 md:pt-5">
-    <button
-      type="button"
-      onClick={handleCloseQuickView}
-      className="inline-flex h-11 w-full items-center justify-center rounded-2xl border border-white/10 bg-white/[0.05] px-6 text-sm font-bold text-white transition hover:bg-white/[0.09] sm:w-auto"
-    >
-      Cerrar
-    </button>
-  </div>
-</div>
+                    <div className="mt-auto border-t border-white/10 pt-4">
+                      <button
+                        type="button"
+                        onClick={handleCloseQuickView}
+                        className="inline-flex h-11 w-full items-center justify-center rounded-2xl border border-white/10 bg-white/[0.05] px-6 text-sm font-bold text-white transition hover:bg-white/[0.09] sm:w-auto"
+                      >
+                        Cerrar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
