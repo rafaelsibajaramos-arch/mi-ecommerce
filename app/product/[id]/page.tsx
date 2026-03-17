@@ -443,7 +443,7 @@ export default function ProductDetailPage() {
   if (loading) {
     return (
       <main className="min-h-screen bg-transparent text-white">
-        <div className="mx-auto max-w-6xl px-5 py-10 text-sm text-white/60 md:px-6 md:text-base">
+        <div className="mx-auto max-w-5xl px-5 py-10 text-sm text-white/60 md:px-6 md:text-base">
           Cargando producto...
         </div>
       </main>
@@ -453,7 +453,7 @@ export default function ProductDetailPage() {
   if (!product) {
     return (
       <main className="min-h-screen bg-transparent text-white">
-        <div className="mx-auto max-w-6xl space-y-4 px-5 py-10 md:px-6">
+        <div className="mx-auto max-w-5xl space-y-4 px-5 py-10 md:px-6">
           <div className="text-white/70">{message}</div>
           <Link
             href="/#catalogo"
@@ -468,11 +468,8 @@ export default function ProductDetailPage() {
 
   return (
     <main className="min-h-screen bg-transparent text-white">
-      <section className="relative overflow-hidden border-b border-white/10">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.03),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(255,255,255,0.02),transparent_26%)]" />
-        <div className="absolute inset-0 opacity-[0.055] [background-image:linear-gradient(to_right,#ffffff_1px,transparent_1px),linear-gradient(to_bottom,#ffffff_1px,transparent_1px)] [background-size:44px_44px]" />
-
-        <div className="relative mx-auto max-w-6xl px-5 py-8 md:px-6 md:py-12">
+      <section>
+        <div className="mx-auto max-w-5xl px-5 py-8 md:px-6 md:py-10">
           <div className="mb-5 md:mb-6">
             <Link
               href="/#catalogo"
@@ -482,8 +479,8 @@ export default function ProductDetailPage() {
             </Link>
           </div>
 
-          <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-[minmax(0,1fr)_460px] lg:gap-10">
-            <div className="overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.03] backdrop-blur-md">
+          <div className="grid grid-cols-1 items-start gap-7 lg:grid-cols-[minmax(0,1fr)_390px] lg:gap-8">
+            <div className="overflow-hidden rounded-[24px] border border-white/10 bg-white/[0.03] backdrop-blur-md">
               <div className="aspect-square bg-white/[0.02]">
                 {product.image_url ? (
                   <img
@@ -499,18 +496,18 @@ export default function ProductDetailPage() {
               </div>
             </div>
 
-            <div className="space-y-4 md:space-y-5">
+            <div className="space-y-4">
               <div>
-                <p className="text-xs uppercase tracking-[0.18em] text-white/45 md:text-sm md:tracking-[0.2em]">
+                <p className="text-xs uppercase tracking-[0.16em] text-white/45 md:text-sm md:tracking-[0.18em]">
                   {product.category || "Sin categoría"}
                 </p>
 
-                <h1 className="mt-2 text-3xl font-extrabold text-white sm:text-4xl md:text-5xl">
+                <h1 className="mt-2 text-[2.1rem] font-extrabold leading-[0.95] text-white sm:text-[2.5rem] md:text-[3.1rem]">
                   {product.name}
                 </h1>
               </div>
 
-              <div className="text-2xl font-extrabold text-white sm:text-3xl md:text-4xl">
+              <div className="text-2xl font-extrabold text-white sm:text-3xl md:text-[2.8rem]">
                 ${visiblePrice.toLocaleString()}
               </div>
 
@@ -527,12 +524,12 @@ export default function ProductDetailPage() {
               </div>
 
               {product.product_type === "variable" && variants.length > 0 && (
-                <div className="rounded-[26px] border border-white/10 bg-white/[0.03] p-4 backdrop-blur-md md:p-5">
+                <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4 backdrop-blur-md">
                   <h2 className="mb-3 text-base font-bold text-white md:text-lg">
                     Variantes
                   </h2>
 
-                  <div className="flex flex-wrap gap-2.5 md:gap-3">
+                  <div className="flex flex-wrap gap-2.5">
                     {variants.map((variant) => {
                       const isSelected = selectedVariantId === variant.id;
 
@@ -541,7 +538,7 @@ export default function ProductDetailPage() {
                           key={variant.id}
                           type="button"
                           onClick={() => setSelectedVariantId(variant.id)}
-                          className={`rounded-2xl border px-4 py-2.5 text-sm font-semibold transition md:px-5 md:py-3 ${
+                          className={`rounded-2xl border px-4 py-2.5 text-sm font-semibold transition ${
                             isSelected
                               ? "border-white bg-white text-black"
                               : "border-white/10 bg-white/[0.03] text-white hover:bg-white/[0.06]"
@@ -562,7 +559,7 @@ export default function ProductDetailPage() {
               )}
 
               {product.product_type === "composite" && components.length > 0 && (
-                <div className="rounded-[26px] border border-white/10 bg-white/[0.03] p-4 backdrop-blur-md md:p-5">
+                <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4 backdrop-blur-md">
                   <h2 className="mb-3 text-base font-bold text-white md:text-lg">
                     Incluye este combo
                   </h2>
@@ -617,7 +614,7 @@ export default function ProductDetailPage() {
                 </div>
               )}
 
-              <div className="rounded-[26px] border border-white/10 bg-white/[0.03] p-4 backdrop-blur-md md:p-5">
+              <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4 backdrop-blur-md">
                 <h2 className="mb-2 text-base font-bold text-white md:text-lg">
                   Descripción
                 </h2>
