@@ -595,9 +595,9 @@ export default function HomePage() {
         >
           <div className="flex min-h-full items-start justify-center px-3 pb-3 pt-24 sm:px-4 sm:pt-28 md:items-center md:py-6">
             <div
-              className="relative w-full max-w-4xl overflow-hidden rounded-[24px] border border-white/10 bg-[#0b0f1a] shadow-2xl md:max-h-[88vh]"
-              onClick={(e) => e.stopPropagation()}
-            >
+  className="relative w-full max-w-[57.6rem] overflow-hidden rounded-[24px] border border-white/10 bg-[#0b0f1a] shadow-2xl md:max-h-[75vh]"
+  onClick={(e) => e.stopPropagation()}
+>
               <button
                 type="button"
                 onClick={handleCloseQuickView}
@@ -607,18 +607,18 @@ export default function HomePage() {
                 ×
               </button>
 
-              <div className="max-h-[calc(100vh-7rem)] overflow-y-auto md:max-h-[88vh]">
+              <div className="max-h-[calc(100vh-10rem)] overflow-y-auto md:max-h-[75vh]">
                 <div className="grid md:grid-cols-2">
                   <div className="p-3 sm:p-4 md:p-5">
                     <div className="overflow-hidden rounded-[20px] border border-white/10 bg-white/[0.03]">
                       {quickViewProduct.image_url ? (
                         <img
-                          src={quickViewProduct.image_url}
-                          alt={quickViewProduct.name}
-                          className="h-[220px] w-full object-contain sm:h-[280px] md:h-[430px]"
-                        />
+  src={quickViewProduct.image_url}
+  alt={quickViewProduct.name}
+  className="h-[176px] w-full object-contain sm:h-[224px] md:h-[365px]"
+/>
                       ) : (
-                        <div className="flex h-[220px] items-center justify-center bg-white/[0.02] sm:h-[280px] md:h-[430px]">
+                        <div className="flex h-[176px] items-center justify-center bg-white/[0.02] sm:h-[224px] md:h-[365px]">
                           <div className="text-center">
                             <p className="text-base font-bold text-white/80">
                               Producto digital
