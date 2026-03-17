@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useCart } from "../context/CartContext";
 import { supabase } from "../lib/supabase";
 import { useEffect, useState } from "react";
@@ -8,17 +9,20 @@ import UserDropdown from "@/components/UserDropdown";
 
 export default function Navbar() {
   const { cart, openCart } = useCart();
+  const pathname = usePathname();
+
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const totalItems = cart.reduce((acc, item) => acc + item.quantity, 0);
 
   useEffect(() => {
-    checkSession();
+    checkSessionAndRole();
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(() => {
-      checkSession();
+      checkSessionAndRole();
     });
 
     return () => {
@@ -26,13 +30,32 @@ export default function Navbar() {
     };
   }, []);
 
-  const checkSession = async () => {
+  const checkSessionAndRole = async () => {
     const {
       data: { user },
     } = await supabase.auth.getUser();
 
-    setIsLoggedIn(!!user);
+    if (!user) {
+      setIsLoggedIn(false);
+      setIsAdmin(false);
+      return;
+    }
+
+    setIsLoggedIn(true);
+
+    const { data } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+
+    setIsAdmin(data?.role === "admin");
   };
+
+  const navLinkClass = (href: string) =>
+    pathname === href
+      ? "border-b-2 border-white pb-1 text-sm font-semibold text-white md:text-[15px]"
+      : "text-sm font-semibold text-white/70 transition hover:text-white md:text-[15px]";
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-white/10 bg-black/80 backdrop-blur-xl">
@@ -43,6 +66,20 @@ export default function Navbar() {
         >
           STREAMINGMAYOR
         </Link>
+
+        {isLoggedIn && (
+          <nav className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-6 lg:flex">
+            <Link href="/" className={navLinkClass("/")}>
+              Inicio
+            </Link>
+
+            {isAdmin && (
+              <Link href="/admin" className={navLinkClass("/admin")}>
+                Admin
+              </Link>
+            )}
+          </nav>
+        )}
 
         <div className="flex items-center gap-2 md:gap-3">
           <button
@@ -71,7 +108,7 @@ export default function Navbar() {
             )}
           </button>
 
-          {isLoggedIn && <UserDropdown />}
+          {isLoggedIn && <UserDropdown isAdmin={isAdmin} />}
         </div>
       </div>
     </header>
