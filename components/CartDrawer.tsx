@@ -56,73 +56,15 @@ export default function CartDrawer() {
 
   const trackRef = useRef<HTMLDivElement | null>(null);
   const knobRef = useRef<HTMLButtonElement | null>(null);
-  const [dragging, setDragging] = useState(false);
+  const dragValueRef = useRef(0);
+  const startOffsetRef = useRef(0);
+
   const [dragX, setDragX] = useState(0);
 
   const resetSlider = () => {
-    setDragging(false);
+    dragValueRef.current = 0;
+    startOffsetRef.current = 0;
     setDragX(0);
-  };
-
-  const startDrag = (clientX: number) => {
-    if (processing || cart.length === 0) return;
-    setMessage("");
-    setSuccessMessage("");
-    setDragging(true);
-
-    const onMove = (moveClientX: number) => {
-      if (!trackRef.current || !knobRef.current) return;
-
-      const trackRect = trackRef.current.getBoundingClientRect();
-      const knobRect = knobRef.current.getBoundingClientRect();
-      const maxX = trackRect.width - knobRect.width - 6;
-
-      const next = Math.min(
-        Math.max(moveClientX - trackRect.left - knobRect.width / 2, 0),
-        maxX
-      );
-
-      setDragX(next);
-    };
-
-    const handleMouseMove = (e: MouseEvent) => onMove(e.clientX);
-    const handleTouchMove = (e: TouchEvent) => {
-      if (!e.touches[0]) return;
-      onMove(e.touches[0].clientX);
-    };
-
-    const finishDrag = async () => {
-      if (!trackRef.current || !knobRef.current) {
-        resetSlider();
-        cleanup();
-        return;
-      }
-
-      const trackRect = trackRef.current.getBoundingClientRect();
-      const knobRect = knobRef.current.getBoundingClientRect();
-      const maxX = trackRect.width - knobRect.width - 6;
-      const threshold = maxX * 0.82;
-
-      const confirmed = dragX >= threshold;
-      resetSlider();
-      cleanup();
-
-      if (confirmed) {
-        await handleCheckout();
-      }
-    };
-
-    const cleanup = () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", finishDrag);
-      document.removeEventListener("touchmove", handleTouchMove);
-      document.removeEventListener("touchend", finishDrag);
-    };
-
-    document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseup", finishDrag);
-    document.addEventListener("touchmove", handleTouchMove, { passive: true });
-    document.addEventListener("touchend", finishDrag);
   };
 
   const handleCheckout = async () => {
@@ -141,6 +83,7 @@ export default function CartDrawer() {
       if (userError || !user) {
         setMessage("Debes iniciar sesión para completar la compra.");
         setProcessing(false);
+        resetSlider();
         return;
       }
 
@@ -153,6 +96,7 @@ export default function CartDrawer() {
       if (profileError || !profileData) {
         setMessage("No se pudo cargar tu perfil.");
         setProcessing(false);
+        resetSlider();
         return;
       }
 
@@ -163,35 +107,40 @@ export default function CartDrawer() {
         new Set(cart.map((item) => item.variantId).filter(Boolean) as string[])
       );
 
-      const [{ data: productsData, error: productsError }, { data: variantsData, error: variantsError }] =
-        await Promise.all([
-          supabase
-            .from("products")
-            .select("id, name, price, stock, is_active, product_type")
-            .in("id", productIds),
-          variantIds.length
-            ? supabase
-                .from("product_variants")
-                .select("id, product_id, name, price, stock, is_active")
-                .in("id", variantIds)
-            : Promise.resolve({ data: [] as VariantRow[], error: null }),
-        ]);
+      const [
+        { data: productsData, error: productsError },
+        { data: variantsData, error: variantsError },
+      ] = await Promise.all([
+        supabase
+          .from("products")
+          .select("id, name, price, stock, is_active, product_type")
+          .in("id", productIds),
+        variantIds.length
+          ? supabase
+              .from("product_variants")
+              .select("id, product_id, name, price, stock, is_active")
+              .in("id", variantIds)
+          : Promise.resolve({ data: [] as VariantRow[], error: null }),
+      ]);
 
       if (productsError) {
         setMessage("No se pudieron validar los productos.");
         setProcessing(false);
+        resetSlider();
         return;
       }
 
       if (variantsError) {
         setMessage("No se pudieron validar las variantes.");
         setProcessing(false);
+        resetSlider();
         return;
       }
 
       const productsMap = Object.fromEntries(
         ((productsData as ProductRow[]) || []).map((p) => [p.id, p])
       );
+
       const variantsMap = Object.fromEntries(
         ((variantsData as VariantRow[]) || []).map((v) => [v.id, v])
       );
@@ -204,6 +153,7 @@ export default function CartDrawer() {
         if (!product || !product.is_active) {
           setMessage(`El producto "${item.name}" ya no está disponible.`);
           setProcessing(false);
+          resetSlider();
           return;
         }
 
@@ -213,12 +163,14 @@ export default function CartDrawer() {
           if (!variant || !variant.is_active) {
             setMessage(`La variante de "${item.name}" ya no está disponible.`);
             setProcessing(false);
+            resetSlider();
             return;
           }
 
           if (Number(variant.stock) < item.quantity) {
             setMessage(`No hay stock suficiente para "${item.name}".`);
             setProcessing(false);
+            resetSlider();
             return;
           }
 
@@ -227,6 +179,7 @@ export default function CartDrawer() {
           if (Number(product.stock) < item.quantity) {
             setMessage(`No hay stock suficiente para "${item.name}".`);
             setProcessing(false);
+            resetSlider();
             return;
           }
 
@@ -238,9 +191,10 @@ export default function CartDrawer() {
         setMessage(
           `Saldo insuficiente. Tu saldo actual es $${Number(
             profile.balance
-          ).toLocaleString()} y el total del carrito es $${validatedTotal.toLocaleString()}.`
+          ).toLocaleString()} y el total es $${validatedTotal.toLocaleString()}.`
         );
         setProcessing(false);
+        resetSlider();
         return;
       }
 
@@ -254,6 +208,7 @@ export default function CartDrawer() {
       if (balanceUpdateError) {
         setMessage("No se pudo descontar el saldo.");
         setProcessing(false);
+        resetSlider();
         return;
       }
 
@@ -275,6 +230,7 @@ export default function CartDrawer() {
 
             setMessage(`No se pudo actualizar el stock de "${item.name}".`);
             setProcessing(false);
+            resetSlider();
             return;
           }
         } else {
@@ -294,6 +250,7 @@ export default function CartDrawer() {
 
             setMessage(`No se pudo actualizar el stock de "${item.name}".`);
             setProcessing(false);
+            resetSlider();
             return;
           }
         }
@@ -319,6 +276,7 @@ export default function CartDrawer() {
 
         setMessage("No se pudo crear el pedido.");
         setProcessing(false);
+        resetSlider();
         return;
       }
 
@@ -351,6 +309,7 @@ export default function CartDrawer() {
 
         setMessage("No se pudo guardar el detalle del pedido.");
         setProcessing(false);
+        resetSlider();
         return;
       }
 
@@ -358,19 +317,87 @@ export default function CartDrawer() {
       setSuccessMessage(
         `Compra realizada con éxito. Total pagado: $${validatedTotal.toLocaleString()}.`
       );
+      resetSlider();
     } catch {
       setMessage("Ocurrió un error inesperado al procesar la compra.");
+      resetSlider();
     } finally {
       setProcessing(false);
-      resetSlider();
     }
   };
 
-  const sliderFillWidth = useMemo(() => {
-    if (!trackRef.current || !knobRef.current) return 0;
-    const knobWidth = knobRef.current.offsetWidth || 56;
-    return dragX + knobWidth;
-  }, [dragX]);
+  const beginDrag = (clientX: number) => {
+    if (processing || cart.length === 0 || !trackRef.current || !knobRef.current) {
+      return;
+    }
+
+    setMessage("");
+    setSuccessMessage("");
+
+    const trackRect = trackRef.current.getBoundingClientRect();
+    startOffsetRef.current = clientX - trackRect.left - dragValueRef.current;
+
+    const onMove = (moveX: number) => {
+      if (!trackRef.current || !knobRef.current) return;
+
+      const trackWidth = trackRef.current.offsetWidth;
+      const knobWidth = knobRef.current.offsetWidth;
+      const maxX = trackWidth - knobWidth - 4;
+
+      const next = Math.min(
+        Math.max(moveX - trackRect.left - startOffsetRef.current, 0),
+        maxX
+      );
+
+      dragValueRef.current = next;
+      setDragX(next);
+    };
+
+    const handleMouseMove = (e: MouseEvent) => onMove(e.clientX);
+    const handleTouchMove = (e: TouchEvent) => {
+      if (!e.touches[0]) return;
+      onMove(e.touches[0].clientX);
+    };
+
+    const endDrag = async () => {
+      if (!trackRef.current || !knobRef.current) {
+        cleanup();
+        resetSlider();
+        return;
+      }
+
+      const trackWidth = trackRef.current.offsetWidth;
+      const knobWidth = knobRef.current.offsetWidth;
+      const maxX = trackWidth - knobWidth - 4;
+      const threshold = maxX * 0.8;
+
+      const confirmed = dragValueRef.current >= threshold;
+
+      cleanup();
+
+      if (confirmed) {
+        dragValueRef.current = maxX;
+        setDragX(maxX);
+        await handleCheckout();
+      } else {
+        resetSlider();
+      }
+    };
+
+    const cleanup = () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", endDrag);
+      window.removeEventListener("touchmove", handleTouchMove);
+      window.removeEventListener("touchend", endDrag);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", endDrag);
+    window.addEventListener("touchmove", handleTouchMove, { passive: true });
+    window.addEventListener("touchend", endDrag);
+  };
+
+  const sliderFill = dragX + 56;
 
   return (
     <>
@@ -382,11 +409,11 @@ export default function CartDrawer() {
       )}
 
       <aside
-        className={`fixed top-0 right-0 z-50 h-full w-full bg-[#03153b] text-white shadow-2xl transition-transform duration-300 sm:w-[450px] ${
+        className={`fixed top-0 right-0 z-50 h-full w-full bg-[#041533] text-white shadow-2xl transition-transform duration-300 sm:w-[430px] ${
           isCartOpen ? "translate-x-0" : "translate-x-full"
         }`}
       >
-        <div className="flex items-center justify-between border-b border-white/10 px-5 py-5 sm:px-6">
+        <div className="flex items-center justify-between border-b border-white/10 px-5 py-5">
           <div>
             <h2 className="text-2xl font-extrabold">Mi carrito</h2>
             <p className="mt-1 text-sm text-white/45">
@@ -403,45 +430,57 @@ export default function CartDrawer() {
         </div>
 
         <div className="flex h-[calc(100%-92px)] flex-col">
-          <div className="flex-1 space-y-4 overflow-y-auto p-4 sm:p-5">
+          <div className="flex-1 space-y-3 overflow-y-auto p-4">
             {cart.length === 0 ? (
-              <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 text-center">
-                <p className="text-base font-semibold text-white/80">
+              <div className="rounded-[24px] border border-white/10 bg-white/[0.04] p-6 text-center">
+                <p className="text-base font-semibold text-white/85">
                   Tu carrito está vacío
                 </p>
                 <p className="mt-2 text-sm text-white/45">
-                  Agrega productos para continuar con tu compra.
+                  Agrega productos para continuar.
                 </p>
               </div>
             ) : (
               cart.map((item) => (
                 <div
                   key={`${item.id}-${item.variantId || "base"}`}
-                  className="rounded-[26px] border border-white/10 bg-white/[0.055] p-4 shadow-[0_10px_40px_rgba(0,0,0,0.2)]"
+                  className="rounded-[24px] border border-white/10 bg-white/[0.05] p-4"
                 >
-                  <div className="flex gap-4">
+                  <div className="flex gap-3">
                     <img
                       src={item.image || "/placeholder.png"}
                       alt={item.name}
-                      className="h-20 w-20 rounded-2xl object-cover"
+                      className="h-[74px] w-[74px] rounded-2xl object-cover"
                     />
 
                     <div className="min-w-0 flex-1">
-                      <h3 className="line-clamp-2 text-sm font-bold leading-5 text-white">
+                      <h3 className="line-clamp-2 text-[15px] font-bold leading-5 text-white">
                         {item.name}
                       </h3>
 
                       {item.variantName && (
                         <p className="mt-1 text-xs font-medium text-blue-300">
-                          Variación: {item.variantName}
+                          {item.variantName}
                         </p>
                       )}
 
-                      <p className="mt-2 text-sm text-white/70">
-                        ${Number(item.price).toLocaleString()}
-                      </p>
+                      <div className="mt-3 flex items-center justify-between gap-3">
+                        <p className="text-sm text-white/70">
+                          ${Number(item.price).toLocaleString()}
+                        </p>
 
-                      <div className="mt-4 flex items-center justify-between gap-3">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            removeFromCart(item.id, item.variantId || null)
+                          }
+                          className="text-xs font-medium text-red-400 transition hover:text-red-300"
+                        >
+                          Quitar
+                        </button>
+                      </div>
+
+                      <div className="mt-3 flex items-center justify-between gap-3">
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
@@ -453,7 +492,7 @@ export default function CartDrawer() {
                             -
                           </button>
 
-                          <span className="min-w-[24px] text-center font-semibold">
+                          <span className="min-w-[22px] text-center text-sm font-semibold">
                             {item.quantity}
                           </span>
 
@@ -468,21 +507,10 @@ export default function CartDrawer() {
                           </button>
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={() =>
-                            removeFromCart(item.id, item.variantId || null)
-                          }
-                          className="text-sm text-red-400 transition hover:text-red-300"
-                        >
-                          Quitar
-                        </button>
+                        <p className="text-sm font-semibold text-blue-400">
+                          ${Number(item.price * item.quantity).toLocaleString()}
+                        </p>
                       </div>
-
-                      <p className="mt-4 font-semibold text-blue-400">
-                        Subtotal: $
-                        {Number(item.price * item.quantity).toLocaleString()}
-                      </p>
                     </div>
                   </div>
                 </div>
@@ -490,7 +518,7 @@ export default function CartDrawer() {
             )}
           </div>
 
-          <div className="space-y-4 border-t border-white/10 bg-[#021034] p-4 sm:p-5">
+          <div className="space-y-4 border-t border-white/10 bg-[#02102b] p-4">
             <div className="flex items-center justify-between text-lg font-semibold">
               <span>Total</span>
               <span className="text-blue-400">
@@ -514,16 +542,14 @@ export default function CartDrawer() {
               <div className="space-y-3">
                 <div
                   ref={trackRef}
-                  className="relative h-[62px] overflow-hidden rounded-2xl border border-white/10 bg-white/[0.06]"
+                  className="relative h-[60px] overflow-hidden rounded-2xl border border-white/10 bg-white/[0.06]"
                 >
                   <div
-                    className="absolute inset-y-0 left-0 rounded-2xl bg-gradient-to-r from-blue-500/40 to-cyan-400/35 transition-all duration-200"
-                    style={{
-                      width: sliderFillWidth ? `${sliderFillWidth}px` : "62px",
-                    }}
+                    className="absolute inset-y-0 left-0 rounded-2xl bg-gradient-to-r from-blue-500/40 to-cyan-400/30 transition-[width] duration-150"
+                    style={{ width: `${sliderFill}px` }}
                   />
 
-                  <div className="absolute inset-0 flex items-center justify-center px-16 text-sm font-semibold text-white/75">
+                  <div className="absolute inset-0 flex items-center justify-center px-16 text-sm font-semibold text-white/80">
                     {processing ? "Procesando compra..." : "Desliza para pagar"}
                   </div>
 
@@ -531,15 +557,13 @@ export default function CartDrawer() {
                     ref={knobRef}
                     type="button"
                     disabled={processing}
-                    onMouseDown={(e) => startDrag(e.clientX)}
+                    onMouseDown={(e) => beginDrag(e.clientX)}
                     onTouchStart={(e) => {
                       if (!e.touches[0]) return;
-                      startDrag(e.touches[0].clientX);
+                      beginDrag(e.touches[0].clientX);
                     }}
-                    className={`absolute top-[3px] flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-black shadow-lg transition ${
-                      processing ? "cursor-not-allowed opacity-70" : "cursor-grab active:cursor-grabbing"
-                    }`}
-                    style={{ left: `${dragX}px` }}
+                    className="absolute left-[2px] top-[2px] flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-black shadow-lg transition disabled:opacity-70"
+                    style={{ transform: `translateX(${dragX}px)` }}
                   >
                     <svg
                       viewBox="0 0 24 24"
@@ -557,7 +581,7 @@ export default function CartDrawer() {
                 </div>
 
                 <p className="text-center text-xs text-white/40">
-                  Desliza para confirmar el pago del carrito
+                  Desliza para confirmar el pago
                 </p>
               </div>
             )}
