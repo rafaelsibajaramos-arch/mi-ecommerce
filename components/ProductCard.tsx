@@ -10,6 +10,7 @@ type Product = {
   image: string;
   category?: string;
 };
+
 export default function ProductCard({ product }: { product: Product }) {
   const { addToCart } = useCart();
 
@@ -24,14 +25,17 @@ export default function ProductCard({ product }: { product: Product }) {
 
         <div className="p-5">
           <p className="text-sm text-gray-500">Producto digital</p>
-          <h3 className="text-lg font-bold text-gray-900 mt-1">{product.name}</h3>
+          <h3 className="text-lg font-bold text-gray-900 mt-1">
+            {product.name}
+          </h3>
           <p className="text-2xl font-extrabold mt-4">${product.price}</p>
         </div>
       </Link>
 
       <div className="px-5 pb-5">
         <button
-onClick={() => addToCart({ ...product, id: String(product.id) })}          className="w-full bg-[#050816] text-white py-3 rounded-2xl font-medium hover:opacity-90 transition"
+          onClick={() => addToCart({ ...product, id: String(product.id) })}
+          className="w-full bg-[#050816] text-white py-3 rounded-2xl font-medium hover:opacity-90 transition"
         >
           Agregar al carrito
         </button>
