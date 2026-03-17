@@ -478,168 +478,147 @@ export default function AccountOrdersPage() {
       </main>
 
       {selectedOrder && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-          <div
-            className="absolute inset-0 bg-black/65 backdrop-blur-md"
-            onClick={() => setSelectedOrder(null)}
-          />
+  <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 md:p-4">
+    <div
+      className="absolute inset-0 bg-black/65 backdrop-blur-md"
+      onClick={() => setSelectedOrder(null)}
+    />
 
-          <div className="relative z-10 w-full max-w-3xl max-h-[90vh] overflow-hidden rounded-[28px] border border-white/10 bg-[#0b1220]/95 shadow-[0_30px_90px_rgba(0,0,0,0.65)] backdrop-blur-2xl">
-            <div className="flex items-center justify-between border-b border-white/10 px-5 py-5 md:px-6">
-              <div>
-                <h3 className="text-2xl font-bold text-white">
-                  Pedido recibido
-                </h3>
-                <p className="mt-1 text-sm text-white/45">
-                  Comprobante #{formatOrderNumber(selectedOrder.order_number)}
-                </p>
-              </div>
+    <div className="relative z-10 w-full max-w-4xl max-h-[75vh] overflow-hidden rounded-[24px] border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.6)] backdrop-blur-xl">
 
-              <button
-                type="button"
-                onClick={() => setSelectedOrder(null)}
-                className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/5 text-white/70 transition hover:bg-white/10 hover:text-white"
-              >
-                ✕
-              </button>
-            </div>
-
-           <div className="max-h-[75vh] overflow-y-auto p-4 md:p-6">
-              <section className="grid gap-4 md:grid-cols-4">
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                  <p className="text-xs uppercase tracking-[0.14em] text-white/35">
-                    Número del pedido
-                  </p>
-                  <p className="mt-3 text-lg font-bold text-white">
-                    {formatOrderNumber(selectedOrder.order_number)}
-                  </p>
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                  <p className="text-xs uppercase tracking-[0.14em] text-white/35">
-                    Estado
-                  </p>
-                  <div className="mt-3">
-                    <span
-                      className={`rounded-full px-3 py-2 text-sm font-semibold ${getStatusClasses(
-                        selectedOrder.status
-                      )}`}
-                    >
-                      {getStatusLabel(selectedOrder.status)}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                  <p className="text-xs uppercase tracking-[0.14em] text-white/35">
-                    Fecha
-                  </p>
-                  <p className="mt-3 text-sm text-white/80">
-                    {formatDate(selectedOrder.created_at)}
-                  </p>
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                  <p className="text-xs uppercase tracking-[0.14em] text-white/35">
-                    Total
-                  </p>
-                  <p className="mt-3 text-lg font-bold text-emerald-300">
-                    {formatMoney(selectedOrder.total)}
-                  </p>
-                </div>
-              </section>
-
-              <section className="mt-5 rounded-[24px] border border-white/10 bg-white/[0.03] p-5">
-                <h4 className="text-lg font-bold text-white">
-                  Servicios comprados
-                </h4>
-
-                <div className="mt-5 space-y-4">
-                  {selectedOrder.items.map((item) => (
-                    <div
-                      key={item.id}
-                      className="rounded-2xl border border-white/10 bg-black/20 p-4"
-                    >
-                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                        <div>
-                          <p className="text-base font-bold text-white">
-                            {item.product_name}
-                            {item.variant_name ? ` - ${item.variant_name}` : ""}
-                          </p>
-
-                          <p className="mt-1 text-sm text-white/50">
-                            {item.product_category || "Servicio digital"}
-                          </p>
-                        </div>
-
-                        <div className="text-left md:text-right">
-                          <p className="text-sm text-white/50">
-                            Cantidad: {item.quantity}
-                          </p>
-                          <p className="mt-1 text-base font-bold text-emerald-300">
-                            {formatMoney(item.price * item.quantity)}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              <section className="mt-5 rounded-[24px] border border-white/10 bg-white/[0.03] p-5">
-                <h4 className="text-lg font-bold text-white">
-                  Licencias entregadas
-                </h4>
-
-                {selectedOrder.items.every((item) => item.licenses.length === 0) ? (
-                  <p className="mt-4 text-sm text-white/55">
-                    Este pedido todavía no tiene licencias asociadas.
-                  </p>
-                ) : (
-                  <div className="mt-5 space-y-4">
-                    {selectedOrder.items.map((item) =>
-                      item.licenses.map((license) => (
-                        <div
-                          key={license.id}
-                          className="rounded-2xl border border-white/10 bg-black/20 p-4"
-                        >
-                          <p className="text-base font-bold text-white">
-                            {item.product_name}
-                            {item.variant_name ? ` - ${item.variant_name}` : ""}
-                          </p>
-
-                          <div className="mt-4 rounded-xl border border-white/10 bg-[#060b14] p-4">
-                            <p className="text-xs uppercase tracking-[0.14em] text-white/35">
-                              Licencia
-                            </p>
-                            <p className="mt-3 break-all text-sm leading-6 text-white/80">
-                              {license.license_text}
-                            </p>
-                          </div>
-
-                          <div className="mt-4 flex justify-end">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                copyLicense(license.license_text, license.id)
-                              }
-                              className="rounded-xl border border-blue-400/20 bg-blue-500/10 px-4 py-2 text-sm font-semibold text-blue-300 transition hover:bg-blue-500/20"
-                            >
-                              {copiedLicenseId === license.id
-                                ? "Copiado"
-                                : "Copiar licencia"}
-                            </button>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                )}
-              </section>
-            </div>
-          </div>
+      {/* HEADER */}
+      <div className="flex items-center justify-between border-b border-white/10 px-4 py-4 md:px-5">
+        <div>
+          <h3 className="text-xl md:text-2xl font-bold text-white">
+            Pedido recibido
+          </h3>
+          <p className="mt-1 text-xs md:text-sm text-white/45">
+            Comprobante #{formatOrderNumber(selectedOrder.order_number)}
+          </p>
         </div>
-      )}
+
+        <button
+          onClick={() => setSelectedOrder(null)}
+          className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/5 text-white/70 hover:bg-white/10"
+        >
+          ✕
+        </button>
+      </div>
+
+      {/* CONTENIDO */}
+      <div className="max-h-[65vh] overflow-y-auto p-4 md:p-5 space-y-4">
+
+        {/* 🔥 RESUMEN RESPONSIVE */}
+        <section className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+            <p className="text-[10px] text-white/40">Pedido</p>
+            <p className="mt-2 text-sm font-bold">
+              {formatOrderNumber(selectedOrder.order_number)}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+            <p className="text-[10px] text-white/40">Estado</p>
+            <span className={`mt-2 inline-block px-2 py-1 text-xs rounded-full ${getStatusClasses(selectedOrder.status)}`}>
+              {getStatusLabel(selectedOrder.status)}
+            </span>
+          </div>
+
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+            <p className="text-[10px] text-white/40">Fecha</p>
+            <p className="mt-2 text-xs">
+              {formatDate(selectedOrder.created_at)}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+            <p className="text-[10px] text-white/40">Total</p>
+            <p className="mt-2 text-sm font-bold text-emerald-300">
+              {formatMoney(selectedOrder.total)}
+            </p>
+          </div>
+        </section>
+
+        {/* SERVICIOS */}
+        <section className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+          <h4 className="text-base font-bold">Servicios</h4>
+
+          <div className="mt-3 space-y-3">
+            {selectedOrder.items.map((item) => (
+              <div
+                key={item.id}
+                className="rounded-xl border border-white/10 bg-black/20 p-3"
+              >
+                <div className="flex flex-col sm:flex-row sm:justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-bold">
+                      {item.product_name}
+                      {item.variant_name ? ` - ${item.variant_name}` : ""}
+                    </p>
+                    <p className="text-xs text-white/50">
+                      {item.product_category || "Servicio digital"}
+                    </p>
+                  </div>
+
+                  <div className="text-xs sm:text-right">
+                    <p>Cant: {item.quantity}</p>
+                    <p className="font-bold text-emerald-300">
+                      {formatMoney(item.price * item.quantity)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* LICENCIAS */}
+        <section className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+          <h4 className="text-base font-bold">Licencias</h4>
+
+          {selectedOrder.items.every((item) => item.licenses.length === 0) ? (
+            <p className="mt-3 text-xs text-white/50">
+              Sin licencias aún.
+            </p>
+          ) : (
+            <div className="mt-3 space-y-3">
+              {selectedOrder.items.map((item) =>
+                item.licenses.map((license) => (
+                  <div
+                    key={license.id}
+                    className="rounded-xl border border-white/10 bg-black/20 p-3"
+                  >
+                    <p className="text-xs font-bold mb-2">
+                      {item.product_name}
+                    </p>
+
+                    <div className="bg-black/60 p-2 rounded text-xs break-all">
+                      {license.license_text}
+                    </div>
+
+                    <div className="mt-2 flex justify-end">
+                      <button
+                        onClick={() =>
+                          copyLicense(license.license_text, license.id)
+                        }
+                        className="text-xs px-3 py-1 rounded bg-blue-600 hover:bg-blue-500"
+                      >
+                        {copiedLicenseId === license.id
+                          ? "Copiado"
+                          : "Copiar"}
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </section>
+
+      </div>
+    </div>
+  </div>
+)}
     </>
   );
 }
