@@ -1,34 +1,34 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 import {
-  LayoutDashboard,
   Package,
   ShoppingCart,
   Users,
   Wallet,
-  KeyRound,
-  Tags,
-  BarChart3,
   Settings,
   LogOut,
 } from "lucide-react";
 
 const menuItems = [
-  { name: "Dashboard", href: "/admin", icon: LayoutDashboard },
   { name: "Productos", href: "/admin/products", icon: Package },
   { name: "Pedidos", href: "/admin/orders", icon: ShoppingCart },
   { name: "Usuarios", href: "/admin/users", icon: Users },
   { name: "Saldo", href: "/admin/balance", icon: Wallet },
-  { name: "Licencias", href: "/admin/licenses", icon: KeyRound },
-  { name: "Categorías", href: "/admin/categories", icon: Tags },
-  { name: "Reportes", href: "/admin/reports", icon: BarChart3 },
   { name: "Ajustes", href: "/admin/settings", icon: Settings },
 ];
 
 export default function AdminSidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.push("/login");
+    router.refresh();
+  };
 
   return (
     <aside className="w-[280px] min-h-screen bg-[#050816] text-white flex flex-col border-r border-white/10">
@@ -36,9 +36,9 @@ export default function AdminSidebar() {
         <p className="text-xs uppercase tracking-[0.3em] text-white/50">
           StreamingMayor
         </p>
-        <h1 className="text-2xl font-extrabold mt-3">Admin Panel</h1>
-        <p className="text-sm text-white/60 mt-2">
-          Control total de la plataforma
+        <h1 className="mt-3 text-2xl font-extrabold">Admin Panel</h1>
+        <p className="mt-2 text-sm text-white/60">
+          Control principal de la plataforma
         </p>
       </div>
 
@@ -66,7 +66,10 @@ export default function AdminSidebar() {
       </nav>
 
       <div className="p-4 border-t border-white/10">
-        <button className="w-full flex items-center gap-3 rounded-2xl px-4 py-3 text-white/75 hover:bg-white/10 hover:text-white transition">
+        <button
+          onClick={handleLogout}
+          className="w-full flex items-center gap-3 rounded-2xl px-4 py-3 text-white/75 hover:bg-white/10 hover:text-white transition"
+        >
           <LogOut size={20} />
           <span>Cerrar sesión</span>
         </button>
