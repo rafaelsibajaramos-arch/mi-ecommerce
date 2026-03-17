@@ -6,6 +6,7 @@ import { supabase } from "../../../lib/supabase";
 
 type OrderRow = {
   id: string;
+  order_number: number | null;
   user_id: string;
   total: number;
   status: string | null;
@@ -17,7 +18,10 @@ type OrderItemRow = {
   order_id: string;
   product_id: string;
   quantity: number;
-  price: number;
+  unit_price?: number | null;
+  price?: number | null;
+  product_name?: string | null;
+  variant_name?: string | null;
 };
 
 type ProductRow = {
@@ -27,8 +31,20 @@ type ProductRow = {
   category: string | null;
 };
 
+type LicenseRow = {
+  id: string;
+  product_id: string;
+  variant_id: string | null;
+  license_text: string;
+  status: string;
+  assigned_order_id: string | null;
+  assigned_order_item_id: string | null;
+  assigned_user_id: string | null;
+};
+
 type OrderWithItems = {
   id: string;
+  order_number: number | null;
   total: number;
   status: string;
   created_at: string;
@@ -38,8 +54,13 @@ type OrderWithItems = {
     price: number;
     product_id: string;
     product_name: string;
+    variant_name: string | null;
     product_description: string | null;
     product_category: string | null;
+    licenses: Array<{
+      id: string;
+      license_text: string;
+    }>;
   }>;
 };
 
@@ -54,6 +75,7 @@ export default function AccountOrdersPage() {
   const [dateTo, setDateTo] = useState("");
 
   const [selectedOrder, setSelectedOrder] = useState<OrderWithItems | null>(null);
+  const [copiedLicenseId, setCopiedLicenseId] = useState<string | null>(null);
 
   useEffect(() => {
     loadOrders();
@@ -89,7 +111,7 @@ export default function AccountOrdersPage() {
 
     const { data: ordersData, error: ordersError } = await supabase
       .from("orders")
-      .select("id, user_id, total, status, created_at")
+      .select("id, order_number, user_id, total, status, created_at")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
 
@@ -111,7 +133,7 @@ export default function AccountOrdersPage() {
 
     const { data: itemsData, error: itemsError } = await supabase
       .from("order_items")
-      .select("id, order_id, product_id, quantity, price")
+      .select("id, order_id, product_id, quantity, unit_price, price, product_name, variant_name")
       .in("order_id", orderIds);
 
     if (itemsError) {
@@ -144,25 +166,58 @@ export default function AccountOrdersPage() {
       });
     }
 
+    const { data: licensesData, error: licensesError } = await supabase
+      .from("product_licenses")
+      .select("id, product_id, variant_id, license_text, status, assigned_order_id, assigned_order_item_id, assigned_user_id")
+      .in("assigned_order_id", orderIds)
+      .eq("assigned_user_id", user.id)
+      .eq("status", "assigned");
+
+    if (licensesError) {
+      setMessage("No se pudieron cargar las licencias entregadas.");
+      setLoading(false);
+      return;
+    }
+
+    const rawLicenses = (licensesData as LicenseRow[]) || [];
+
     const mergedOrders: OrderWithItems[] = rawOrders.map((order) => {
       const items = rawItems
         .filter((item) => item.order_id === order.id)
         .map((item) => {
           const product = productsMap.get(item.product_id);
 
+          const itemLicenses = rawLicenses.filter((license) => {
+            if (license.assigned_order_item_id) {
+              return license.assigned_order_item_id === item.id;
+            }
+
+            return (
+              license.assigned_order_id === order.id &&
+              license.product_id === item.product_id
+            );
+          });
+
           return {
             id: item.id,
             quantity: Number(item.quantity || 0),
-            price: Number(item.price || 0),
+            price: Number(item.unit_price ?? item.price ?? 0),
             product_id: item.product_id,
-            product_name: product?.name || "Producto",
+            product_name:
+              item.product_name || product?.name || "Producto",
+            variant_name: item.variant_name || null,
             product_description: product?.description || null,
             product_category: product?.category || null,
+            licenses: itemLicenses.map((license) => ({
+              id: license.id,
+              license_text: license.license_text,
+            })),
           };
         });
 
       return {
         id: order.id,
+        order_number: order.order_number,
         total: Number(order.total || 0),
         status: order.status || "completed",
         created_at: order.created_at,
@@ -204,7 +259,7 @@ export default function AccountOrdersPage() {
     try {
       return new Date(date).toLocaleDateString("es-CO", {
         year: "numeric",
-        month: "short",
+        month: "long",
         day: "numeric",
       });
     } catch {
@@ -212,10 +267,16 @@ export default function AccountOrdersPage() {
     }
   };
 
+  const formatOrderNumber = (value: number | null) => {
+    if (!value) return "-----";
+    return String(value).padStart(5, "0");
+  };
+
   const getStatusLabel = (status: string) => {
     const normalized = (status || "").toLowerCase();
 
     if (normalized === "completed") return "Entregado";
+    if (normalized === "paid") return "Pagado";
     if (normalized === "pending") return "Pendiente";
     if (normalized === "processing") return "Procesando";
     if (normalized === "cancelled") return "Cancelado";
@@ -226,7 +287,7 @@ export default function AccountOrdersPage() {
   const getStatusClasses = (status: string) => {
     const normalized = (status || "").toLowerCase();
 
-    if (normalized === "completed") {
+    if (normalized === "completed" || normalized === "paid") {
       return "border border-emerald-400/20 bg-emerald-400/10 text-emerald-300";
     }
 
@@ -245,6 +306,16 @@ export default function AccountOrdersPage() {
     return "border border-white/10 bg-white/5 text-white/80";
   };
 
+  const copyLicense = async (licenseText: string, licenseId: string) => {
+    try {
+      await navigator.clipboard.writeText(licenseText);
+      setCopiedLicenseId(licenseId);
+      setTimeout(() => setCopiedLicenseId(null), 1800);
+    } catch {
+      setCopiedLicenseId(null);
+    }
+  };
+
   if (loading) {
     return (
       <main className="min-h-screen bg-transparent px-6 py-10 text-white">
@@ -255,19 +326,19 @@ export default function AccountOrdersPage() {
 
   return (
     <>
-      <main className="min-h-screen bg-transparent px-6 py-10 text-white">
+      <main className="min-h-screen bg-transparent px-4 py-8 text-white md:px-6 md:py-10">
         <section className="mx-auto max-w-7xl">
-          <div className="rounded-[28px] border border-white/10 bg-slate-800/80 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-md">
+          <div className="rounded-[28px] border border-white/10 bg-slate-800/80 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-md md:p-6">
             <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
               <div>
                 <p className="text-sm uppercase tracking-[0.2em] text-white/45">
                   Pedidos
                 </p>
-                <h1 className="mt-2 text-4xl font-black tracking-tight md:text-5xl">
+                <h1 className="mt-2 text-3xl font-black tracking-tight md:text-5xl">
                   Mis pedidos
                 </h1>
                 <p className="mt-3 text-white/65">
-                  Consulta tu historial de compras y el detalle de cada pedido.
+                  Consulta tus comprobantes, servicios y licencias entregadas.
                 </p>
               </div>
 
@@ -275,14 +346,14 @@ export default function AccountOrdersPage() {
                 <p className="text-xs uppercase tracking-[0.18em] text-emerald-300/70">
                   Inversión total
                 </p>
-                <p className="mt-2 text-3xl font-black text-emerald-300">
+                <p className="mt-2 text-2xl font-black text-emerald-300 md:text-3xl">
                   {formatMoney(totalInvested)}
                 </p>
               </div>
             </div>
           </div>
 
-          <div className="mt-8 rounded-[28px] border border-white/10 bg-slate-800/80 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-md">
+          <div className="mt-8 rounded-[28px] border border-white/10 bg-slate-800/80 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-md md:p-6">
             <p className="text-sm font-semibold uppercase tracking-[0.18em] text-white/35">
               Filtrar por fecha
             </p>
@@ -319,7 +390,7 @@ export default function AccountOrdersPage() {
                     setDateFrom("");
                     setDateTo("");
                   }}
-                  className="rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-white/75 transition hover:bg-white/10 hover:text-white"
+                  className="w-full rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-white/75 transition hover:bg-white/10 hover:text-white md:w-auto"
                 >
                   Limpiar filtro
                 </button>
@@ -328,8 +399,8 @@ export default function AccountOrdersPage() {
           </div>
 
           <div className="mt-8 rounded-[28px] border border-white/10 bg-slate-800/80 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-md">
-            <div className="border-b border-white/10 px-6 py-5">
-              <h2 className="text-2xl font-bold">
+            <div className="border-b border-white/10 px-5 py-5 md:px-6">
+              <h2 className="text-xl font-bold md:text-2xl">
                 Historial de pedidos ({filteredOrders.length})
               </h2>
             </div>
@@ -349,7 +420,7 @@ export default function AccountOrdersPage() {
                 {filteredOrders.map((order) => (
                   <div
                     key={order.id}
-                    className="flex flex-col gap-4 px-6 py-5 lg:flex-row lg:items-center lg:justify-between"
+                    className="flex flex-col gap-4 px-5 py-5 lg:flex-row lg:items-center lg:justify-between md:px-6"
                   >
                     <div className="flex items-start gap-4">
                       <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/5 text-white">
@@ -371,13 +442,12 @@ export default function AccountOrdersPage() {
 
                       <div>
                         <p className="text-lg font-bold text-white">
-                          Pedido #{order.id.slice(0, 8)}
+                          Pedido #{formatOrderNumber(order.order_number)}
                         </p>
 
                         <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-white/55">
                           <span>{formatDate(order.created_at)}</span>
-                          <span>{order.items.length} producto(s)</span>
-                          <span>Pago con saldo</span>
+                          <span>{order.items.length} servicio(s)</span>
                         </div>
                       </div>
                     </div>
@@ -400,7 +470,7 @@ export default function AccountOrdersPage() {
                         onClick={() => setSelectedOrder(order)}
                         className="rounded-2xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-500"
                       >
-                        Detalles
+                        Ver comprobante
                       </button>
                     </div>
                   </div>
@@ -418,14 +488,14 @@ export default function AccountOrdersPage() {
             onClick={() => setSelectedOrder(null)}
           />
 
-          <div className="relative z-10 w-full max-w-2xl overflow-hidden rounded-[28px] border border-white/10 bg-[#0b1220]/95 shadow-[0_30px_90px_rgba(0,0,0,0.65)] backdrop-blur-2xl">
-            <div className="flex items-center justify-between border-b border-white/10 px-6 py-5">
+          <div className="relative z-10 w-full max-w-3xl overflow-hidden rounded-[28px] border border-white/10 bg-[#0b1220]/95 shadow-[0_30px_90px_rgba(0,0,0,0.65)] backdrop-blur-2xl">
+            <div className="flex items-center justify-between border-b border-white/10 px-5 py-5 md:px-6">
               <div>
                 <h3 className="text-2xl font-bold text-white">
-                  Detalle del pedido
+                  Pedido recibido
                 </h3>
                 <p className="mt-1 text-sm text-white/45">
-                  #{selectedOrder.id.slice(0, 8)}
+                  Comprobante #{formatOrderNumber(selectedOrder.order_number)}
                 </p>
               </div>
 
@@ -438,122 +508,137 @@ export default function AccountOrdersPage() {
               </button>
             </div>
 
-            <div className="max-h-[80vh] overflow-y-auto p-6">
-              <section className="rounded-[24px] border border-white/10 bg-white/[0.03] p-5">
-                <h4 className="text-lg font-bold text-white">
-                  Licencia entregada
-                </h4>
-
-                {selectedOrder.items.length === 0 ? (
-                  <p className="mt-4 text-sm text-white/55">
-                    Este pedido no tiene productos registrados.
+            <div className="max-h-[80vh] overflow-y-auto p-5 md:p-6">
+              <section className="grid gap-4 md:grid-cols-4">
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                  <p className="text-xs uppercase tracking-[0.14em] text-white/35">
+                    Número del pedido
                   </p>
-                ) : (
-                  <div className="mt-5 space-y-4">
-                    {selectedOrder.items.map((item) => (
-                      <div
-                        key={item.id}
-                        className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
-                      >
-                        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                          <div>
-                            <p className="text-base font-bold text-white">
-                              {item.product_name}
-                            </p>
+                  <p className="mt-3 text-lg font-bold text-white">
+                    {formatOrderNumber(selectedOrder.order_number)}
+                  </p>
+                </div>
 
-                            <p className="mt-1 text-sm text-white/50">
-                              {item.product_category || "Producto digital"}
-                            </p>
-                          </div>
-
-                          <p className="text-base font-bold text-emerald-300">
-                            {formatMoney(item.price)}
-                          </p>
-                        </div>
-
-                        <div className="mt-4 grid gap-3 md:grid-cols-2">
-                          <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                            <p className="text-xs uppercase tracking-[0.14em] text-white/35">
-                              Producto
-                            </p>
-                            <p className="mt-2 text-sm text-white/80">
-                              {item.product_name}
-                            </p>
-                          </div>
-
-                          <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                            <p className="text-xs uppercase tracking-[0.14em] text-white/35">
-                              Cantidad
-                            </p>
-                            <p className="mt-2 text-sm text-white/80">
-                              {item.quantity}
-                            </p>
-                          </div>
-
-                          <div className="rounded-xl border border-white/10 bg-black/20 p-3 md:col-span-2">
-                            <p className="text-xs uppercase tracking-[0.14em] text-white/35">
-                              Información entregada
-                            </p>
-                            <p className="mt-2 text-sm leading-6 text-white/75">
-                              {item.product_description ||
-                                "La licencia de este producto fue registrada como entregada dentro del pedido. Si luego conectas una tabla específica de licencias, aquí podremos mostrar correo, usuario, clave o instrucciones exactas."}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                  <p className="text-xs uppercase tracking-[0.14em] text-white/35">
+                    Estado
+                  </p>
+                  <div className="mt-3">
+                    <span
+                      className={`rounded-full px-3 py-2 text-sm font-semibold ${getStatusClasses(
+                        selectedOrder.status
+                      )}`}
+                    >
+                      {getStatusLabel(selectedOrder.status)}
+                    </span>
                   </div>
-                )}
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                  <p className="text-xs uppercase tracking-[0.14em] text-white/35">
+                    Fecha
+                  </p>
+                  <p className="mt-3 text-sm text-white/80">
+                    {formatDate(selectedOrder.created_at)}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                  <p className="text-xs uppercase tracking-[0.14em] text-white/35">
+                    Total
+                  </p>
+                  <p className="mt-3 text-lg font-bold text-emerald-300">
+                    {formatMoney(selectedOrder.total)}
+                  </p>
+                </div>
               </section>
 
               <section className="mt-5 rounded-[24px] border border-white/10 bg-white/[0.03] p-5">
                 <h4 className="text-lg font-bold text-white">
-                  Estado del pedido
+                  Servicios comprados
                 </h4>
 
-                <div className="mt-5 grid gap-4 md:grid-cols-2">
-                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                    <p className="text-xs uppercase tracking-[0.14em] text-white/35">
-                      Estado
-                    </p>
-                    <div className="mt-3">
-                      <span
-                        className={`rounded-full px-4 py-2 text-sm font-semibold ${getStatusClasses(
-                          selectedOrder.status
-                        )}`}
-                      >
-                        {getStatusLabel(selectedOrder.status)}
-                      </span>
+                <div className="mt-5 space-y-4">
+                  {selectedOrder.items.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-2xl border border-white/10 bg-black/20 p-4"
+                    >
+                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                        <div>
+                          <p className="text-base font-bold text-white">
+                            {item.product_name}
+                            {item.variant_name ? ` - ${item.variant_name}` : ""}
+                          </p>
+
+                          <p className="mt-1 text-sm text-white/50">
+                            {item.product_category || "Servicio digital"}
+                          </p>
+                        </div>
+
+                        <div className="text-left md:text-right">
+                          <p className="text-sm text-white/50">
+                            Cantidad: {item.quantity}
+                          </p>
+                          <p className="mt-1 text-base font-bold text-emerald-300">
+                            {formatMoney(item.price * item.quantity)}
+                          </p>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                    <p className="text-xs uppercase tracking-[0.14em] text-white/35">
-                      Fecha
-                    </p>
-                    <p className="mt-3 text-sm text-white/80">
-                      {formatDate(selectedOrder.created_at)}
-                    </p>
-                  </div>
-
-                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                    <p className="text-xs uppercase tracking-[0.14em] text-white/35">
-                      Método de pago
-                    </p>
-                    <p className="mt-3 text-sm text-white/80">
-                      Saldo de billetera
-                    </p>
-                  </div>
-
-                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                    <p className="text-xs uppercase tracking-[0.14em] text-white/35">
-                      Total
-                    </p>
-                    <p className="mt-3 text-sm font-semibold text-emerald-300">
-                      {formatMoney(selectedOrder.total)}
-                    </p>
-                  </div>
+                  ))}
                 </div>
+              </section>
+
+              <section className="mt-5 rounded-[24px] border border-white/10 bg-white/[0.03] p-5">
+                <h4 className="text-lg font-bold text-white">
+                  Licencias entregadas
+                </h4>
+
+                {selectedOrder.items.every((item) => item.licenses.length === 0) ? (
+                  <p className="mt-4 text-sm text-white/55">
+                    Este pedido todavía no tiene licencias asociadas.
+                  </p>
+                ) : (
+                  <div className="mt-5 space-y-4">
+                    {selectedOrder.items.map((item) =>
+                      item.licenses.map((license) => (
+                        <div
+                          key={license.id}
+                          className="rounded-2xl border border-white/10 bg-black/20 p-4"
+                        >
+                          <p className="text-base font-bold text-white">
+                            {item.product_name}
+                            {item.variant_name ? ` - ${item.variant_name}` : ""}
+                          </p>
+
+                          <div className="mt-4 rounded-xl border border-white/10 bg-[#060b14] p-4">
+                            <p className="text-xs uppercase tracking-[0.14em] text-white/35">
+                              Licencia
+                            </p>
+                            <p className="mt-3 break-all text-sm leading-6 text-white/80">
+                              {license.license_text}
+                            </p>
+                          </div>
+
+                          <div className="mt-4 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                copyLicense(license.license_text, license.id)
+                              }
+                              className="rounded-xl border border-blue-400/20 bg-blue-500/10 px-4 py-2 text-sm font-semibold text-blue-300 transition hover:bg-blue-500/20"
+                            >
+                              {copiedLicenseId === license.id
+                                ? "Copiado"
+                                : "Copiar licencia"}
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
               </section>
             </div>
           </div>

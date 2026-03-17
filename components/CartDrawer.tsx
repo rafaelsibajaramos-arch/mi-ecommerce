@@ -29,6 +29,56 @@ type ProfileRow = {
   balance: number;
 };
 
+type CreatedOrderItemRow = {
+  id: string;
+  order_id: string;
+  product_id: string;
+  variant_id: string | null;
+  quantity: number;
+  unit_price: number;
+  item_type: string;
+  product_name: string;
+  variant_name: string | null;
+};
+
+type LicenseRow = {
+  id: string;
+  product_id: string;
+  variant_id: string | null;
+  license_text: string;
+  status: string;
+};
+
+const generateRandomOrderNumber = () => {
+  return Math.floor(10000 + Math.random() * 90000);
+};
+
+async function getUniqueOrderNumber() {
+  let attempts = 0;
+
+  while (attempts < 20) {
+    const candidate = generateRandomOrderNumber();
+
+    const { data, error } = await supabase
+      .from("orders")
+      .select("id")
+      .eq("order_number", candidate)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error("No se pudo validar el número de pedido.");
+    }
+
+    if (!data) {
+      return candidate;
+    }
+
+    attempts += 1;
+  }
+
+  throw new Error("No se pudo generar un número de pedido único.");
+}
+
 export default function CartDrawer() {
   const {
     cart,
@@ -174,7 +224,8 @@ export default function CartDrawer() {
             return;
           }
 
-          validatedTotal += Number(variant.price) * item.quantity;
+          const unitPrice = Number(variant.price);
+          validatedTotal += unitPrice * item.quantity;
         } else {
           if (Number(product.stock) < item.quantity) {
             setMessage(`No hay stock suficiente para "${item.name}".`);
@@ -183,7 +234,8 @@ export default function CartDrawer() {
             return;
           }
 
-          validatedTotal += Number(product.price) * item.quantity;
+          const unitPrice = Number(product.price);
+          validatedTotal += unitPrice * item.quantity;
         }
       }
 
@@ -198,6 +250,28 @@ export default function CartDrawer() {
         return;
       }
 
+      const orderNumber = await getUniqueOrderNumber();
+
+      const { data: orderData, error: orderError } = await supabase
+        .from("orders")
+        .insert([
+          {
+            user_id: user.id,
+            total: validatedTotal,
+            status: "paid",
+            order_number: orderNumber,
+          },
+        ])
+        .select()
+        .single();
+
+      if (orderError || !orderData) {
+        setMessage("No se pudo crear el pedido.");
+        setProcessing(false);
+        resetSlider();
+        return;
+      }
+
       const newBalance = Number(profile.balance) - validatedTotal;
 
       const { error: balanceUpdateError } = await supabase
@@ -206,15 +280,59 @@ export default function CartDrawer() {
         .eq("id", user.id);
 
       if (balanceUpdateError) {
+        await supabase.from("orders").delete().eq("id", orderData.id);
         setMessage("No se pudo descontar el saldo.");
         setProcessing(false);
         resetSlider();
         return;
       }
 
+      const createdOrderItems: CreatedOrderItemRow[] = [];
+
       for (const item of cart) {
-        if (item.variantId) {
-          const variant = variantsMap[item.variantId];
+        const product = productsMap[item.id];
+        const variant = item.variantId ? variantsMap[item.variantId] : null;
+
+        const unitPrice = Number(variant?.price ?? product?.price ?? item.price);
+
+        const { data: orderItemData, error: orderItemError } = await supabase
+          .from("order_items")
+          .insert([
+            {
+              order_id: orderData.id,
+              product_id: item.id,
+              variant_id: item.variantId || null,
+              quantity: item.quantity,
+              unit_price: unitPrice,
+              item_type: item.variantId ? "variant" : "simple",
+              product_name: product?.name || item.name,
+              variant_name: item.variantName || null,
+            },
+          ])
+          .select()
+          .single();
+
+        if (orderItemError || !orderItemData) {
+          await supabase.from("orders").delete().eq("id", orderData.id);
+          await supabase
+            .from("profiles")
+            .update({ balance: profile.balance })
+            .eq("id", user.id);
+
+          setMessage("No se pudo guardar el detalle del pedido.");
+          setProcessing(false);
+          resetSlider();
+          return;
+        }
+
+        createdOrderItems.push(orderItemData as CreatedOrderItemRow);
+      }
+
+      for (const item of cart) {
+        const product = productsMap[item.id];
+        const variant = item.variantId ? variantsMap[item.variantId] : null;
+
+        if (item.variantId && variant) {
           const newStock = Number(variant.stock) - item.quantity;
 
           const { error } = await supabase
@@ -223,6 +341,7 @@ export default function CartDrawer() {
             .eq("id", variant.id);
 
           if (error) {
+            await supabase.from("orders").delete().eq("id", orderData.id);
             await supabase
               .from("profiles")
               .update({ balance: profile.balance })
@@ -233,8 +352,7 @@ export default function CartDrawer() {
             resetSlider();
             return;
           }
-        } else {
-          const product = productsMap[item.id];
+        } else if (product) {
           const newStock = Number(product.stock) - item.quantity;
 
           const { error } = await supabase
@@ -243,6 +361,7 @@ export default function CartDrawer() {
             .eq("id", product.id);
 
           if (error) {
+            await supabase.from("orders").delete().eq("id", orderData.id);
             await supabase
               .from("profiles")
               .update({ balance: profile.balance })
@@ -256,70 +375,99 @@ export default function CartDrawer() {
         }
       }
 
-      const { data: orderData, error: orderError } = await supabase
-        .from("orders")
-        .insert([
-          {
-            user_id: user.id,
-            total: validatedTotal,
-            status: "paid",
-          },
-        ])
-        .select()
-        .single();
+      for (const item of cart) {
+        const matchingOrderItem = createdOrderItems.find(
+          (orderItem) =>
+            orderItem.product_id === item.id &&
+            (orderItem.variant_id || null) === (item.variantId || null)
+        );
 
-      if (orderError || !orderData) {
-        await supabase
-          .from("profiles")
-          .update({ balance: profile.balance })
-          .eq("id", user.id);
+        if (!matchingOrderItem) {
+          continue;
+        }
 
-        setMessage("No se pudo crear el pedido.");
-        setProcessing(false);
-        resetSlider();
-        return;
-      }
+        const licenseQuery = supabase
+          .from("product_licenses")
+          .select("id, product_id, variant_id, license_text, status")
+          .eq("product_id", item.id)
+          .eq("status", "available")
+          .order("is_priority", { ascending: false })
+          .order("created_at", { ascending: true })
+          .limit(item.quantity);
 
-      const orderItemsPayload = cart.map((item) => {
-        const freshVariant = item.variantId ? variantsMap[item.variantId] : null;
-        const freshProduct = productsMap[item.id];
+        const { data: licensesData, error: licensesError } = item.variantId
+          ? await licenseQuery.eq("variant_id", item.variantId)
+          : await licenseQuery.is("variant_id", null);
 
-        return {
-          order_id: orderData.id,
-          product_id: item.id,
-          variant_id: item.variantId || null,
-          quantity: item.quantity,
-          unit_price: Number(freshVariant?.price ?? freshProduct?.price ?? item.price),
-          item_type: item.variantId ? "variant" : "simple",
-          product_name: freshProduct?.name || item.name,
-          variant_name: item.variantName || null,
-        };
-      });
+        if (licensesError) {
+          await supabase.from("orders").delete().eq("id", orderData.id);
+          await supabase
+            .from("profiles")
+            .update({ balance: profile.balance })
+            .eq("id", user.id);
 
-      const { error: orderItemsError } = await supabase
-        .from("order_items")
-        .insert(orderItemsPayload);
+          setMessage(`No se pudieron asignar las licencias de "${item.name}".`);
+          setProcessing(false);
+          resetSlider();
+          return;
+        }
 
-      if (orderItemsError) {
-        await supabase.from("orders").delete().eq("id", orderData.id);
-        await supabase
-          .from("profiles")
-          .update({ balance: profile.balance })
-          .eq("id", user.id);
+        const licenses = (licensesData as LicenseRow[]) || [];
 
-        setMessage("No se pudo guardar el detalle del pedido.");
-        setProcessing(false);
-        resetSlider();
-        return;
+        if (licenses.length < item.quantity) {
+          await supabase.from("orders").delete().eq("id", orderData.id);
+          await supabase
+            .from("profiles")
+            .update({ balance: profile.balance })
+            .eq("id", user.id);
+
+          setMessage(`No hay suficientes licencias disponibles para "${item.name}".`);
+          setProcessing(false);
+          resetSlider();
+          return;
+        }
+
+        for (const license of licenses) {
+          const { error: assignError } = await supabase
+            .from("product_licenses")
+            .update({
+              status: "assigned",
+              assigned_order_id: orderData.id,
+              assigned_order_item_id: matchingOrderItem.id,
+              assigned_user_id: user.id,
+            })
+            .eq("id", license.id);
+
+          if (assignError) {
+            await supabase.from("orders").delete().eq("id", orderData.id);
+            await supabase
+              .from("profiles")
+              .update({ balance: profile.balance })
+              .eq("id", user.id);
+
+            setMessage(`No se pudo completar la entrega de "${item.name}".`);
+            setProcessing(false);
+            resetSlider();
+            return;
+          }
+        }
       }
 
       clearCart();
       setSuccessMessage(
-        `Compra realizada con éxito. Total pagado: $${validatedTotal.toLocaleString()}.`
+        `Compra realizada con éxito. Pedido #${String(orderNumber).padStart(
+          5,
+          "0"
+        )} generado correctamente.`
       );
       resetSlider();
-    } catch {
-      setMessage("Ocurrió un error inesperado al procesar la compra.");
+    } catch (error) {
+      const fallback =
+        error instanceof Error
+          ? error.message
+          : "Ocurrió un error inesperado al procesar la compra.";
+
+      setMessage(fallback);
       resetSlider();
     } finally {
       setProcessing(false);
