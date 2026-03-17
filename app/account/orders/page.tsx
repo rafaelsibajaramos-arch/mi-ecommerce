@@ -18,10 +18,9 @@ type OrderItemRow = {
   order_id: string;
   product_id: string;
   quantity: number;
-  unit_price?: number | null;
-  price?: number | null;
-  product_name?: string | null;
-  variant_name?: string | null;
+  unit_price: number | null;
+  product_name: string | null;
+  variant_name: string | null;
 };
 
 type ProductRow = {
@@ -132,9 +131,9 @@ export default function AccountOrdersPage() {
     const orderIds = rawOrders.map((order) => order.id);
 
     const { data: itemsData, error: itemsError } = await supabase
-      .from("order_items")
-      .select("id, order_id, product_id, quantity, unit_price, price, product_name, variant_name")
-      .in("order_id", orderIds);
+  .from("order_items")
+  .select("id, order_id, product_id, quantity, unit_price, product_name, variant_name")
+  .in("order_id", orderIds);
 
     if (itemsError) {
       setMessage("No se pudieron cargar los productos de tus pedidos.");
@@ -199,15 +198,14 @@ export default function AccountOrdersPage() {
           });
 
           return {
-            id: item.id,
-            quantity: Number(item.quantity || 0),
-            price: Number(item.unit_price ?? item.price ?? 0),
-            product_id: item.product_id,
-            product_name:
-              item.product_name || product?.name || "Producto",
-            variant_name: item.variant_name || null,
-            product_description: product?.description || null,
-            product_category: product?.category || null,
+  id: item.id,
+  quantity: Number(item.quantity || 0),
+  price: Number(item.unit_price || 0),
+  product_id: item.product_id,
+  product_name: item.product_name || product?.name || "Producto",
+  variant_name: item.variant_name || null,
+  product_description: product?.description || null,
+  product_category: product?.category || null,
             licenses: itemLicenses.map((license) => ({
               id: license.id,
               license_text: license.license_text,

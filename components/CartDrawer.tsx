@@ -452,13 +452,9 @@ export default function CartDrawer() {
       }
 
       clearCart();
-      setSuccessMessage(
-        `Compra realizada con éxito. Pedido #${String(orderNumber).padStart(
-          5,
-          "0"
-        )} generado correctamente.`
-      );
-      resetSlider();
+closeCart();
+resetSlider();
+window.location.href = "/account/orders";
     } catch (error) {
       setMessage(
         error instanceof Error
