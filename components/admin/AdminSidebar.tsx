@@ -8,7 +8,6 @@ import { supabase } from "../../lib/supabase";
 const adminLinks = [
   { href: "/admin/orders", label: "Pedidos" },
   { href: "/admin/products", label: "Productos" },
-  { href: "/admin/licenses", label: "Licencias" },
   { href: "/admin/users", label: "Usuarios" },
   { href: "/admin/wallet", label: "Wallet" },
 ];
@@ -61,50 +60,41 @@ export default function AdminSidebar() {
 
   return (
     <>
-      <div className="fixed inset-x-0 top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur lg:hidden">
-        <div className="flex items-center justify-between px-4 py-3 sm:px-6">
-          <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
-              StreamingMayor
-            </p>
-            <p className="truncate text-base font-extrabold text-slate-900">
-              {currentSection}
-            </p>
-          </div>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="fixed left-4 top-[96px] z-[120] inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-lg transition hover:bg-slate-50 lg:hidden"
+        aria-label="Abrir menú admin"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          className="h-5 w-5"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <line x1="4" y1="7" x2="20" y2="7" />
+          <line x1="4" y1="12" x2="20" y2="12" />
+          <line x1="4" y1="17" x2="20" y2="17" />
+        </svg>
+      </button>
 
-          <button
-            type="button"
-            onClick={() => setOpen(true)}
-            className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:bg-slate-50"
-            aria-label="Abrir menú"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-5 w-5"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <line x1="4" y1="7" x2="20" y2="7" />
-              <line x1="4" y1="12" x2="20" y2="12" />
-              <line x1="4" y1="17" x2="20" y2="17" />
-            </svg>
-          </button>
-        </div>
+      <div className="pointer-events-none fixed left-20 top-[101px] z-[119] hidden rounded-2xl border border-slate-200 bg-white/95 px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur sm:block lg:hidden">
+        {currentSection}
       </div>
 
       <div
         onClick={() => setOpen(false)}
-        className={`fixed inset-0 z-40 bg-slate-950/55 transition-opacity duration-300 lg:hidden ${
+        className={`fixed inset-0 z-[130] bg-black/55 transition-opacity duration-300 lg:hidden ${
           open ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
         }`}
       />
 
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-[86vw] max-w-[320px] flex-col bg-[#050816] text-white shadow-2xl transition-transform duration-300 lg:hidden ${
+        className={`fixed left-0 top-0 z-[140] flex h-dvh w-[84vw] max-w-[320px] flex-col bg-[#050816] text-white shadow-2xl transition-transform duration-300 lg:hidden ${
           open ? "translate-x-0" : "-translate-x-full"
         }`}
       >
