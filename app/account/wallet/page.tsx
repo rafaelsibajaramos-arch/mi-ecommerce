@@ -4,16 +4,16 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../../lib/supabase";
 
-type Wallet = {
-  balance: number;
-};
-
 type WalletTransaction = {
   id: string;
   type: string;
   amount: number;
   note: string | null;
   created_at: string;
+};
+
+type ProfileBalanceRow = {
+  balance: number | null;
 };
 
 type FilterType = "all" | "credit" | "debit";
@@ -37,10 +37,11 @@ export default function WalletPage() {
         return;
       }
 
-      const { data: walletData } = await supabase
-        .from("wallets")
+      // Tu compra real usa profiles.balance, no wallets.balance
+      const { data: profileData } = await supabase
+        .from("profiles")
         .select("balance")
-        .eq("user_id", user.id)
+        .eq("id", user.id)
         .single();
 
       const { data: txData } = await supabase
@@ -49,9 +50,9 @@ export default function WalletPage() {
         .eq("user_id", user.id)
         .order("created_at", { ascending: false });
 
-      if (walletData) {
-        const wallet = walletData as Wallet;
-        setBalance(Number(wallet.balance || 0));
+      if (profileData) {
+        const profile = profileData as ProfileBalanceRow;
+        setBalance(Number(profile.balance || 0));
       }
 
       if (txData) {
@@ -64,19 +65,28 @@ export default function WalletPage() {
     loadWallet();
   }, [router]);
 
-  const getTransactionKind = (tx: WalletTransaction) => {
-    const txType = (tx.type || "").toLowerCase();
-    const amount = Number(tx.amount || 0);
+  const getTransactionKind = (tx: WalletTransaction): "credit" | "debit" => {
+    const txType = (tx.type || "").toLowerCase().trim();
 
     if (
-      txType.includes("credit") ||
+      txType === "debit" ||
+      txType === "purchase" ||
+      txType === "order" ||
+      txType.includes("debito") ||
+      txType.includes("débito") ||
+      txType.includes("compra")
+    ) {
+      return "debit";
+    }
+
+    if (
+      txType === "credit" ||
+      txType === "deposit" ||
       txType.includes("credito") ||
       txType.includes("crédito") ||
-      txType.includes("deposit") ||
       txType.includes("deposito") ||
       txType.includes("depósito") ||
-      txType.includes("recarga") ||
-      amount > 0
+      txType.includes("recarga")
     ) {
       return "credit";
     }
@@ -99,9 +109,11 @@ export default function WalletPage() {
     return Number(value || 0).toLocaleString("es-CO");
   };
 
-  const formatSignedMoney = (value: number) => {
-    const amount = Number(value || 0);
-    return `${amount >= 0 ? "+" : "-"}$ ${formatMoney(Math.abs(amount))}`;
+  const formatSignedMoney = (tx: WalletTransaction) => {
+    const amount = Number(tx.amount || 0);
+    const kind = getTransactionKind(tx);
+
+    return `${kind === "credit" ? "+" : "-"}$ ${formatMoney(amount)}`;
   };
 
   const formatDate = (date: string) => {
@@ -119,8 +131,27 @@ export default function WalletPage() {
   };
 
   const getTransactionTitle = (tx: WalletTransaction) => {
-    const kind = getTransactionKind(tx);
-    return kind === "credit" ? "Recarga" : "Compra";
+    const txType = (tx.type || "").toLowerCase().trim();
+    const txNote = (tx.note || "").toLowerCase().trim();
+
+    if (
+      txNote.includes("compra") ||
+      txNote.includes("pedido") ||
+      txType === "purchase" ||
+      txType === "order"
+    ) {
+      return "Compra";
+    }
+
+    if (
+      txType === "debit" ||
+      txType.includes("debito") ||
+      txType.includes("débito")
+    ) {
+      return "Débito";
+    }
+
+    return "Recarga";
   };
 
   if (loading) {
@@ -132,8 +163,8 @@ export default function WalletPage() {
   }
 
   return (
-  <main className="min-h-screen bg-transparent text-white">
-    <section className="max-w-7xl mx-auto px-6 py-10 md:px-10">
+    <main className="min-h-screen bg-transparent text-white">
+      <section className="max-w-7xl mx-auto px-6 py-10 md:px-10">
         <div className="mb-8">
           <p className="text-sm uppercase tracking-[0.2em] text-white/45">
             Wallet
@@ -249,7 +280,7 @@ export default function WalletPage() {
                     : "text-red-400"
                 }`}
               >
-                {formatSignedMoney(Number(latestTransaction.amount || 0))}
+                {formatSignedMoney(latestTransaction)}
               </p>
             </div>
           </div>
@@ -257,7 +288,9 @@ export default function WalletPage() {
 
         <div className="mt-8 rounded-[28px] border border-white/10 bg-slate-800/80 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-md">
           <div className="border-b border-white/10 px-6 py-5">
-            <h3 className="text-2xl font-extrabold">Historial de transacciones</h3>
+            <h3 className="text-2xl font-extrabold">
+              Historial de transacciones
+            </h3>
           </div>
 
           {filteredTransactions.length === 0 ? (
@@ -346,7 +379,7 @@ export default function WalletPage() {
                             : "text-red-400"
                         }`}
                       >
-                        {formatSignedMoney(Number(tx.amount || 0))}
+                        {formatSignedMoney(tx)}
                       </p>
                     </div>
                   </div>

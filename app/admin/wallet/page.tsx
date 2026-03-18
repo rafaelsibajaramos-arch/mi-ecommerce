@@ -38,7 +38,13 @@ type BannerState = {
 } | null;
 
 function formatMoney(value: number) {
-  return `$ ${Number(value || 0).toLocaleString("es-CO")}`;
+  return `$ ${Number(Math.abs(value || 0)).toLocaleString("es-CO")}`;
+}
+
+function formatSignedMoney(type: string, value: number) {
+  const normalized = normalizeType(type);
+  const prefix = normalized === "credit" ? "+" : "-";
+  return `${prefix}${formatMoney(value)}`;
 }
 
 function formatDate(value: string) {
@@ -56,18 +62,34 @@ function formatDate(value: string) {
 }
 
 function normalizeType(type: string | null) {
-  const normalized = (type || "").toLowerCase();
+  const normalized = (type || "").toLowerCase().trim();
 
-  if (normalized === "credit" || normalized === "deposit") return "credit";
-  if (normalized === "debit") return "debit";
-  if (normalized === "purchase") return "purchase";
+  if (
+    normalized === "credit" ||
+    normalized === "deposit" ||
+    normalized.includes("credito") ||
+    normalized.includes("crédito") ||
+    normalized.includes("recarga")
+  ) {
+    return "credit";
+  }
+
+  if (
+    normalized === "debit" ||
+    normalized === "purchase" ||
+    normalized === "order" ||
+    normalized.includes("debito") ||
+    normalized.includes("débito") ||
+    normalized.includes("compra")
+  ) {
+    return "debit";
+  }
 
   return normalized || "movement";
 }
 
 function isRechargeType(type: string | null) {
-  const normalized = normalizeType(type);
-  return normalized === "credit";
+  return normalizeType(type) === "credit";
 }
 
 function getTransactionLabel(type: string) {
@@ -75,7 +97,6 @@ function getTransactionLabel(type: string) {
 
   if (normalized === "credit") return "Crédito";
   if (normalized === "debit") return "Débito";
-  if (normalized === "purchase") return "Compra";
 
   return "Movimiento";
 }
@@ -87,7 +108,7 @@ function getTransactionClasses(type: string) {
     return "border border-emerald-200 bg-emerald-50 text-emerald-700";
   }
 
-  if (normalized === "debit" || normalized === "purchase") {
+  if (normalized === "debit") {
     return "border border-rose-200 bg-rose-50 text-rose-700";
   }
 
@@ -95,12 +116,16 @@ function getTransactionClasses(type: string) {
 }
 
 export default function AdminWalletPage() {
-  const [movementType, setMovementType] = useState<"credit" | "debit">("credit");
+  const [movementType, setMovementType] = useState<"credit" | "debit">(
+    "credit"
+  );
   const [email, setEmail] = useState("");
   const [amount, setAmount] = useState("");
   const [banner, setBanner] = useState<BannerState>(null);
 
-  const [allTransactions, setAllTransactions] = useState<FormattedTransaction[]>([]);
+  const [allTransactions, setAllTransactions] = useState<
+    FormattedTransaction[]
+  >([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [revertingId, setRevertingId] = useState<string | null>(null);
@@ -163,7 +188,9 @@ export default function AdminWalletPage() {
     });
 
     const formatted = rawTransactions.map((transaction) => {
-      const profile = transaction.user_id ? profileMap.get(transaction.user_id) : null;
+      const profile = transaction.user_id
+        ? profileMap.get(transaction.user_id)
+        : null;
 
       return {
         id: transaction.id,
@@ -186,11 +213,15 @@ export default function AdminWalletPage() {
 
   const filteredRechargeTransactions = useMemo(() => {
     return rechargeTransactions.filter((transaction) => {
-      const txDate = transaction.created_at ? transaction.created_at.slice(0, 10) : "";
+      const txDate = transaction.created_at
+        ? transaction.created_at.slice(0, 10)
+        : "";
 
       const emailMatch =
         !searchEmail.trim() ||
-        transaction.email.toLowerCase().includes(searchEmail.trim().toLowerCase());
+        transaction.email
+          .toLowerCase()
+          .includes(searchEmail.trim().toLowerCase());
 
       const startMatch = !startDate || (txDate && txDate >= startDate);
       const endMatch = !endDate || (txDate && txDate <= endDate);
@@ -205,7 +236,9 @@ export default function AdminWalletPage() {
     if (!hasTransactionSearch) return [];
 
     return allTransactions.filter((transaction) => {
-      const txDate = transaction.created_at ? transaction.created_at.slice(0, 10) : "";
+      const txDate = transaction.created_at
+        ? transaction.created_at.slice(0, 10)
+        : "";
       const normalizedType = normalizeType(transaction.type);
 
       const emailMatch = transaction.email
@@ -215,12 +248,11 @@ export default function AdminWalletPage() {
       const startMatch =
         !transactionStartDate || (txDate && txDate >= transactionStartDate);
 
-      const endMatch = !transactionEndDate || (txDate && txDate <= transactionEndDate);
+      const endMatch =
+        !transactionEndDate || (txDate && txDate <= transactionEndDate);
 
       const validType =
-        normalizedType === "credit" ||
-        normalizedType === "debit" ||
-        normalizedType === "purchase";
+        normalizedType === "credit" || normalizedType === "debit";
 
       return validType && emailMatch && startMatch && endMatch;
     });
@@ -311,11 +343,16 @@ export default function AdminWalletPage() {
       return;
     }
 
-    const { error: txError } = await supabase.from("wallet_transactions").insert({
-      user_id: profile.id,
-      type: movementType,
-      amount: numericAmount,
-    });
+    const signedAmount =
+      movementType === "debit" ? -numericAmount : numericAmount;
+
+    const { error: txError } = await supabase
+      .from("wallet_transactions")
+      .insert({
+        user_id: profile.id,
+        type: movementType,
+        amount: signedAmount,
+      });
 
     if (txError) {
       await supabase
@@ -374,8 +411,9 @@ export default function AdminWalletPage() {
     }
 
     const currentBalance = Number((wallet as WalletRow).balance || 0);
+    const rechargeAmount = Math.abs(Number(transaction.amount || 0));
 
-    if (currentBalance < transaction.amount) {
+    if (currentBalance < rechargeAmount) {
       setBanner({
         kind: "error",
         text: `No se puede revertir esta recarga porque el cliente solo tiene ${formatMoney(
@@ -386,7 +424,7 @@ export default function AdminWalletPage() {
       return;
     }
 
-    const newBalance = currentBalance - transaction.amount;
+    const newBalance = currentBalance - rechargeAmount;
 
     const { error: updateError } = await supabase
       .from("wallets")
@@ -407,7 +445,7 @@ export default function AdminWalletPage() {
       .insert({
         user_id: transaction.user_id,
         type: "debit",
-        amount: transaction.amount,
+        amount: -rechargeAmount,
       })
       .select("id")
       .single();
@@ -438,7 +476,10 @@ export default function AdminWalletPage() {
         .eq("user_id", transaction.user_id);
 
       if (debitInserted?.id) {
-        await supabase.from("wallet_transactions").delete().eq("id", debitInserted.id);
+        await supabase
+          .from("wallet_transactions")
+          .delete()
+          .eq("id", debitInserted.id);
       }
 
       setBanner({
@@ -451,7 +492,7 @@ export default function AdminWalletPage() {
 
     setBanner({
       kind: "success",
-      text: `Se descontó ${formatMoney(transaction.amount)} al correo ${transaction.email}.`,
+      text: `Se descontó ${formatMoney(rechargeAmount)} al correo ${transaction.email}.`,
     });
 
     await loadTransactions();
@@ -468,8 +509,8 @@ export default function AdminWalletPage() {
           Gestión manual de saldo
         </h1>
         <p className="mt-2 text-sm text-slate-600 sm:text-base">
-          Acredita o descuenta saldo, revisa recargas y consulta transacciones por
-          correo.
+          Acredita o descuenta saldo, revisa recargas y consulta transacciones
+          por correo.
         </p>
       </div>
 
@@ -486,9 +527,12 @@ export default function AdminWalletPage() {
       )}
 
       <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-        <h2 className="text-2xl font-extrabold text-slate-900">Movimiento manual</h2>
+        <h2 className="text-2xl font-extrabold text-slate-900">
+          Movimiento manual
+        </h2>
         <p className="mt-2 text-sm text-slate-500">
-          Selecciona si vas a hacer un crédito o un débito al monedero del cliente.
+          Selecciona si vas a hacer un crédito o un débito al monedero del
+          cliente.
         </p>
 
         <form className="mt-6 space-y-5" onSubmit={handleMovement}>
@@ -688,7 +732,9 @@ export default function AdminWalletPage() {
                           disabled={revertingId === transaction.id}
                           className="inline-flex items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-60"
                         >
-                          {revertingId === transaction.id ? "Debitando..." : "Debitar"}
+                          {revertingId === transaction.id
+                            ? "Debitando..."
+                            : "Debitar"}
                         </button>
                       </div>
                     </div>
@@ -707,8 +753,8 @@ export default function AdminWalletPage() {
               Historial de transacciones
             </h3>
             <p className="mt-2 text-sm text-slate-500">
-              Aquí verás créditos y débitos en orden. Solo se muestra cuando buscas
-              por correo.
+              Aquí verás créditos y débitos en orden. Solo se muestra cuando
+              buscas por correo.
             </p>
           </div>
 
@@ -767,11 +813,13 @@ export default function AdminWalletPage() {
             </div>
           ) : !hasTransactionSearch ? (
             <div className="px-5 py-8 text-sm text-slate-500">
-              Escribe el correo del cliente para ver su historial de transacciones.
+              Escribe el correo del cliente para ver su historial de
+              transacciones.
             </div>
           ) : filteredClientTransactions.length === 0 ? (
             <div className="px-5 py-8 text-sm text-slate-500">
-              No se encontraron transacciones para ese correo con ese rango de fechas.
+              No se encontraron transacciones para ese correo con ese rango de
+              fechas.
             </div>
           ) : (
             <>
@@ -824,7 +872,7 @@ export default function AdminWalletPage() {
                               : "text-rose-600"
                           }`}
                         >
-                          {formatMoney(transaction.amount)}
+                          {formatSignedMoney(transaction.type, transaction.amount)}
                         </p>
                       </div>
 

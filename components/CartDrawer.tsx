@@ -550,6 +550,7 @@ export default function CartDrawer() {
       }
 
       let createdOrderId: string | null = orderData.id;
+      let createdWalletTransactionId: string | null = null;
       let balanceDiscounted = false;
       const assignedLicenseIds: string[] = [];
       const updatedVariantStockIds = new Set<string>();
@@ -588,6 +589,13 @@ export default function CartDrawer() {
             .in("id", assignedLicenseIds);
         }
 
+        if (createdWalletTransactionId) {
+          await supabase
+            .from("wallet_transactions")
+            .delete()
+            .eq("id", createdWalletTransactionId);
+        }
+
         if (createdOrderId) {
           await supabase.from("orders").delete().eq("id", createdOrderId);
         }
@@ -616,6 +624,38 @@ export default function CartDrawer() {
       }
 
       balanceDiscounted = true;
+
+      const purchaseNote =
+        totalItems === 1
+          ? `Compra del pedido #${orderNumber}`
+          : `Compra de ${totalItems} producto(s) en el pedido #${orderNumber}`;
+
+      const { data: walletTransactionData, error: walletTransactionError } =
+        await supabase
+          .from("wallet_transactions")
+          .insert([
+            {
+              user_id: user.id,
+              type: "debit",
+              amount: validatedTotal,
+              note: purchaseNote,
+            },
+          ])
+          .select("id")
+          .single();
+
+      if (walletTransactionError || !walletTransactionData) {
+        await rollbackPurchase();
+        setMessage(
+          walletTransactionError?.message ||
+            "No se pudo registrar la transacción de compra."
+        );
+        resetSlider();
+        setProcessing(false);
+        return;
+      }
+
+      createdWalletTransactionId = walletTransactionData.id;
 
       const createdOrderItems: CreatedOrderItemRow[] = [];
       const orderItemsByKey = new Map<string, CreatedOrderItemRow>();
