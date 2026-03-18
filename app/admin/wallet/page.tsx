@@ -3,15 +3,11 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { supabase } from "../../../lib/supabase";
 
-type WalletRow = {
-  id: string;
-  balance: number | null;
-};
-
 type ProfileRow = {
   id: string;
   email: string | null;
   full_name: string | null;
+  balance: number | null;
 };
 
 type TransactionRow = {
@@ -20,6 +16,8 @@ type TransactionRow = {
   type: string | null;
   amount: number | null;
   created_at: string | null;
+  note?: string | null;
+  description?: string | null;
 };
 
 type FormattedTransaction = {
@@ -30,6 +28,8 @@ type FormattedTransaction = {
   type: string;
   amount: number;
   created_at: string;
+  note?: string | null;
+  description?: string | null;
 };
 
 type BannerState = {
@@ -157,7 +157,7 @@ export default function AdminWalletPage() {
 
     const { data: transactionsData, error: transactionsError } = await supabase
       .from("wallet_transactions")
-      .select("id, user_id, type, amount, created_at")
+      .select("id, user_id, type, amount, created_at, note, description")
       .order("created_at", { ascending: false });
 
     if (transactionsError) {
@@ -176,7 +176,7 @@ export default function AdminWalletPage() {
     if (userIds.length > 0) {
       const { data } = await supabase
         .from("profiles")
-        .select("id, email, full_name")
+        .select("id, email, full_name, balance")
         .in("id", userIds);
 
       profilesData = (data as ProfileRow[]) || [];
@@ -200,6 +200,8 @@ export default function AdminWalletPage() {
         type: transaction.type || "movement",
         amount: Number(transaction.amount || 0),
         created_at: transaction.created_at || "",
+        note: transaction.note || null,
+        description: transaction.description || null,
       };
     });
 
@@ -269,7 +271,7 @@ export default function AdminWalletPage() {
     setSubmitting(true);
     setBanner(null);
 
-    const cleanEmail = email.trim();
+    const cleanEmail = email.trim().toLowerCase();
     const numericAmount = Number(amount);
 
     if (!cleanEmail || !numericAmount || numericAmount <= 0) {
@@ -283,7 +285,7 @@ export default function AdminWalletPage() {
 
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("id, email")
+      .select("id, email, balance")
       .ilike("email", cleanEmail)
       .single();
 
@@ -296,22 +298,7 @@ export default function AdminWalletPage() {
       return;
     }
 
-    const { data: wallet, error: walletError } = await supabase
-      .from("wallets")
-      .select("id, balance")
-      .eq("user_id", profile.id)
-      .single();
-
-    if (walletError || !wallet) {
-      setBanner({
-        kind: "error",
-        text: "Wallet no encontrada.",
-      });
-      setSubmitting(false);
-      return;
-    }
-
-    const currentBalance = Number((wallet as WalletRow).balance || 0);
+    const currentBalance = Number(profile.balance || 0);
 
     if (movementType === "debit" && currentBalance < numericAmount) {
       setBanner({
@@ -330,9 +317,9 @@ export default function AdminWalletPage() {
         : currentBalance - numericAmount;
 
     const { error: updateError } = await supabase
-      .from("wallets")
+      .from("profiles")
       .update({ balance: newBalance })
-      .eq("user_id", profile.id);
+      .eq("id", profile.id);
 
     if (updateError) {
       setBanner({
@@ -343,22 +330,26 @@ export default function AdminWalletPage() {
       return;
     }
 
-    const signedAmount =
-      movementType === "debit" ? -numericAmount : numericAmount;
+    const movementLabel =
+      movementType === "credit"
+        ? "Recarga manual desde admin"
+        : "Débito manual desde admin";
 
     const { error: txError } = await supabase
       .from("wallet_transactions")
       .insert({
         user_id: profile.id,
         type: movementType,
-        amount: signedAmount,
+        amount: numericAmount,
+        note: movementLabel,
+        description: movementLabel,
       });
 
     if (txError) {
       await supabase
-        .from("wallets")
+        .from("profiles")
         .update({ balance: currentBalance })
-        .eq("user_id", profile.id);
+        .eq("id", profile.id);
 
       setBanner({
         kind: "error",
@@ -395,22 +386,22 @@ export default function AdminWalletPage() {
     setRevertingId(transaction.id);
     setBanner(null);
 
-    const { data: wallet, error: walletError } = await supabase
-      .from("wallets")
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
       .select("id, balance")
-      .eq("user_id", transaction.user_id)
+      .eq("id", transaction.user_id)
       .single();
 
-    if (walletError || !wallet) {
+    if (profileError || !profile) {
       setBanner({
         kind: "error",
-        text: "No se encontró la wallet del cliente.",
+        text: "No se encontró el perfil del cliente.",
       });
       setRevertingId(null);
       return;
     }
 
-    const currentBalance = Number((wallet as WalletRow).balance || 0);
+    const currentBalance = Number(profile.balance || 0);
     const rechargeAmount = Math.abs(Number(transaction.amount || 0));
 
     if (currentBalance < rechargeAmount) {
@@ -427,9 +418,9 @@ export default function AdminWalletPage() {
     const newBalance = currentBalance - rechargeAmount;
 
     const { error: updateError } = await supabase
-      .from("wallets")
+      .from("profiles")
       .update({ balance: newBalance })
-      .eq("user_id", transaction.user_id);
+      .eq("id", transaction.user_id);
 
     if (updateError) {
       setBanner({
@@ -440,21 +431,25 @@ export default function AdminWalletPage() {
       return;
     }
 
+    const reverseLabel = "Reversa manual de recarga";
+
     const { data: debitInserted, error: insertDebitError } = await supabase
       .from("wallet_transactions")
       .insert({
         user_id: transaction.user_id,
         type: "debit",
-        amount: -rechargeAmount,
+        amount: rechargeAmount,
+        note: reverseLabel,
+        description: `${reverseLabel} (${transaction.id})`,
       })
       .select("id")
       .single();
 
     if (insertDebitError) {
       await supabase
-        .from("wallets")
+        .from("profiles")
         .update({ balance: currentBalance })
-        .eq("user_id", transaction.user_id);
+        .eq("id", transaction.user_id);
 
       setBanner({
         kind: "error",
@@ -471,9 +466,9 @@ export default function AdminWalletPage() {
 
     if (deleteError) {
       await supabase
-        .from("wallets")
+        .from("profiles")
         .update({ balance: currentBalance })
-        .eq("user_id", transaction.user_id);
+        .eq("id", transaction.user_id);
 
       if (debitInserted?.id) {
         await supabase
