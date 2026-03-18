@@ -48,6 +48,7 @@ export default function AuthGuard({
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
       setIsLoggedIn(!!session?.user);
       setCheckingAuth(false);
     });
@@ -71,13 +72,14 @@ export default function AuthGuard({
     }
   }, [checkingAuth, isLoggedIn]);
 
+  const allowedPaths = useMemo(() => ["/", "/login", "/register"], []);
+
   const isAuthBlocked = useMemo(() => {
-    if (checkingAuth) return true;
+    if (checkingAuth) return false;
     if (isLoggedIn) return false;
 
-    const allowedPaths = ["/", "/login", "/register"];
     return allowedPaths.includes(pathname);
-  }, [checkingAuth, isLoggedIn, pathname]);
+  }, [checkingAuth, isLoggedIn, pathname, allowedPaths]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -235,7 +237,7 @@ export default function AuthGuard({
       <div
         className={
           !checkingAuth && !isLoggedIn
-            ? "pointer-events-none select-none blur-[px] brightness-75 transition duration-300"
+            ? "pointer-events-none select-none brightness-75 transition duration-300"
             : "transition duration-300"
         }
         aria-hidden={!checkingAuth && !isLoggedIn}

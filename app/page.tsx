@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { useCart } from "../context/CartContext";
 
+
 type ProductType = "simple" | "variable" | "composite";
 
 type Product = {
@@ -37,6 +38,7 @@ type CategoryItem = {
 };
 
 export default function HomePage() {
+  
   const { addToCart } = useCart();
 
   const [products, setProducts] = useState<Product[]>([]);
@@ -57,6 +59,11 @@ export default function HomePage() {
     fetchProducts();
     fetchRole();
   }, []);
+
+    const formatPrice = (value: number | string | null | undefined) => {
+    const numericValue = Math.round(Number(value || 0));
+    return numericValue.toLocaleString("es-CO");
+  };
 
   useEffect(() => {
     if (!quickViewProduct) return;
@@ -558,8 +565,9 @@ export default function HomePage() {
                             <p className="text-[10px] uppercase tracking-[0.18em] text-white/30">
                               Precio
                             </p>
+                            
                             <p className="mt-1 text-xl font-black text-white md:text-2xl">
-                              ${Number(visiblePrice).toLocaleString()}
+                             ${formatPrice(visiblePrice)}
                             </p>
 
                             {isAdmin && (
@@ -661,7 +669,7 @@ export default function HomePage() {
                           Precio
                         </p>
                         <p className="mt-2 text-4xl font-black text-white sm:text-5xl md:text-6xl">
-                          ${Number(quickViewPrice).toLocaleString()}
+                         ${formatPrice(quickViewPrice)}
                         </p>
                       </div>
 

@@ -165,11 +165,22 @@ export default function Navbar() {
               </div>
             </>
           ) : (
-            <Link href="/" className="inline-block leading-none">
-              <span className="inline-block text-[20px] font-extrabold tracking-[0.01em] text-white sm:text-[24px] md:text-[30px]">
-                STREAMINGMAYOR
-              </span>
-            </Link>
+            <>
+              <div
+                className="block md:hidden"
+                style={{
+                  width: `${logoWidthMobile}px`,
+                  height: `${logoHeightMobile}px`,
+                }}
+              />
+              <div
+                className="hidden md:block"
+                style={{
+                  width: `${logoWidthDesktop}px`,
+                  height: `${logoHeightDesktop}px`,
+                }}
+              />
+            </>
           )}
         </div>
 
@@ -180,7 +191,7 @@ export default function Navbar() {
             </Link>
 
             {isAdmin && (
-              <Link href="/admin/orders" className={navLinkClass("/admin/orders")}>
+              <Link href="/admin/products" className={navLinkClass("/admin/products")}>
                 Admin
               </Link>
             )}

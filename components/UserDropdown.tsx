@@ -165,10 +165,10 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
 
               {isAdmin && (
                 <Link
-                  href="/admin"
-                  onClick={() => setOpen(false)}
-                  className="flex items-center gap-3 rounded-2xl px-3 py-3 text-[14px] font-medium text-white/85 transition hover:bg-white/[0.05] hover:text-white md:text-[15px]"
-                >
+                    href="/admin/products"
+                    onClick={() => setOpen(false)}
+                     className="flex items-center gap-3 rounded-2xl px-3 py-3 text-[14px] font-medium text-white/85 transition hover:bg-white/[0.05] hover:text-white md:text-[15px]"
+                   >
                   <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/[0.04]">
                     <svg
                       viewBox="0 0 24 24"

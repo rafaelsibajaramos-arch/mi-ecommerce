@@ -3,6 +3,7 @@
 import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import { supabase } from "../../../lib/supabase";
 
+
 type SiteSettingsRow = {
   id: string;
   timezone: string;
