@@ -5,6 +5,7 @@ import CartDrawer from "../components/CartDrawer";
 import Navbar from "../components/Navbar";
 import ShootingStars from "../components/ShootingStars";
 import AuthGuard from "../components/AuthGuard";
+import SiteBrandingSync from "../components/SiteBrandingSync";
 
 export const metadata: Metadata = {
   title: "StreamingMayor",
@@ -39,6 +40,7 @@ export default function RootLayout({
 
         <CartProvider>
           <AuthGuard>
+            <SiteBrandingSync />
             <Navbar />
             <div className="relative z-10">{children}</div>
             <CartDrawer />

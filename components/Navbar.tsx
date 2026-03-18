@@ -1,11 +1,20 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useCart } from "../context/CartContext";
 import { supabase } from "../lib/supabase";
 import { useEffect, useState } from "react";
 import UserDropdown from "@/components/UserDropdown";
+
+type SiteSettingsRow = {
+  navbar_logo_url: string | null;
+  navbar_logo_width_desktop: number | null;
+  navbar_logo_height_desktop: number | null;
+  navbar_logo_width_mobile: number | null;
+  navbar_logo_height_mobile: number | null;
+};
 
 export default function Navbar() {
   const { cart, openCart } = useCart();
@@ -14,15 +23,23 @@ export default function Navbar() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
 
+  const [navbarLogoUrl, setNavbarLogoUrl] = useState("");
+  const [logoWidthDesktop, setLogoWidthDesktop] = useState(290);
+  const [logoHeightDesktop, setLogoHeightDesktop] = useState(46);
+  const [logoWidthMobile, setLogoWidthMobile] = useState(180);
+  const [logoHeightMobile, setLogoHeightMobile] = useState(34);
+
   const totalItems = cart.reduce((acc, item) => acc + item.quantity, 0);
 
   useEffect(() => {
     checkSessionAndRole();
+    loadBranding();
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(() => {
       checkSessionAndRole();
+      loadBranding();
     });
 
     return () => {
@@ -30,7 +47,31 @@ export default function Navbar() {
     };
   }, []);
 
-  const checkSessionAndRole = async () => {
+  async function loadBranding() {
+    const { data, error } = await supabase
+      .from("site_settings")
+      .select(
+        "navbar_logo_url, navbar_logo_width_desktop, navbar_logo_height_desktop, navbar_logo_width_mobile, navbar_logo_height_mobile"
+      )
+      .order("updated_at", { ascending: false })
+      .limit(1);
+
+    if (error) {
+      console.error("Error cargando branding:", error);
+      return;
+    }
+
+    const row = data?.[0] as SiteSettingsRow | undefined;
+    if (!row) return;
+
+    setNavbarLogoUrl(row.navbar_logo_url || "");
+    setLogoWidthDesktop(row.navbar_logo_width_desktop || 290);
+    setLogoHeightDesktop(row.navbar_logo_height_desktop || 46);
+    setLogoWidthMobile(row.navbar_logo_width_mobile || 180);
+    setLogoHeightMobile(row.navbar_logo_height_mobile || 34);
+  }
+
+  async function checkSessionAndRole() {
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -50,7 +91,7 @@ export default function Navbar() {
       .single();
 
     setIsAdmin(data?.role === "admin");
-  };
+  }
 
   const navLinkClass = (href: string) =>
     pathname === href
@@ -60,12 +101,77 @@ export default function Navbar() {
   return (
     <header className="sticky top-0 z-50 w-full border-b border-white/10 bg-black/80 backdrop-blur-xl">
       <div className="mx-auto flex h-[70px] max-w-7xl items-center justify-between px-4 md:h-[76px] md:px-6">
-        <Link
-          href="/"
-          className="text-[20px] font-extrabold tracking-[0.01em] text-white sm:text-[24px] md:text-[30px]"
-        >
-          STREAMINGMAYOR
-        </Link>
+        <div className="shrink-0">
+          {navbarLogoUrl ? (
+            <>
+              <div
+                className="relative md:hidden"
+                style={{
+                  width: `${logoWidthMobile}px`,
+                  height: `${logoHeightMobile}px`,
+                }}
+              >
+                <div className="pointer-events-none absolute inset-0">
+                  <Image
+                    src={navbarLogoUrl}
+                    alt="StreamingMayor"
+                    fill
+                    className="object-contain object-left"
+                    sizes="180px"
+                    priority
+                    unoptimized
+                  />
+                </div>
+
+                <Link
+                  href="/"
+                  aria-label="Ir al inicio"
+                  className="absolute left-0 top-0 z-10 block"
+                  style={{
+                    width: `${logoWidthMobile}px`,
+                    height: `${Math.min(70, logoHeightMobile)}px`,
+                  }}
+                />
+              </div>
+
+              <div
+                className="relative hidden md:block"
+                style={{
+                  width: `${logoWidthDesktop}px`,
+                  height: `${logoHeightDesktop}px`,
+                }}
+              >
+                <div className="pointer-events-none absolute inset-0">
+                  <Image
+                    src={navbarLogoUrl}
+                    alt="StreamingMayor"
+                    fill
+                    className="object-contain object-left"
+                    sizes="290px"
+                    priority
+                    unoptimized
+                  />
+                </div>
+
+                <Link
+                  href="/"
+                  aria-label="Ir al inicio"
+                  className="absolute left-0 top-0 z-10 block"
+                  style={{
+                    width: `${logoWidthDesktop}px`,
+                    height: `${Math.min(76, logoHeightDesktop)}px`,
+                  }}
+                />
+              </div>
+            </>
+          ) : (
+            <Link href="/" className="inline-block leading-none">
+              <span className="inline-block text-[20px] font-extrabold tracking-[0.01em] text-white sm:text-[24px] md:text-[30px]">
+                STREAMINGMAYOR
+              </span>
+            </Link>
+          )}
+        </div>
 
         {isLoggedIn && (
           <nav className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-6 lg:flex">
@@ -74,7 +180,7 @@ export default function Navbar() {
             </Link>
 
             {isAdmin && (
-              <Link href="/admin" className={navLinkClass("/admin")}>
+              <Link href="/admin/orders" className={navLinkClass("/admin/orders")}>
                 Admin
               </Link>
             )}

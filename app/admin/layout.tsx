@@ -1,10 +1,22 @@
-import { ReactNode } from "react";
-import AdminLayoutShell from "../../components/admin/AdminLayoutShell";
+"use client";
+
+import type { ReactNode } from "react";
+import AdminSidebar from "../../components/admin/AdminSidebar";
 
 export default function AdminLayout({
   children,
 }: {
   children: ReactNode;
 }) {
-  return <AdminLayoutShell>{children}</AdminLayoutShell>;
+  return (
+    <main className="min-h-screen bg-[#f4f6fb] text-[#0f172a]">
+      <div className="flex min-h-screen">
+        <AdminSidebar />
+
+        <section className="min-w-0 flex-1">
+          <div className="px-4 py-4 sm:px-6 sm:py-6 lg:px-8">{children}</div>
+        </section>
+      </div>
+    </main>
+  );
 }
