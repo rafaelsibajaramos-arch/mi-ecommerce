@@ -1,179 +1,196 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useMemo, useState } from "react";
-import {
-  Package,
-  ShoppingCart,
-  Users,
-  Wallet,
-  Settings,
-  Menu,
-  X,
-  ChevronRight,
-} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { supabase } from "../../lib/supabase";
 
-const menuItems = [
-  { name: "Productos", href: "/admin/products", icon: Package },
-  { name: "Pedidos", href: "/admin/orders", icon: ShoppingCart },
-  { name: "Usuarios", href: "/admin/users", icon: Users },
-  { name: "Saldo", href: "/admin/balance", icon: Wallet },
-  { name: "Ajustes", href: "/admin/settings", icon: Settings },
+const adminLinks = [
+  { href: "/admin/orders", label: "Pedidos" },
+  { href: "/admin/products", label: "Productos" },
+  { href: "/admin/licenses", label: "Licencias" },
+  { href: "/admin/users", label: "Usuarios" },
+  { href: "/admin/wallet", label: "Wallet" },
 ];
 
 export default function AdminSidebar() {
+  const router = useRouter();
   const pathname = usePathname();
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const [open, setOpen] = useState(false);
 
-  const activeItem = useMemo(() => {
-    return (
-      menuItems.find(
-        (item) => pathname === item.href || pathname.startsWith(item.href + "/")
-      ) || menuItems[1]
-    );
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.push("/login");
+    router.refresh();
+  };
+
+  useEffect(() => {
+    setOpen(false);
   }, [pathname]);
+
+  useEffect(() => {
+    document.body.style.overflow = open ? "hidden" : "";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [open]);
+
+  const currentSection = useMemo(() => {
+    const current = adminLinks.find((item) => {
+      if (item.href === "/admin/orders") {
+        return pathname === "/admin" || pathname === "/admin/orders";
+      }
+      return pathname === item.href || pathname.startsWith(`${item.href}/`);
+    });
+
+    return current?.label || "Panel admin";
+  }, [pathname]);
+
+  const isActive = (href: string) => {
+    if (href === "/admin/orders") {
+      return pathname === "/admin" || pathname === "/admin/orders";
+    }
+
+    return pathname === href || pathname.startsWith(`${href}/`);
+  };
+
+  const navClass = (href: string) =>
+    isActive(href)
+      ? "flex items-center rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-[#050816] shadow-sm"
+      : "flex items-center rounded-2xl px-4 py-3 text-sm font-medium text-white/72 transition hover:bg-white/10 hover:text-white";
 
   return (
     <>
-      <div className="sticky top-0 z-40 border-b border-black/5 bg-white/90 px-4 py-3 backdrop-blur xl:hidden">
-        <div className="flex items-center justify-between gap-3">
+      <div className="fixed inset-x-0 top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur lg:hidden">
+        <div className="flex items-center justify-between px-4 py-3 sm:px-6">
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
               StreamingMayor
             </p>
-            <p className="mt-1 truncate text-sm font-bold text-slate-900">
-              {activeItem.name}
+            <p className="truncate text-base font-extrabold text-slate-900">
+              {currentSection}
             </p>
           </div>
 
           <button
             type="button"
-            aria-label="Abrir menú admin"
-            onClick={() => setMobileOpen(true)}
-            className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:bg-slate-50"
+            onClick={() => setOpen(true)}
+            className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:bg-slate-50"
+            aria-label="Abrir menú"
           >
-            <Menu size={20} />
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-5 w-5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <line x1="4" y1="7" x2="20" y2="7" />
+              <line x1="4" y1="12" x2="20" y2="12" />
+              <line x1="4" y1="17" x2="20" y2="17" />
+            </svg>
           </button>
         </div>
       </div>
 
-      {mobileOpen && (
-        <div className="fixed inset-0 z-50 xl:hidden">
+      <div
+        onClick={() => setOpen(false)}
+        className={`fixed inset-0 z-40 bg-slate-950/55 transition-opacity duration-300 lg:hidden ${
+          open ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
+        }`}
+      />
+
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 flex w-[86vw] max-w-[320px] flex-col bg-[#050816] text-white shadow-2xl transition-transform duration-300 lg:hidden ${
+          open ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        <div className="flex items-center justify-between border-b border-white/10 px-5 py-5">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/45">
+              StreamingMayor
+            </p>
+            <h2 className="mt-1 text-xl font-extrabold">Panel admin</h2>
+          </div>
+
           <button
             type="button"
+            onClick={() => setOpen(false)}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-white/10 text-white transition hover:bg-white/15"
             aria-label="Cerrar menú"
-            onClick={() => setMobileOpen(false)}
-            className="absolute inset-0 bg-black/45 backdrop-blur-[2px]"
-          />
-
-          <aside className="absolute left-0 top-0 flex h-full w-[86%] max-w-[320px] flex-col border-r border-white/10 bg-[#08111f] text-white shadow-2xl">
-            <div className="flex items-start justify-between border-b border-white/10 px-5 py-5">
-              <div>
-                <p className="text-[11px] uppercase tracking-[0.28em] text-white/40">
-                  StreamingMayor
-                </p>
-                <h2 className="mt-3 text-2xl font-black">Admin</h2>
-                <p className="mt-1 text-sm text-white/55">
-                  Panel de control
-                </p>
-              </div>
-
-              <button
-                type="button"
-                aria-label="Cerrar menú"
-                onClick={() => setMobileOpen(false)}
-                className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 text-white/80 transition hover:bg-white/10"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-              {menuItems.map((item) => {
-                const Icon = item.icon;
-                const active =
-                  pathname === item.href || pathname.startsWith(item.href + "/");
-
-                return (
-                  <Link
-                    key={item.name}
-                    href={item.href}
-                    onClick={() => setMobileOpen(false)}
-                    className={`flex items-center gap-3 rounded-2xl px-4 py-3 transition ${
-                      active
-                        ? "bg-white text-[#08111f] shadow-sm"
-                        : "text-white/72 hover:bg-white/10 hover:text-white"
-                    }`}
-                  >
-                    <Icon size={18} />
-                    <span className="flex-1 text-sm font-semibold">
-                      {item.name}
-                    </span>
-                    <ChevronRight
-                      size={16}
-                      className={active ? "opacity-70" : "opacity-35"}
-                    />
-                  </Link>
-                );
-              })}
-            </nav>
-          </aside>
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-5 w-5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
         </div>
-      )}
 
-      <aside className="hidden xl:flex xl:min-h-screen xl:w-[248px] xl:flex-col xl:border-r xl:border-black/5 xl:bg-[#08111f] xl:text-white">
-        <div className="border-b border-white/10 px-6 py-7">
-          <p className="text-[11px] uppercase tracking-[0.28em] text-white/40">
+        <div className="flex-1 overflow-y-auto px-4 py-5">
+          <p className="mb-3 px-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-white/40">
+            Administración
+          </p>
+
+          <nav className="space-y-2">
+            {adminLinks.map((item) => (
+              <Link key={item.href} href={item.href} className={navClass(item.href)}>
+                {item.label}
+              </Link>
+            ))}
+          </nav>
+        </div>
+
+        <div className="border-t border-white/10 p-4">
+          <button
+            onClick={handleLogout}
+            className="w-full rounded-2xl bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/20"
+          >
+            Cerrar sesión
+          </button>
+        </div>
+      </aside>
+
+      <aside className="sticky top-0 hidden h-screen w-[280px] shrink-0 flex-col border-r border-slate-900/5 bg-[#050816] text-white lg:flex">
+        <div className="border-b border-white/10 px-6 py-6">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/40">
             StreamingMayor
           </p>
-          <h1 className="mt-3 text-[28px] font-black leading-none">Admin</h1>
-          <p className="mt-2 text-sm text-white/50">
-            Gestión simple y ordenada
-          </p>
+          <h2 className="mt-2 text-2xl font-extrabold">Panel admin</h2>
         </div>
 
-        <nav className="flex-1 space-y-1 px-3 py-5">
-          {menuItems.map((item) => {
-            const Icon = item.icon;
-            const active =
-              pathname === item.href || pathname.startsWith(item.href + "/");
+        <div className="flex-1 overflow-y-auto px-4 py-6">
+          <p className="mb-3 px-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-white/40">
+            Administración
+          </p>
 
-            return (
-              <Link
-                key={item.name}
-                href={item.href}
-                className={`group flex items-center gap-3 rounded-2xl px-4 py-3 transition ${
-                  active
-                    ? "bg-white text-[#08111f] shadow-sm"
-                    : "text-white/70 hover:bg-white/10 hover:text-white"
-                }`}
-              >
-                <Icon size={18} />
-                <span className="flex-1 text-sm font-semibold">{item.name}</span>
-                <ChevronRight
-                  size={16}
-                  className={`transition ${
-                    active ? "opacity-70" : "opacity-0 group-hover:opacity-40"
-                  }`}
-                />
+          <nav className="space-y-2">
+            {adminLinks.map((item) => (
+              <Link key={item.href} href={item.href} className={navClass(item.href)}>
+                {item.label}
               </Link>
-            );
-          })}
-        </nav>
+            ))}
+          </nav>
+        </div>
 
-        <div className="border-t border-white/10 px-4 py-4">
-          <div className="rounded-2xl bg-white/5 px-4 py-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-white/35">
-              Configuración
-            </p>
-            <p className="mt-2 text-sm font-semibold text-white/90">
-              Panel administrativo
-            </p>
-            <p className="mt-1 text-xs text-white/45">
-              Diseño limpio y responsive
-            </p>
-          </div>
+        <div className="border-t border-white/10 p-4">
+          <button
+            onClick={handleLogout}
+            className="w-full rounded-2xl bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/20"
+          >
+            Cerrar sesión
+          </button>
         </div>
       </aside>
     </>

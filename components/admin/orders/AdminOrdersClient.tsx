@@ -170,7 +170,9 @@ export default function AdminOrdersClient() {
     if (orderIds.length > 0) {
       const { data, error } = await supabase
         .from("order_items")
-        .select("id, order_id, product_id, quantity, unit_price, product_name, variant_name")
+        .select(
+          "id, order_id, product_id, quantity, unit_price, product_name, variant_name"
+        )
         .in("order_id", orderIds);
 
       if (error) {
@@ -222,7 +224,7 @@ export default function AdminOrdersClient() {
       const orderLicenses: FormattedLicense[] = licensesData
         .filter((license) => license.assigned_order_id === order.id)
         .map((license) => {
-          let matchedItem =
+          const matchedItem =
             orderItems.find((item) => item.id === license.assigned_order_item_id) ||
             orderItems.find((item) => item.product_id === license.product_id);
 
@@ -277,193 +279,239 @@ export default function AdminOrdersClient() {
     if (!term) return orders;
 
     return orders.filter((order) => {
-      const email = (order.customer_email || "").toLowerCase();
-      const licenseText = order.licenses
+      const idText = (order.id || "").toLowerCase();
+      const numberText = String(order.order_number || "").toLowerCase();
+      const emailText = (order.customer_email || "").toLowerCase();
+      const licensesText = order.licenses
         .map(
           (license) =>
-            `${license.license_text} ${license.product_name || ""} ${license.variant_name || ""}`.toLowerCase()
+            `${license.license_text} ${license.product_name || ""} ${
+              license.variant_name || ""
+            }`.toLowerCase()
         )
         .join(" ");
 
-      return email.includes(term) || licenseText.includes(term);
+      return (
+        idText.includes(term) ||
+        numberText.includes(term) ||
+        emailText.includes(term) ||
+        licensesText.includes(term)
+      );
     });
   }, [orders, search]);
 
+  const totalRevenue = useMemo(() => {
+    return orders.reduce((acc, order) => acc + Number(order.total || 0), 0);
+  }, [orders]);
+
+  const totalLicenses = useMemo(() => {
+    return orders.reduce((acc, order) => acc + order.licenses.length, 0);
+  }, [orders]);
+
   return (
     <>
-      <main className="min-h-screen bg-[radial-gradient(circle_at_top,_#1a1a1a_0%,_#0b0b0b_45%,_#000000_100%)] text-white">
-        <section className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-          <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-            <div>
-              <p className="text-sm uppercase tracking-[0.2em] text-white/45">
-                Administración
-              </p>
-              <h1 className="mt-2 text-3xl font-black tracking-tight text-white md:text-4xl">
-                Pedidos
-              </h1>
-              <p className="mt-2 text-white/60">
-                Revisa compras, correos del cliente, licencias entregadas y comprobantes.
-              </p>
-            </div>
-
-            <div className="w-full md:max-w-md">
-              <label className="mb-2 block text-sm font-medium text-white/65">
-                Buscar pedido
-              </label>
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar por correo o licencias entregadas"
-                className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-white/20"
-              />
-            </div>
+      <section className="space-y-6 text-slate-900">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              Administración
+            </p>
+            <h1 className="mt-2 text-3xl font-extrabold tracking-tight text-slate-900 sm:text-4xl">
+              Pedidos
+            </h1>
+            <p className="mt-2 text-sm text-slate-600 sm:text-base">
+              Revisa compras, correos del cliente, licencias entregadas y comprobantes.
+            </p>
           </div>
 
-          <div className="mb-5 flex justify-end">
-            <button
-              onClick={loadOrders}
-              className="rounded-2xl border border-white/15 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/15"
-            >
-              Recargar
-            </button>
+          <div className="w-full lg:max-w-md">
+            <label className="mb-2 block text-sm font-medium text-slate-600">
+              Buscar pedido
+            </label>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar por ID, número, correo o licencia"
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Pedidos
+            </p>
+            <p className="mt-3 text-3xl font-extrabold text-slate-900">
+              {orders.length}
+            </p>
           </div>
 
-          <div className="rounded-[28px] border border-white/10 bg-white/5 shadow-sm backdrop-blur-xl">
-            <div className="hidden grid-cols-5 gap-4 border-b border-white/10 px-6 py-4 text-sm font-semibold text-white/55 xl:grid">
-              <span>Pedido</span>
-              <span>Correo cliente</span>
-              <span>Fecha compra</span>
-              <span>Total</span>
-              <span className="text-right">Comprobante</span>
+          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Facturación
+            </p>
+            <p className="mt-3 text-3xl font-extrabold text-slate-900">
+              {formatMoney(totalRevenue)}
+            </p>
+          </div>
+
+          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Licencias entregadas
+            </p>
+            <p className="mt-3 text-3xl font-extrabold text-slate-900">
+              {totalLicenses}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex justify-end">
+          <button
+            onClick={loadOrders}
+            className="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+          >
+            Recargar
+          </button>
+        </div>
+
+        <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
+          <div className="hidden grid-cols-[0.9fr_1.2fr_1fr_0.9fr_0.9fr] gap-4 border-b border-slate-200 px-6 py-4 text-sm font-semibold text-slate-500 lg:grid">
+            <span>Pedido</span>
+            <span>Cliente</span>
+            <span>Fecha</span>
+            <span>Total</span>
+            <span className="text-right">Acción</span>
+          </div>
+
+          {loading ? (
+            <div className="px-6 py-10 text-slate-500">Cargando pedidos...</div>
+          ) : error ? (
+            <div className="px-6 py-10 text-red-600">{error}</div>
+          ) : filteredOrders.length === 0 ? (
+            <div className="px-6 py-10 text-slate-500">
+              No se encontraron pedidos con ese criterio.
             </div>
+          ) : (
+            <div className="divide-y divide-slate-200">
+              {filteredOrders.map((order) => (
+                <div key={order.id} className="px-5 py-5 md:px-6">
+                  <div className="grid gap-4 lg:grid-cols-[0.9fr_1.2fr_1fr_0.9fr_0.9fr] lg:items-start">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 lg:hidden">
+                        Pedido
+                      </p>
+                      <p className="text-sm font-bold text-slate-900">
+                        #{formatOrderNumber(order.order_number)}
+                      </p>
+                      <p className="mt-1 break-all text-xs text-slate-500">
+                        {order.id}
+                      </p>
+                    </div>
 
-            {loading ? (
-              <div className="px-6 py-10 text-white/60">Cargando pedidos...</div>
-            ) : error ? (
-              <div className="px-6 py-10 text-red-300">{error}</div>
-            ) : filteredOrders.length === 0 ? (
-              <div className="px-6 py-10 text-white/60">
-                No se encontraron pedidos con ese criterio.
-              </div>
-            ) : (
-              <div className="divide-y divide-white/10">
-                {filteredOrders.map((order) => (
-                  <div key={order.id} className="px-5 py-5 md:px-6">
-                    <div className="grid gap-4 xl:grid-cols-5 xl:items-start">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/40 xl:hidden">
-                          Pedido
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 lg:hidden">
+                        Cliente
+                      </p>
+                      <p className="break-all text-sm font-medium text-slate-800">
+                        {order.customer_email}
+                      </p>
+                      {order.customer_name && (
+                        <p className="mt-1 text-xs text-slate-500">
+                          {order.customer_name}
                         </p>
-                        <p className="text-sm font-bold text-white">
-                          #{formatOrderNumber(order.order_number)}
-                        </p>
-                      </div>
+                      )}
 
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/40 xl:hidden">
-                          Correo cliente
+                      <div className="mt-3 space-y-1">
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                          Licencias
                         </p>
-                        <p className="break-all text-sm font-medium text-white/85">
-                          {order.customer_email}
-                        </p>
-                        {order.customer_name && (
-                          <p className="mt-1 text-xs text-white/45">
-                            {order.customer_name}
-                          </p>
+                        {order.licenses.length === 0 ? (
+                          <p className="text-sm text-slate-500">Sin licencias</p>
+                        ) : (
+                          <>
+                            <p className="text-sm font-semibold text-emerald-600">
+                              {order.licenses.length} licencia
+                              {order.licenses.length > 1 ? "s" : ""}
+                            </p>
+
+                            {order.licenses.slice(0, 2).map((license) => (
+                              <div
+                                key={license.id}
+                                className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2"
+                              >
+                                <p className="text-xs font-semibold text-slate-700">
+                                  {license.product_name}
+                                  {license.variant_name
+                                    ? ` - ${license.variant_name}`
+                                    : ""}
+                                </p>
+                                <p className="mt-1 break-all text-xs text-slate-600">
+                                  {truncateLicense(license.license_text)}
+                                </p>
+                              </div>
+                            ))}
+
+                            {order.licenses.length > 2 && (
+                              <p className="text-xs text-slate-500">
+                                +{order.licenses.length - 2} más
+                              </p>
+                            )}
+                          </>
                         )}
                       </div>
+                    </div>
 
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/40 xl:hidden">
-                          Fecha compra
-                        </p>
-                        <p className="text-sm text-white/75">
-                          {formatDate(order.created_at)}
-                        </p>
-                      </div>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 lg:hidden">
+                        Fecha
+                      </p>
+                      <p className="text-sm text-slate-700">
+                        {formatDate(order.created_at)}
+                      </p>
+                    </div>
 
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/40 xl:hidden">
-                          Total
-                        </p>
-                        <p className="text-sm font-bold text-white">
-                          {formatMoney(order.total)}
-                        </p>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 lg:hidden">
+                        Total
+                      </p>
+                      <p className="text-sm font-bold text-slate-900">
+                        {formatMoney(order.total)}
+                      </p>
+                    </div>
 
-                        <div className="mt-3 space-y-2">
-                          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/40">
-                            Licencias entregadas
-                          </p>
-
-                          {order.licenses.length === 0 ? (
-                            <p className="text-sm text-white/45">Sin licencias</p>
-                          ) : (
-                            <>
-                              <p className="text-sm font-semibold text-emerald-300">
-                                {order.licenses.length} licencia
-                                {order.licenses.length > 1 ? "s" : ""}
-                              </p>
-
-                              <div className="space-y-1">
-                                {order.licenses.slice(0, 2).map((license) => (
-                                  <div
-                                    key={license.id}
-                                    className="rounded-xl border border-white/10 bg-black/20 px-3 py-2"
-                                  >
-                                    <p className="text-xs font-semibold text-white/65">
-                                      {license.product_name}
-                                      {license.variant_name ? ` - ${license.variant_name}` : ""}
-                                    </p>
-                                    <p className="mt-1 break-all text-xs text-white/80">
-                                      {truncateLicense(license.license_text)}
-                                    </p>
-                                  </div>
-                                ))}
-
-                                {order.licenses.length > 2 && (
-                                  <p className="text-xs text-white/45">
-                                    +{order.licenses.length - 2} más
-                                  </p>
-                                )}
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="flex items-start justify-start xl:justify-end">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedOrder(order)}
-                          className="rounded-2xl border border-white/15 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/15"
-                        >
-                          Ver comprobante
-                        </button>
-                      </div>
+                    <div className="flex items-start justify-start lg:justify-end">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedOrder(order)}
+                        className="rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700"
+                      >
+                        Ver comprobante
+                      </button>
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </section>
-      </main>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
 
       {selectedOrder && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4">
           <div
-            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
             onClick={() => setSelectedOrder(null)}
           />
 
-          <div className="relative z-10 w-full max-w-5xl overflow-hidden rounded-[28px] border border-white/10 bg-[#0c0c0c] text-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-white/10 px-4 py-4 md:px-6">
+          <div className="relative z-10 w-full max-w-5xl overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-4 md:px-6">
               <div>
-                <h3 className="text-xl font-black md:text-2xl">
+                <h3 className="text-xl font-black text-slate-900 md:text-2xl">
                   Comprobante del pedido
                 </h3>
-                <p className="mt-1 text-sm text-white/50">
+                <p className="mt-1 text-sm text-slate-500">
                   Pedido #{formatOrderNumber(selectedOrder.order_number)}
                 </p>
               </div>
@@ -471,7 +519,7 @@ export default function AdminOrdersClient() {
               <button
                 type="button"
                 onClick={() => setSelectedOrder(null)}
-                className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 text-white/70 transition hover:bg-white/10"
+                className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-600 transition hover:bg-slate-100"
               >
                 ✕
               </button>
@@ -479,48 +527,48 @@ export default function AdminOrdersClient() {
 
             <div className="max-h-[85vh] overflow-y-auto p-4 md:p-6">
               <section className="grid gap-4 md:grid-cols-3 xl:grid-cols-4">
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-xs uppercase tracking-[0.14em] text-white/40">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs uppercase tracking-[0.14em] text-slate-400">
                     Número pedido
                   </p>
-                  <p className="mt-3 text-lg font-bold text-white">
+                  <p className="mt-3 text-lg font-bold text-slate-900">
                     #{formatOrderNumber(selectedOrder.order_number)}
                   </p>
                 </div>
 
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4 md:col-span-2 xl:col-span-1">
-                  <p className="text-xs uppercase tracking-[0.14em] text-white/40">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 md:col-span-2 xl:col-span-1">
+                  <p className="text-xs uppercase tracking-[0.14em] text-slate-400">
                     Cliente
                   </p>
-                  <p className="mt-3 break-all text-sm font-medium text-white">
+                  <p className="mt-3 break-all text-sm font-medium text-slate-900">
                     {selectedOrder.customer_email}
                   </p>
                 </div>
 
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-xs uppercase tracking-[0.14em] text-white/40">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs uppercase tracking-[0.14em] text-slate-400">
                     Fecha
                   </p>
-                  <p className="mt-3 text-sm text-white">
+                  <p className="mt-3 text-sm text-slate-900">
                     {formatDate(selectedOrder.created_at)}
                   </p>
                 </div>
 
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-xs uppercase tracking-[0.14em] text-white/40">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs uppercase tracking-[0.14em] text-slate-400">
                     Total
                   </p>
-                  <p className="mt-3 text-lg font-bold text-emerald-300">
+                  <p className="mt-3 text-lg font-bold text-emerald-600">
                     {formatMoney(selectedOrder.total)}
                   </p>
                 </div>
               </section>
 
-              <section className="mt-5 rounded-[24px] border border-white/10 bg-white/5 p-5">
-                <h4 className="text-lg font-bold text-white">Servicios comprados</h4>
+              <section className="mt-5 rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+                <h4 className="text-lg font-bold text-slate-900">Servicios comprados</h4>
 
                 {selectedOrder.items.length === 0 ? (
-                  <p className="mt-4 text-sm text-white/55">
+                  <p className="mt-4 text-sm text-slate-500">
                     Este pedido no tiene items asociados.
                   </p>
                 ) : (
@@ -528,21 +576,21 @@ export default function AdminOrdersClient() {
                     {selectedOrder.items.map((item) => (
                       <div
                         key={item.id}
-                        className="rounded-2xl border border-white/10 bg-black/20 p-4"
+                        className="rounded-2xl border border-slate-200 bg-white p-4"
                       >
                         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                           <div>
-                            <p className="text-base font-bold text-white">
+                            <p className="text-base font-bold text-slate-900">
                               {item.product_name}
                               {item.variant_name ? ` - ${item.variant_name}` : ""}
                             </p>
                           </div>
 
                           <div className="text-left md:text-right">
-                            <p className="text-sm text-white/55">
+                            <p className="text-sm text-slate-500">
                               Cantidad: {item.quantity}
                             </p>
-                            <p className="mt-1 text-base font-bold text-emerald-300">
+                            <p className="mt-1 text-base font-bold text-emerald-600">
                               {formatMoney(item.price * item.quantity)}
                             </p>
                           </div>
@@ -553,11 +601,11 @@ export default function AdminOrdersClient() {
                 )}
               </section>
 
-              <section className="mt-5 rounded-[24px] border border-white/10 bg-white/5 p-5">
-                <h4 className="text-lg font-bold text-white">Licencias entregadas</h4>
+              <section className="mt-5 rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+                <h4 className="text-lg font-bold text-slate-900">Licencias entregadas</h4>
 
                 {selectedOrder.licenses.length === 0 ? (
-                  <p className="mt-4 text-sm text-white/55">
+                  <p className="mt-4 text-sm text-slate-500">
                     Este pedido todavía no tiene licencias asociadas.
                   </p>
                 ) : (
@@ -565,18 +613,18 @@ export default function AdminOrdersClient() {
                     {selectedOrder.licenses.map((license) => (
                       <div
                         key={license.id}
-                        className="rounded-2xl border border-white/10 bg-black/20 p-4"
+                        className="rounded-2xl border border-slate-200 bg-white p-4"
                       >
-                        <p className="text-base font-bold text-white">
+                        <p className="text-base font-bold text-slate-900">
                           {license.product_name}
                           {license.variant_name ? ` - ${license.variant_name}` : ""}
                         </p>
 
-                        <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-4">
-                          <p className="text-xs uppercase tracking-[0.14em] text-white/40">
+                        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                          <p className="text-xs uppercase tracking-[0.14em] text-slate-400">
                             Licencia
                           </p>
-                          <p className="mt-3 break-all text-sm leading-6 text-white/85">
+                          <p className="mt-3 break-all text-sm leading-6 text-slate-700">
                             {license.license_text}
                           </p>
                         </div>
