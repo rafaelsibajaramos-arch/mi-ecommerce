@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { useCart } from "../context/CartContext";
+import Footer from "../components/Footer";
+import WhatsAppButton from "../components/WhatsAppButton";
 
 type ProductType = "simple" | "variable" | "composite";
 
@@ -616,6 +618,9 @@ export default function HomePage() {
           )}
         </section>
       </main>
+      
+        <Footer />
+      <WhatsAppButton />
 
       {quickViewProduct && (
         <div

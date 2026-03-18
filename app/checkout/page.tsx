@@ -28,8 +28,8 @@ export default function CheckoutPage() {
       )
       .join("%0A");
 
-    const message =
-      `Hola, quiero confirmar mi pedido en StreamingMayor:%0A%0A` +
+      const message =
+      `Hola, vengo desde StreamingMayor y quiero información.%0A%0A` +
       `Nombre: ${name}%0A` +
       `Correo: ${email}%0A` +
       `Teléfono: ${phone}%0A` +
