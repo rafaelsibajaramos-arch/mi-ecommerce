@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { useCart } from "../context/CartContext";
 
-
 type ProductType = "simple" | "variable" | "composite";
 
 type Product = {
@@ -18,6 +17,7 @@ type Product = {
   is_active: boolean;
   created_at?: string;
   product_type?: ProductType;
+  fallback_to_general_licenses?: boolean;
 };
 
 type ProductVariant = {
@@ -38,16 +38,15 @@ type CategoryItem = {
 };
 
 export default function HomePage() {
-  
   const { addToCart } = useCart();
 
   const [products, setProducts] = useState<Product[]>([]);
-  const [variantsMap, setVariantsMap] = useState<Record<string, ProductVariant[]>>(
-    {}
-  );
-  const [selectedVariants, setSelectedVariants] = useState<Record<string, string>>(
-    {}
-  );
+  const [variantsMap, setVariantsMap] = useState<
+    Record<string, ProductVariant[]>
+  >({});
+  const [selectedVariants, setSelectedVariants] = useState<
+    Record<string, string>
+  >({});
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("Todas");
   const [loading, setLoading] = useState(true);
@@ -60,7 +59,7 @@ export default function HomePage() {
     fetchRole();
   }, []);
 
-    const formatPrice = (value: number | string | null | undefined) => {
+  const formatPrice = (value: number | string | null | undefined) => {
     const numericValue = Math.round(Number(value || 0));
     return numericValue.toLocaleString("es-CO");
   };
@@ -214,8 +213,15 @@ export default function HomePage() {
   const getVisibleStock = (product: Product) => {
     if (product.product_type === "variable") {
       const selectedVariant = getSelectedVariant(product.id);
-      return Number(selectedVariant?.stock ?? 0);
+      const variantStock = Number(selectedVariant?.stock ?? 0);
+      const generalStock =
+        product.fallback_to_general_licenses === false
+          ? 0
+          : Number(product.stock ?? 0);
+
+      return variantStock + generalStock;
     }
+
     return Number(product.stock);
   };
 
@@ -240,7 +246,15 @@ export default function HomePage() {
     if (product.product_type === "variable") {
       const selectedVariant = getSelectedVariant(product.id);
 
-      if (!selectedVariant || Number(selectedVariant.stock) <= 0) return;
+      const variantStock = Number(selectedVariant?.stock ?? 0);
+      const generalStock =
+        product.fallback_to_general_licenses === false
+          ? 0
+          : Number(product.stock ?? 0);
+
+      const availableStock = variantStock + generalStock;
+
+      if (!selectedVariant || availableStock <= 0) return;
 
       addToCart({
         id: product.id,
@@ -255,7 +269,7 @@ export default function HomePage() {
       return;
     }
 
-    if (product.stock <= 0) return;
+    if (Number(product.stock) <= 0) return;
 
     addToCart({
       id: product.id,
@@ -301,7 +315,8 @@ export default function HomePage() {
             </h1>
 
             <p className="mt-4 max-w-2xl text-sm leading-6 text-white/50 sm:text-base md:mt-5 md:text-lg md:leading-7">
-              Plataforma confiable para comprar servicios digitales y entretenimiento de forma segura y rápida.
+              Plataforma confiable para comprar servicios digitales y
+              entretenimiento de forma segura y rápida.
             </p>
 
             <div className="mt-7 md:mt-8">
@@ -321,7 +336,8 @@ export default function HomePage() {
                       ENTREGA INMEDIATA
                     </h3>
                     <p className="mt-2 text-sm leading-6 text-white/55">
-                      Recibe tus servicios digitales de forma rápida y sin complicaciones.
+                      Recibe tus servicios digitales de forma rápida y sin
+                      complicaciones.
                     </p>
                   </div>
 
@@ -338,7 +354,8 @@ export default function HomePage() {
                       SOPORTE CONFIABLE
                     </h3>
                     <p className="mt-2 text-sm leading-6 text-white/55">
-                      Estamos disponibles para ayudarte en cada paso de tu compra.
+                      Estamos disponibles para ayudarte en cada paso de tu
+                      compra.
                     </p>
                   </div>
 
@@ -355,7 +372,8 @@ export default function HomePage() {
                       COMPRA SEGURA
                     </h3>
                     <p className="mt-2 text-sm leading-6 text-white/55">
-                      Compra con confianza en una plataforma moderna, rápida y confiable.
+                      Compra con confianza en una plataforma moderna, rápida y
+                      confiable.
                     </p>
                   </div>
 
@@ -540,7 +558,10 @@ export default function HomePage() {
                       </div>
 
                       {product.product_type === "variable" && selectedVariant && (
-                        <div className="mt-2" onClick={(e) => e.stopPropagation()}>
+                        <div
+                          className="mt-2"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           <select
                             value={selectedVariants[product.id] || ""}
                             onChange={(e) => handleVariantChange(e, product.id)}
@@ -565,9 +586,9 @@ export default function HomePage() {
                             <p className="text-[10px] uppercase tracking-[0.18em] text-white/30">
                               Precio
                             </p>
-                            
+
                             <p className="mt-1 text-xl font-black text-white md:text-2xl">
-                             ${formatPrice(visiblePrice)}
+                              ${formatPrice(visiblePrice)}
                             </p>
 
                             {isAdmin && (
@@ -603,9 +624,9 @@ export default function HomePage() {
         >
           <div className="flex min-h-full items-start justify-center px-3 pb-3 pt-24 sm:px-4 sm:pt-28 md:items-center md:py-6">
             <div
-  className="relative w-full max-w-[57.6rem] overflow-hidden rounded-[24px] border border-white/10 bg-[#0b0f1a] shadow-2xl md:max-h-[75vh]"
-  onClick={(e) => e.stopPropagation()}
->
+              className="relative w-full max-w-[57.6rem] overflow-hidden rounded-[24px] border border-white/10 bg-[#0b0f1a] shadow-2xl md:max-h-[75vh]"
+              onClick={(e) => e.stopPropagation()}
+            >
               <button
                 type="button"
                 onClick={handleCloseQuickView}
@@ -621,10 +642,10 @@ export default function HomePage() {
                     <div className="overflow-hidden rounded-[20px] border border-white/10 bg-white/[0.03]">
                       {quickViewProduct.image_url ? (
                         <img
-  src={quickViewProduct.image_url}
-  alt={quickViewProduct.name}
-  className="h-[176px] w-full object-contain sm:h-[224px] md:h-[365px]"
-/>
+                          src={quickViewProduct.image_url}
+                          alt={quickViewProduct.name}
+                          className="h-[176px] w-full object-contain sm:h-[224px] md:h-[365px]"
+                        />
                       ) : (
                         <div className="flex h-[176px] items-center justify-center bg-white/[0.02] sm:h-[224px] md:h-[365px]">
                           <div className="text-center">
@@ -669,7 +690,7 @@ export default function HomePage() {
                           Precio
                         </p>
                         <p className="mt-2 text-4xl font-black text-white sm:text-5xl md:text-6xl">
-                         ${formatPrice(quickViewPrice)}
+                          ${formatPrice(quickViewPrice)}
                         </p>
                       </div>
 

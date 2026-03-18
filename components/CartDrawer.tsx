@@ -13,6 +13,9 @@ type ProductRow = {
   stock: number;
   is_active: boolean;
   product_type?: ProductType;
+  avoid_repeat_license?: boolean;
+  use_priority_licenses?: boolean;
+  fallback_to_general_licenses?: boolean;
 };
 
 type VariantRow = {
@@ -47,11 +50,22 @@ type LicenseRow = {
   variant_id: string | null;
   license_text: string;
   status: string;
+  is_priority?: boolean;
+};
+
+type AssignedLicenseHistoryRow = {
+  product_id: string;
+  license_text: string;
 };
 
 const generateRandomOrderNumber = () => {
   return Math.floor(10000 + Math.random() * 90000);
 };
+
+const normalizeLicenseText = (value: string) => value.trim();
+
+const buildItemKey = (productId: string, variantId?: string | null) =>
+  `${productId}__${variantId ?? "base"}`;
 
 async function getUniqueOrderNumber() {
   let attempts = 0;
@@ -77,6 +91,118 @@ async function getUniqueOrderNumber() {
   }
 
   throw new Error("No se pudo generar un número de pedido único.");
+}
+
+async function fetchAvailableLicensePool({
+  productId,
+  variantId,
+  isPriority,
+}: {
+  productId: string;
+  variantId: string | null;
+  isPriority: boolean;
+}) {
+  let query = supabase
+    .from("product_licenses")
+    .select("id, product_id, variant_id, license_text, status, is_priority")
+    .eq("product_id", productId)
+    .eq("status", "available")
+    .eq("is_priority", isPriority)
+    .order("created_at", { ascending: true });
+
+  if (variantId) {
+    query = query.eq("variant_id", variantId);
+  } else {
+    query = query.is("variant_id", null);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data as LicenseRow[]) || [];
+}
+
+async function selectLicensesForItem({
+  productId,
+  variantId,
+  quantity,
+  avoidRepeatLicense,
+  usePriorityLicenses,
+  fallbackToGeneralLicenses,
+  previouslyAssignedTexts,
+  alreadySelectedTexts,
+}: {
+  productId: string;
+  variantId: string | null;
+  quantity: number;
+  avoidRepeatLicense: boolean;
+  usePriorityLicenses: boolean;
+  fallbackToGeneralLicenses: boolean;
+  previouslyAssignedTexts: Set<string>;
+  alreadySelectedTexts: Set<string>;
+}) {
+  const pools: { variantId: string | null; isPriority: boolean }[] = [];
+
+  if (variantId) {
+    const priorityPool = { variantId, isPriority: true };
+    const generalPool = { variantId: null, isPriority: false };
+
+    if (usePriorityLicenses) {
+      pools.push(priorityPool);
+
+      if (fallbackToGeneralLicenses) {
+        pools.push(generalPool);
+      }
+    } else {
+      if (fallbackToGeneralLicenses) {
+        pools.push(generalPool);
+      }
+
+      pools.push(priorityPool);
+    }
+  } else {
+    pools.push({ variantId: null, isPriority: false });
+  }
+
+  const selected: LicenseRow[] = [];
+  const selectedIds = new Set<string>();
+  const selectedTexts = new Set<string>(alreadySelectedTexts);
+
+  for (const pool of pools) {
+    const poolLicenses = await fetchAvailableLicensePool({
+      productId,
+      variantId: pool.variantId,
+      isPriority: pool.isPriority,
+    });
+
+    for (const license of poolLicenses) {
+      if (selectedIds.has(license.id)) continue;
+
+      const normalizedText = normalizeLicenseText(license.license_text);
+      if (!normalizedText) continue;
+
+      if (avoidRepeatLicense) {
+        if (previouslyAssignedTexts.has(normalizedText)) continue;
+        if (selectedTexts.has(normalizedText)) continue;
+      }
+
+      selected.push(license);
+      selectedIds.add(license.id);
+
+      if (avoidRepeatLicense) {
+        selectedTexts.add(normalizedText);
+      }
+
+      if (selected.length >= quantity) {
+        return selected;
+      }
+    }
+  }
+
+  return selected;
 }
 
 export default function CartDrawer() {
@@ -164,7 +290,9 @@ export default function CartDrawer() {
       ] = await Promise.all([
         supabase
           .from("products")
-          .select("id, name, price, stock, is_active, product_type")
+          .select(
+            "id, name, price, stock, is_active, product_type, avoid_repeat_license, use_priority_licenses, fallback_to_general_licenses"
+          )
           .in("id", productIds),
         variantIds.length
           ? supabase
@@ -218,7 +346,14 @@ export default function CartDrawer() {
             return;
           }
 
-          if (Number(variant.stock) < item.quantity) {
+          const fallbackEnabled =
+            product.fallback_to_general_licenses !== false;
+
+          const effectiveStock =
+            Number(variant.stock) +
+            (fallbackEnabled ? Number(product.stock) : 0);
+
+          if (effectiveStock < item.quantity) {
             setMessage(`No hay stock suficiente para "${item.name}".`);
             resetSlider();
             setProcessing(false);
@@ -249,6 +384,149 @@ export default function CartDrawer() {
         return;
       }
 
+      const { data: assignedHistoryData, error: assignedHistoryError } =
+        await supabase
+          .from("product_licenses")
+          .select("product_id, license_text")
+          .eq("assigned_user_id", user.id)
+          .eq("status", "assigned")
+          .in("product_id", productIds);
+
+      if (assignedHistoryError) {
+        setMessage("No se pudo validar el historial de licencias del usuario.");
+        resetSlider();
+        setProcessing(false);
+        return;
+      }
+
+      const assignedHistoryMap = new Map<string, Set<string>>();
+
+      for (const row of ((assignedHistoryData ||
+        []) as AssignedLicenseHistoryRow[])) {
+        const normalizedText = normalizeLicenseText(row.license_text);
+        if (!normalizedText) continue;
+
+        if (!assignedHistoryMap.has(row.product_id)) {
+          assignedHistoryMap.set(row.product_id, new Set<string>());
+        }
+
+        assignedHistoryMap.get(row.product_id)!.add(normalizedText);
+      }
+
+      const orderSelectedTextsByProduct = new Map<string, Set<string>>();
+      const selectedLicensesByItemKey = new Map<string, LicenseRow[]>();
+
+      const productStockDeltas = new Map<
+        string,
+        { original: number; decrement: number }
+      >();
+
+      const variantStockDeltas = new Map<
+        string,
+        { original: number; decrement: number }
+      >();
+
+      for (const item of cart) {
+        const product = productsMap[item.id];
+        const variant = item.variantId ? variantsMap[item.variantId] : null;
+        const itemKey = buildItemKey(item.id, item.variantId || null);
+
+        if (!product) {
+          setMessage(`No se pudo preparar la compra de "${item.name}".`);
+          resetSlider();
+          setProcessing(false);
+          return;
+        }
+
+        const avoidRepeat = Boolean(product.avoid_repeat_license);
+        const usePriority = Boolean(product.use_priority_licenses);
+        const fallbackToGeneral =
+          product.fallback_to_general_licenses !== false;
+
+        const previouslyAssignedTexts =
+          assignedHistoryMap.get(item.id) || new Set<string>();
+
+        const alreadySelectedTexts =
+          orderSelectedTextsByProduct.get(item.id) || new Set<string>();
+
+        const selectedLicenses = await selectLicensesForItem({
+          productId: item.id,
+          variantId: item.variantId || null,
+          quantity: item.quantity,
+          avoidRepeatLicense: avoidRepeat,
+          usePriorityLicenses: usePriority,
+          fallbackToGeneralLicenses: fallbackToGeneral,
+          previouslyAssignedTexts,
+          alreadySelectedTexts,
+        });
+
+        if (selectedLicenses.length < item.quantity) {
+          setMessage(
+            `No hay suficientes licencias disponibles para "${item.name}" con la configuración actual.`
+          );
+          resetSlider();
+          setProcessing(false);
+          return;
+        }
+
+        selectedLicensesByItemKey.set(itemKey, selectedLicenses);
+
+        if (avoidRepeat) {
+          const updatedSelectedTexts = new Set<string>(alreadySelectedTexts);
+
+          for (const license of selectedLicenses) {
+            updatedSelectedTexts.add(normalizeLicenseText(license.license_text));
+          }
+
+          orderSelectedTextsByProduct.set(item.id, updatedSelectedTexts);
+        }
+
+        if (item.variantId && variant) {
+          const priorityCount = selectedLicenses.filter(
+            (license) => license.variant_id === item.variantId
+          ).length;
+
+          const generalCount = selectedLicenses.filter(
+            (license) => license.variant_id === null
+          ).length;
+
+          if (priorityCount > 0) {
+            const currentVariantDelta = variantStockDeltas.get(variant.id);
+            if (currentVariantDelta) {
+              currentVariantDelta.decrement += priorityCount;
+            } else {
+              variantStockDeltas.set(variant.id, {
+                original: Number(variant.stock),
+                decrement: priorityCount,
+              });
+            }
+          }
+
+          if (generalCount > 0) {
+            const currentProductDelta = productStockDeltas.get(product.id);
+            if (currentProductDelta) {
+              currentProductDelta.decrement += generalCount;
+            } else {
+              productStockDeltas.set(product.id, {
+                original: Number(product.stock),
+                decrement: generalCount,
+              });
+            }
+          }
+        } else {
+          const currentProductDelta = productStockDeltas.get(product.id);
+
+          if (currentProductDelta) {
+            currentProductDelta.decrement += selectedLicenses.length;
+          } else {
+            productStockDeltas.set(product.id, {
+              original: Number(product.stock),
+              decrement: selectedLicenses.length,
+            });
+          }
+        }
+      }
+
       const orderNumber = await getUniqueOrderNumber();
 
       const { data: orderData, error: orderError } = await supabase
@@ -265,13 +543,62 @@ export default function CartDrawer() {
         .single();
 
       if (orderError || !orderData) {
-        setMessage(
-          orderError?.message || "No se pudo crear el pedido."
-        );
+        setMessage(orderError?.message || "No se pudo crear el pedido.");
         resetSlider();
         setProcessing(false);
         return;
       }
+
+      let createdOrderId: string | null = orderData.id;
+      let balanceDiscounted = false;
+      const assignedLicenseIds: string[] = [];
+      const updatedVariantStockIds = new Set<string>();
+      const updatedProductStockIds = new Set<string>();
+
+      const rollbackPurchase = async () => {
+        for (const variantId of Array.from(updatedVariantStockIds)) {
+          const restore = variantStockDeltas.get(variantId);
+          if (!restore) continue;
+
+          await supabase
+            .from("product_variants")
+            .update({ stock: restore.original })
+            .eq("id", variantId);
+        }
+
+        for (const productId of Array.from(updatedProductStockIds)) {
+          const restore = productStockDeltas.get(productId);
+          if (!restore) continue;
+
+          await supabase
+            .from("products")
+            .update({ stock: restore.original })
+            .eq("id", productId);
+        }
+
+        if (assignedLicenseIds.length > 0) {
+          await supabase
+            .from("product_licenses")
+            .update({
+              status: "available",
+              assigned_order_id: null,
+              assigned_order_item_id: null,
+              assigned_user_id: null,
+            })
+            .in("id", assignedLicenseIds);
+        }
+
+        if (createdOrderId) {
+          await supabase.from("orders").delete().eq("id", createdOrderId);
+        }
+
+        if (balanceDiscounted) {
+          await supabase
+            .from("profiles")
+            .update({ balance: profile.balance })
+            .eq("id", user.id);
+        }
+      };
 
       const newBalance = Number(profile.balance) - validatedTotal;
 
@@ -288,7 +615,10 @@ export default function CartDrawer() {
         return;
       }
 
+      balanceDiscounted = true;
+
       const createdOrderItems: CreatedOrderItemRow[] = [];
+      const orderItemsByKey = new Map<string, CreatedOrderItemRow>();
 
       for (const item of cart) {
         const product = productsMap[item.id];
@@ -313,120 +643,36 @@ export default function CartDrawer() {
           .single();
 
         if (orderItemError || !orderItemData) {
-          await supabase.from("orders").delete().eq("id", orderData.id);
-          await supabase
-            .from("profiles")
-            .update({ balance: profile.balance })
-            .eq("id", user.id);
-
+          await rollbackPurchase();
           setMessage("No se pudo guardar el detalle del pedido.");
           resetSlider();
           setProcessing(false);
           return;
         }
 
-        createdOrderItems.push(orderItemData as CreatedOrderItemRow);
-      }
-
-      for (const item of cart) {
-        const product = productsMap[item.id];
-        const variant = item.variantId ? variantsMap[item.variantId] : null;
-
-        if (item.variantId && variant) {
-          const { error } = await supabase
-            .from("product_variants")
-            .update({ stock: Number(variant.stock) - item.quantity })
-            .eq("id", variant.id);
-
-          if (error) {
-            await supabase.from("orders").delete().eq("id", orderData.id);
-            await supabase
-              .from("profiles")
-              .update({ balance: profile.balance })
-              .eq("id", user.id);
-
-            setMessage(`No se pudo actualizar el stock de "${item.name}".`);
-            resetSlider();
-            setProcessing(false);
-            return;
-          }
-        } else if (product) {
-          const { error } = await supabase
-            .from("products")
-            .update({ stock: Number(product.stock) - item.quantity })
-            .eq("id", product.id);
-
-          if (error) {
-            await supabase.from("orders").delete().eq("id", orderData.id);
-            await supabase
-              .from("profiles")
-              .update({ balance: profile.balance })
-              .eq("id", user.id);
-
-            setMessage(`No se pudo actualizar el stock de "${item.name}".`);
-            resetSlider();
-            setProcessing(false);
-            return;
-          }
-        }
-      }
-
-      for (const item of cart) {
-        const matchingOrderItem = createdOrderItems.find(
-          (orderItem) =>
-            orderItem.product_id === item.id &&
-            (orderItem.variant_id || null) === (item.variantId || null)
+        const createdItem = orderItemData as CreatedOrderItemRow;
+        createdOrderItems.push(createdItem);
+        orderItemsByKey.set(
+          buildItemKey(item.id, item.variantId || null),
+          createdItem
         );
+      }
 
-        if (!matchingOrderItem) continue;
+      for (const item of cart) {
+        const itemKey = buildItemKey(item.id, item.variantId || null);
+        const matchingOrderItem = orderItemsByKey.get(itemKey);
+        const selectedLicenses = selectedLicensesByItemKey.get(itemKey) || [];
 
-        let licenseQuery = supabase
-          .from("product_licenses")
-          .select("id, product_id, variant_id, license_text, status")
-          .eq("product_id", item.id)
-          .eq("status", "available")
-          .order("is_priority", { ascending: false })
-          .order("created_at", { ascending: true })
-          .limit(item.quantity);
-
-        if (item.variantId) {
-          licenseQuery = licenseQuery.eq("variant_id", item.variantId);
-        } else {
-          licenseQuery = licenseQuery.is("variant_id", null);
-        }
-
-        const { data: licensesData, error: licensesError } = await licenseQuery;
-
-        if (licensesError) {
-          await supabase.from("orders").delete().eq("id", orderData.id);
-          await supabase
-            .from("profiles")
-            .update({ balance: profile.balance })
-            .eq("id", user.id);
-
-          setMessage(`No se pudieron asignar las licencias de "${item.name}".`);
+        if (!matchingOrderItem) {
+          await rollbackPurchase();
+          setMessage(`No se pudo completar la entrega de "${item.name}".`);
           resetSlider();
           setProcessing(false);
           return;
         }
 
-        const licenses = (licensesData as LicenseRow[]) || [];
-
-        if (licenses.length < item.quantity) {
-          await supabase.from("orders").delete().eq("id", orderData.id);
-          await supabase
-            .from("profiles")
-            .update({ balance: profile.balance })
-            .eq("id", user.id);
-
-          setMessage(`No hay suficientes licencias disponibles para "${item.name}".`);
-          resetSlider();
-          setProcessing(false);
-          return;
-        }
-
-        for (const license of licenses) {
-          const { error: assignError } = await supabase
+        for (const license of selectedLicenses) {
+          const { data: assignedRow, error: assignError } = await supabase
             .from("product_licenses")
             .update({
               status: "assigned",
@@ -434,27 +680,61 @@ export default function CartDrawer() {
               assigned_order_item_id: matchingOrderItem.id,
               assigned_user_id: user.id,
             })
-            .eq("id", license.id);
+            .eq("id", license.id)
+            .eq("status", "available")
+            .select("id")
+            .maybeSingle();
 
-          if (assignError) {
-            await supabase.from("orders").delete().eq("id", orderData.id);
-            await supabase
-              .from("profiles")
-              .update({ balance: profile.balance })
-              .eq("id", user.id);
-
+          if (assignError || !assignedRow) {
+            await rollbackPurchase();
             setMessage(`No se pudo completar la entrega de "${item.name}".`);
             resetSlider();
             setProcessing(false);
             return;
           }
+
+          assignedLicenseIds.push(license.id);
         }
       }
 
+      for (const [variantId, stockInfo] of variantStockDeltas.entries()) {
+        const { error } = await supabase
+          .from("product_variants")
+          .update({ stock: stockInfo.original - stockInfo.decrement })
+          .eq("id", variantId);
+
+        if (error) {
+          await rollbackPurchase();
+          setMessage("No se pudo actualizar el stock de una variante.");
+          resetSlider();
+          setProcessing(false);
+          return;
+        }
+
+        updatedVariantStockIds.add(variantId);
+      }
+
+      for (const [productId, stockInfo] of productStockDeltas.entries()) {
+        const { error } = await supabase
+          .from("products")
+          .update({ stock: stockInfo.original - stockInfo.decrement })
+          .eq("id", productId);
+
+        if (error) {
+          await rollbackPurchase();
+          setMessage("No se pudo actualizar el stock de un producto.");
+          resetSlider();
+          setProcessing(false);
+          return;
+        }
+
+        updatedProductStockIds.add(productId);
+      }
+
       clearCart();
-closeCart();
-resetSlider();
-window.location.href = "/account/orders";
+      closeCart();
+      resetSlider();
+      window.location.href = "/account/orders";
     } catch (error) {
       setMessage(
         error instanceof Error

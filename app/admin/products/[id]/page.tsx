@@ -67,14 +67,21 @@ function slugify(value: string) {
 }
 
 function normalizeLines(text: string) {
-  return Array.from(
-    new Set(
-      text
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean)
-    )
-  );
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function buildCountMap(lines: string[]) {
+  const map = new Map<string, number>();
+
+  for (const line of lines) {
+    const key = line.trim();
+    map.set(key, (map.get(key) || 0) + 1);
+  }
+
+  return map;
 }
 
 const inputClass =
@@ -85,6 +92,9 @@ const inputSoftClass =
 
 const fileInputClass =
   "w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700 outline-none file:mr-4 file:rounded-xl file:border-0 file:bg-slate-900 file:px-4 file:py-2 file:text-white";
+
+const checkboxClass =
+  "h-5 w-5 rounded border-slate-300 accent-slate-900 cursor-pointer";
 
 function SectionCard({
   title,
@@ -279,7 +289,8 @@ export default function EditProductPage() {
       .from("product_licenses")
       .select("id, product_id, variant_id, license_text, status, is_priority")
       .eq("product_id", id)
-      .eq("status", "available");
+      .eq("status", "available")
+      .order("created_at", { ascending: true });
 
     if (error) {
       setMessage("No se pudieron cargar las licencias.");
@@ -440,7 +451,8 @@ export default function EditProductPage() {
       .select("id, license_text")
       .eq("product_id", productId)
       .eq("status", "available")
-      .eq("is_priority", isPriority);
+      .eq("is_priority", isPriority)
+      .order("created_at", { ascending: true });
 
     if (variantId) {
       query = query.eq("variant_id", variantId);
@@ -455,15 +467,38 @@ export default function EditProductPage() {
     }
 
     const existingRows = (data as { id: string; license_text: string }[]) || [];
-    const incomingSet = new Set(lines.map((line) => line.trim()));
-    const existingSet = new Set(
-      existingRows.map((row) => row.license_text.trim())
+    const normalizedIncoming = lines.map((line) => line.trim()).filter(Boolean);
+
+    const incomingCountMap = buildCountMap(normalizedIncoming);
+    const toDeleteIds: string[] = [];
+
+    for (const row of existingRows) {
+      const key = row.license_text.trim();
+      const count = incomingCountMap.get(key) || 0;
+
+      if (count > 0) {
+        incomingCountMap.set(key, count - 1);
+      } else {
+        toDeleteIds.push(row.id);
+      }
+    }
+
+    const existingCountMap = buildCountMap(
+      existingRows.map((row) => row.license_text.trim()).filter(Boolean)
     );
 
-    const toInsert = lines.filter((line) => !existingSet.has(line));
-    const toDeleteIds = existingRows
-      .filter((row) => !incomingSet.has(row.license_text.trim()))
-      .map((row) => row.id);
+    const toInsert: string[] = [];
+
+    for (const line of normalizedIncoming) {
+      const key = line.trim();
+      const count = existingCountMap.get(key) || 0;
+
+      if (count > 0) {
+        existingCountMap.set(key, count - 1);
+      } else {
+        toInsert.push(key);
+      }
+    }
 
     if (toDeleteIds.length > 0) {
       const { error: deleteError } = await supabase
@@ -941,31 +976,34 @@ export default function EditProductPage() {
             defaultOpen={true}
           >
             <div className="space-y-4">
-              <label className="flex items-center gap-3 text-sm text-slate-700">
+              <label className="flex items-center gap-3 text-base font-medium text-slate-700">
                 <input
                   type="checkbox"
                   checked={isActive}
                   onChange={(e) => setIsActive(e.target.checked)}
+                  className={checkboxClass}
                 />
-                Producto activo
+                <span>Producto activo</span>
               </label>
 
-              <label className="flex items-center gap-3 text-sm text-slate-700">
+              <label className="flex items-center gap-3 text-base font-medium text-slate-700">
                 <input
                   type="checkbox"
                   checked={avoidRepeatLicense}
                   onChange={(e) => setAvoidRepeatLicense(e.target.checked)}
+                  className={checkboxClass}
                 />
-                Evitar entregar licencias repetidas al mismo cliente
+                <span>Evitar entregar licencias repetidas al mismo cliente</span>
               </label>
 
-              <label className="flex items-center gap-3 text-sm text-slate-700">
+              <label className="flex items-center gap-3 text-base font-medium text-slate-700">
                 <input
                   type="checkbox"
                   checked={usePriorityLicenses}
                   onChange={(e) => setUsePriorityLicenses(e.target.checked)}
+                  className={checkboxClass}
                 />
-                Usar primero licencias prioritarias
+                <span>Usar primero licencias prioritarias</span>
               </label>
 
               <div className="pt-2">
@@ -979,8 +1017,7 @@ export default function EditProductPage() {
                   className={inputSoftClass}
                 />
                 <p className="mt-2 text-sm text-slate-500">
-                  Licencias detectadas:{" "}
-                  {normalizeLines(generalLicensesInput).length}
+                  Licencias detectadas: {normalizeLines(generalLicensesInput).length}
                 </p>
               </div>
 
@@ -1111,7 +1148,7 @@ export default function EditProductPage() {
                           </div>
                         </div>
 
-                        <label className="flex items-center gap-3 text-sm text-slate-700">
+                        <label className="flex items-center gap-3 text-base font-medium text-slate-700">
                           <input
                             type="checkbox"
                             checked={item.is_active}
@@ -1122,14 +1159,14 @@ export default function EditProductPage() {
                                 e.target.checked
                               )
                             }
+                            className={checkboxClass}
                           />
-                          Variante activa
+                          <span>Variante activa</span>
                         </label>
 
                         <div>
                           <label className="mb-2 block text-sm font-semibold text-slate-700">
-                            Licencias prioritarias de esta variante (una por
-                            línea)
+                            Licencias prioritarias de esta variante (una por línea)
                           </label>
 
                           <textarea
