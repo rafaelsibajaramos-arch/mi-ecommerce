@@ -20,6 +20,8 @@ export default function AdminProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [onlyOutOfStock, setOnlyOutOfStock] = useState(false);
 
   const fetchProducts = async () => {
     setLoading(true);
@@ -66,6 +68,20 @@ export default function AdminProductsPage() {
   const formatPrice = (value: number) => {
     return `$${Number(value || 0).toLocaleString("es-CO")}`;
   };
+
+  const normalizedSearch = searchTerm.trim().toLowerCase();
+
+  const filteredProducts = products.filter((product) => {
+    const matchesSearch =
+      !normalizedSearch ||
+      product.name.toLowerCase().includes(normalizedSearch) ||
+      (product.description || "").toLowerCase().includes(normalizedSearch) ||
+      (product.category || "").toLowerCase().includes(normalizedSearch);
+
+    const matchesStock = !onlyOutOfStock || (product.stock ?? 0) <= 0;
+
+    return matchesSearch && matchesStock;
+  });
 
   return (
     <div className="space-y-5 sm:space-y-6 text-slate-900">
@@ -125,20 +141,48 @@ export default function AdminProductsPage() {
         </div>
       </div>
 
+      <div className="flex flex-col gap-3 rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-5">
+        <div className="flex-1">
+          <input
+            type="search"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Buscar por nombre, descripción o categoría..."
+            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-slate-400"
+          />
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setOnlyOutOfStock((prev) => !prev)}
+            className={`inline-flex min-h-[48px] items-center justify-center rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
+              onlyOutOfStock
+                ? "border-rose-200 bg-rose-50 text-rose-600"
+                : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            Solo sin stock
+          </button>
+        </div>
+      </div>
+
       <div className="overflow-hidden rounded-[24px] sm:rounded-[28px] border border-slate-200 bg-white shadow-sm">
         {loading ? (
           <div className="p-5 sm:p-6 text-sm text-slate-600">
             Cargando productos...
           </div>
-        ) : products.length === 0 ? (
+        ) : filteredProducts.length === 0 ? (
           <div className="p-5 sm:p-6 text-sm text-slate-600">
-            No hay productos creados todavía.
+            {products.length === 0
+              ? "No hay productos creados todavía."
+              : "No se encontraron productos con esos filtros."}
           </div>
         ) : (
           <>
             {/* MOBILE */}
             <div className="grid gap-4 p-4 sm:p-5 md:hidden">
-              {products.map((product) => (
+              {filteredProducts.map((product) => (
                 <div
                   key={product.id}
                   className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
@@ -243,7 +287,7 @@ export default function AdminProductsPage() {
                 </thead>
 
                 <tbody>
-                  {products.map((product) => (
+                  {filteredProducts.map((product) => (
                     <tr
                       key={product.id}
                       className="border-t border-slate-200 text-sm text-slate-700"
