@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
 
@@ -29,37 +29,18 @@ export default function AuthGuard({
   const [registerLoading, setRegisterLoading] = useState(false);
   const [registerMessage, setRegisterMessage] = useState("");
 
-  const publicPaths = useMemo(() => ["/", "/login", "/register"], []);
-  const isPublicPath = publicPaths.includes(pathname);
-
-  const shouldShowLoginModal = !checkingAuth && !isLoggedIn && isPublicPath;
-  const shouldBlockPrivatePage = !checkingAuth && !isLoggedIn && !isPublicPath;
-
   useEffect(() => {
     let mounted = true;
 
     const checkSession = async () => {
-      try {
-        const {
-          data: { session },
-          error,
-        } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-        if (!mounted) return;
+      if (!mounted) return;
 
-        if (error) {
-          console.error("Error obteniendo sesión:", error.message);
-          setIsLoggedIn(false);
-        } else {
-          setIsLoggedIn(!!session?.user);
-        }
-      } catch (error) {
-        console.error("Error inesperado revisando sesión:", error);
-        if (!mounted) return;
-        setIsLoggedIn(false);
-      } finally {
-        if (mounted) setCheckingAuth(false);
-      }
+      setIsLoggedIn(!!session?.user);
+      setCheckingAuth(false);
     };
 
     checkSession();
@@ -81,106 +62,78 @@ export default function AuthGuard({
   useEffect(() => {
     if (checkingAuth) return;
 
-    const previousOverflow = document.body.style.overflow;
-    const previousOverflowX = document.body.style.overflowX;
-
-    if (!isLoggedIn && isPublicPath) {
+    if (!isLoggedIn) {
+      const previousOverflow = document.body.style.overflow;
       document.body.style.overflow = "hidden";
-      document.body.style.overflowX = "hidden";
-    } else {
-      document.body.style.overflow = "";
-      document.body.style.overflowX = "";
+
+      return () => {
+        document.body.style.overflow = previousOverflow;
+      };
     }
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.body.style.overflowX = previousOverflowX;
-    };
-  }, [checkingAuth, isLoggedIn, isPublicPath]);
-
-  useEffect(() => {
-    if (checkingAuth) return;
-
-    if (shouldBlockPrivatePage) {
-      router.replace("/");
-    }
-  }, [checkingAuth, shouldBlockPrivatePage, router]);
+  }, [checkingAuth, isLoggedIn]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginLoading(true);
     setLoginMessage("");
 
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: loginEmail.trim(),
-        password: loginPassword,
-      });
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: loginEmail.trim(),
+      password: loginPassword,
+    });
 
-      if (error) {
-        setLoginMessage(error.message);
-        setLoginLoading(false);
-        return;
-      }
-
-      const user = data.user;
-
-      if (!user) {
-        setLoginMessage("No se pudo iniciar sesión.");
-        setLoginLoading(false);
-        return;
-      }
-
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", user.id)
-        .single();
-
+    if (error) {
+      setLoginMessage(error.message);
       setLoginLoading(false);
-
-      if (profile?.role === "admin") {
-        router.push("/admin");
-      } else {
-        router.push("/");
-      }
-
-      router.refresh();
-    } catch (error) {
-      console.error("Error iniciando sesión:", error);
-      setLoginMessage("Ocurrió un error inesperado al iniciar sesión.");
-      setLoginLoading(false);
+      return;
     }
+
+    const user = data.user;
+
+    if (!user) {
+      setLoginMessage("No se pudo iniciar sesión.");
+      setLoginLoading(false);
+      return;
+    }
+
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+
+    setLoginLoading(false);
+
+    if (profile?.role === "admin") {
+      router.push("/admin");
+    } else {
+      router.push("/");
+    }
+
+    router.refresh();
   };
 
   const handleForgotPassword = async () => {
     setLoginMessage("");
 
     if (!loginEmail.trim()) {
-      setLoginMessage(
-        "Escribe tu correo electrónico para recuperar tu contraseña."
-      );
+      setLoginMessage("Escribe tu correo electrónico para recuperar tu contraseña.");
       return;
     }
 
-    try {
-      const { error } = await supabase.auth.resetPasswordForEmail(
-        loginEmail.trim(),
-        {
-          redirectTo: "https://streamingmayor1.com/reset-password",
-        }
-      );
-
-      if (error) {
-        setLoginMessage(error.message);
-        return;
+    const { error } = await supabase.auth.resetPasswordForEmail(
+      loginEmail.trim(),
+      {
+        redirectTo: "https://streamingmayor1.com/reset-password",
       }
+    );
 
-      setLoginMessage("Te enviamos un enlace para restablecer tu contraseña.");
-    } catch (error) {
-      console.error("Error recuperando contraseña:", error);
-      setLoginMessage("No se pudo procesar la recuperación de contraseña.");
+    if (error) {
+      setLoginMessage(error.message);
+      return;
     }
+
+    setLoginMessage("Te enviamos un enlace para restablecer tu contraseña.");
   };
 
   const handleRegister = async (e: React.FormEvent) => {
@@ -188,162 +141,116 @@ export default function AuthGuard({
     setRegisterLoading(true);
     setRegisterMessage("");
 
-    try {
-      const cleanName = registerFullName.trim();
-      const cleanEmail = registerEmail.trim();
+    const cleanName = registerFullName.trim();
+    const cleanEmail = registerEmail.trim();
 
-      const { data, error } = await supabase.auth.signUp({
-        email: cleanEmail,
-        password: registerPassword,
-        options: {
-          data: {
-            full_name: cleanName,
-          },
-        },
-      });
-
-      if (error) {
-        setRegisterMessage(error.message);
-        setRegisterLoading(false);
-        return;
-      }
-
-      let user = data.user;
-
-      if (!data.session) {
-        const { data: loginData, error: loginError } =
-          await supabase.auth.signInWithPassword({
-            email: cleanEmail,
-            password: registerPassword,
-          });
-
-        if (loginError) {
-          setRegisterMessage(
-            "Cuenta creada, pero no se pudo iniciar sesión automáticamente."
-          );
-          setRegisterLoading(false);
-          return;
-        }
-
-        user = loginData.user;
-      }
-
-      if (!user) {
-        setRegisterMessage("Cuenta creada, pero no se pudo obtener el usuario.");
-        setRegisterLoading(false);
-        return;
-      }
-
-      await supabase.from("profiles").upsert(
-        {
-          id: user.id,
-          email: cleanEmail,
+    const { data, error } = await supabase.auth.signUp({
+      email: cleanEmail,
+      password: registerPassword,
+      options: {
+        data: {
           full_name: cleanName,
         },
-        { onConflict: "id" }
-      );
+      },
+    });
 
-      let role: string | null = null;
-
-      for (let i = 0; i < 5; i++) {
-        const { data: profileData } = await supabase
-          .from("profiles")
-          .select("role")
-          .eq("id", user.id)
-          .single();
-
-        if (profileData?.role) {
-          role = profileData.role;
-          break;
-        }
-
-        await new Promise((resolve) => setTimeout(resolve, 350));
-      }
-
+    if (error) {
+      setRegisterMessage(error.message);
       setRegisterLoading(false);
-
-      if (role === "admin") {
-        router.push("/admin");
-      } else {
-        router.push("/");
-      }
-
-      router.refresh();
-    } catch (error) {
-      console.error("Error registrando usuario:", error);
-      setRegisterMessage("Ocurrió un error inesperado creando la cuenta.");
-      setRegisterLoading(false);
+      return;
     }
+
+    let user = data.user;
+
+    if (!data.session) {
+      const { data: loginData, error: loginError } =
+        await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password: registerPassword,
+        });
+
+      if (loginError) {
+        setRegisterMessage(
+          "Cuenta creada, pero no se pudo iniciar sesión automáticamente."
+        );
+        setRegisterLoading(false);
+        return;
+      }
+
+      user = loginData.user;
+    }
+
+    if (!user) {
+      setRegisterMessage("Cuenta creada, pero no se pudo obtener el usuario.");
+      setRegisterLoading(false);
+      return;
+    }
+
+    await supabase.from("profiles").upsert(
+      {
+        id: user.id,
+        email: cleanEmail,
+        full_name: cleanName,
+      },
+      { onConflict: "id" }
+    );
+
+    let role: string | null = null;
+
+    for (let i = 0; i < 5; i++) {
+      const { data: profileData } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .single();
+
+      if (profileData?.role) {
+        role = profileData.role;
+        break;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 350));
+    }
+
+    setRegisterLoading(false);
+
+    if (role === "admin") {
+      router.push("/admin");
+    } else {
+      router.push("/");
+    }
+
+    router.refresh();
   };
 
-  if (checkingAuth) {
-    return (
-      <>
-        <div className="transition duration-300">{children}</div>
-
-        <div className="fixed inset-0 z-[140] flex items-center justify-center bg-black/35 backdrop-blur-sm">
-          <div className="rounded-2xl border border-white/10 bg-[#050816] px-5 py-4 text-sm font-semibold text-white shadow-xl">
-            Verificando sesión...
-          </div>
-        </div>
-      </>
-    );
-  }
-
-  if (shouldBlockPrivatePage) {
-    return (
-      <div className="fixed inset-0 z-[140] flex items-center justify-center bg-black text-white">
-        <div className="rounded-2xl border border-white/10 bg-[#050816] px-5 py-4 text-sm font-semibold shadow-xl">
-          Redirigiendo al inicio...
-        </div>
-      </div>
-    );
-  }
+  const showAuthModal = !checkingAuth && !isLoggedIn;
 
   return (
     <>
       <div
         className={
-          shouldShowLoginModal
+          showAuthModal
             ? "pointer-events-none select-none brightness-75 transition duration-300"
             : "transition duration-300"
         }
-        aria-hidden={shouldShowLoginModal}
+        aria-hidden={showAuthModal}
       >
         {children}
       </div>
 
-      {shouldShowLoginModal && (
-        <div className="fixed inset-0 z-[120] bg-black/55 backdrop-blur-sm">
-          <div className="absolute inset-0" />
-
-          <div
-            className="fixed inset-0 grid place-items-center"
-            style={{
-              paddingTop: "max(16px, env(safe-area-inset-top))",
-              paddingRight: "max(16px, env(safe-area-inset-right))",
-              paddingBottom: "max(16px, env(safe-area-inset-bottom))",
-              paddingLeft: "max(16px, env(safe-area-inset-left))",
-            }}
-          >
-            <div
-              className="w-full max-w-[460px] overflow-hidden rounded-[26px] border border-white/10 bg-white shadow-2xl"
-              style={{
-                maxHeight: "calc(100dvh - 32px)",
-              }}
-            >
-              <div
-                className="overflow-y-auto overflow-x-hidden px-5 py-6 sm:px-7 sm:py-7 md:px-8 md:py-8"
-                style={{ maxHeight: "calc(100dvh - 32px)" }}
-              >
-                <div className="w-full">
+      {showAuthModal && (
+        <div className="fixed inset-0 z-[120] bg-black/50 px-3 py-4 backdrop-blur-sm sm:px-4 sm:py-6">
+          <div className="flex min-h-full items-center justify-center">
+            <div className="max-h-[92vh] w-full max-w-[560px] overflow-hidden rounded-[26px] border border-white/10 bg-white shadow-2xl">
+              <div className="max-h-[92vh] overflow-y-auto bg-white px-5 py-6 sm:px-8 sm:py-8 md:px-10 md:py-9">
+                <div className="mx-auto w-full max-w-md">
                   {mode === "login" ? (
                     <>
                       <p className="mb-2 text-sm uppercase tracking-[0.2em] text-gray-500">
                         Bienvenido
                       </p>
 
-                      <h1 className="text-[1.9rem] font-extrabold leading-tight text-gray-900 sm:text-[2.5rem]">
+                      <h1 className="text-3xl font-extrabold text-gray-900 sm:text-4xl">
                         Iniciar sesión
                       </h1>
 
@@ -352,7 +259,7 @@ export default function AuthGuard({
                       </p>
 
                       <form
-                        className="mt-6 space-y-4 sm:mt-7 sm:space-y-5"
+                        className="mt-7 space-y-4 sm:mt-8 sm:space-y-5"
                         onSubmit={handleLogin}
                       >
                         <div>
@@ -366,13 +273,12 @@ export default function AuthGuard({
                             value={loginEmail}
                             onChange={(e) => setLoginEmail(e.target.value)}
                             required
-                            autoComplete="email"
-                            className="block w-full min-w-0 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-base text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:py-4"
                           />
                         </div>
 
                         <div>
-                          <div className="mb-2 flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="mb-2 flex items-center justify-between gap-3">
                             <label className="block text-sm font-semibold text-gray-700">
                               Contraseña
                             </label>
@@ -380,7 +286,7 @@ export default function AuthGuard({
                             <button
                               type="button"
                               onClick={handleForgotPassword}
-                              className="text-left text-xs text-blue-600 hover:underline sm:text-sm"
+                              className="text-xs text-blue-600 hover:underline sm:text-sm"
                             >
                               ¿Olvidaste tu contraseña?
                             </button>
@@ -392,15 +298,14 @@ export default function AuthGuard({
                             value={loginPassword}
                             onChange={(e) => setLoginPassword(e.target.value)}
                             required
-                            autoComplete="current-password"
-                            className="block w-full min-w-0 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-base text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:py-4"
                           />
                         </div>
 
                         <button
                           type="submit"
                           disabled={loginLoading}
-                          className="block w-full rounded-2xl bg-[#050816] px-4 py-3.5 text-center font-semibold text-white transition hover:opacity-95 disabled:opacity-50"
+                          className="w-full rounded-2xl bg-[#050816] py-3.5 font-semibold text-white transition hover:opacity-95 disabled:opacity-50 sm:py-4"
                         >
                           {loginLoading ? "Entrando..." : "Iniciar sesión"}
                         </button>
@@ -412,7 +317,7 @@ export default function AuthGuard({
                         </p>
                       )}
 
-                      <p className="mt-6 text-center text-sm text-gray-500 sm:mt-7">
+                      <p className="mt-7 text-center text-sm text-gray-500 sm:mt-8">
                         ¿No tienes cuenta?{" "}
                         <button
                           type="button"
@@ -432,7 +337,7 @@ export default function AuthGuard({
                         Registro
                       </p>
 
-                      <h1 className="text-[1.9rem] font-extrabold leading-tight text-gray-900 sm:text-[2.5rem]">
+                      <h1 className="text-3xl font-extrabold text-gray-900 sm:text-4xl">
                         Crear cuenta
                       </h1>
 
@@ -441,7 +346,7 @@ export default function AuthGuard({
                       </p>
 
                       <form
-                        className="mt-6 space-y-4 sm:mt-7 sm:space-y-5"
+                        className="mt-7 space-y-4 sm:mt-8 sm:space-y-5"
                         onSubmit={handleRegister}
                       >
                         <div>
@@ -455,8 +360,7 @@ export default function AuthGuard({
                             value={registerFullName}
                             onChange={(e) => setRegisterFullName(e.target.value)}
                             required
-                            autoComplete="name"
-                            className="block w-full min-w-0 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-base text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:py-4"
                           />
                         </div>
 
@@ -471,8 +375,7 @@ export default function AuthGuard({
                             value={registerEmail}
                             onChange={(e) => setRegisterEmail(e.target.value)}
                             required
-                            autoComplete="email"
-                            className="block w-full min-w-0 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-base text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:py-4"
                           />
                         </div>
 
@@ -487,15 +390,14 @@ export default function AuthGuard({
                             value={registerPassword}
                             onChange={(e) => setRegisterPassword(e.target.value)}
                             required
-                            autoComplete="new-password"
-                            className="block w-full min-w-0 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-base text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:py-4"
                           />
                         </div>
 
                         <button
                           type="submit"
                           disabled={registerLoading}
-                          className="block w-full rounded-2xl bg-[#050816] px-4 py-3.5 text-center font-semibold text-white transition hover:opacity-95 disabled:opacity-50"
+                          className="w-full rounded-2xl bg-[#050816] py-3.5 font-semibold text-white transition hover:opacity-95 disabled:opacity-50 sm:py-4"
                         >
                           {registerLoading ? "Creando cuenta..." : "Crear cuenta"}
                         </button>
@@ -507,7 +409,7 @@ export default function AuthGuard({
                         </p>
                       )}
 
-                      <p className="mt-6 text-center text-sm text-gray-500 sm:mt-7">
+                      <p className="mt-7 text-center text-sm text-gray-500 sm:mt-8">
                         ¿Ya tienes cuenta?{" "}
                         <button
                           type="button"

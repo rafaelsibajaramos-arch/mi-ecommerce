@@ -5,7 +5,7 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useCart } from "../context/CartContext";
 import { supabase } from "../lib/supabase";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import UserDropdown from "@/components/UserDropdown";
 
 type SiteSettingsRow = {
@@ -98,37 +98,17 @@ export default function Navbar() {
       ? "border-b-2 border-white pb-1 text-sm font-semibold text-white md:text-[15px]"
       : "text-sm font-semibold text-white/70 transition hover:text-white md:text-[15px]";
 
-  const mobileLogoWidth = useMemo(() => {
-    const safe = Number(logoWidthMobile || 180);
-    return Math.min(safe, 150);
-  }, [logoWidthMobile]);
-
-  const mobileLogoHeight = useMemo(() => {
-    const safe = Number(logoHeightMobile || 34);
-    return Math.min(safe, 40);
-  }, [logoHeightMobile]);
-
-  const desktopLogoWidth = useMemo(() => {
-    const safe = Number(logoWidthDesktop || 290);
-    return Math.min(safe, 290);
-  }, [logoWidthDesktop]);
-
-  const desktopLogoHeight = useMemo(() => {
-    const safe = Number(logoHeightDesktop || 46);
-    return Math.min(safe, 60);
-  }, [logoHeightDesktop]);
-
   return (
-    <header className="sticky top-0 z-50 w-full overflow-x-hidden border-b border-white/10 bg-black/80 backdrop-blur-xl">
-      <div className="mx-auto flex h-[70px] w-full max-w-7xl min-w-0 items-center justify-between gap-3 overflow-hidden px-3 md:h-[76px] md:px-6">
-        <div className="min-w-0 shrink flex-1 overflow-hidden">
+    <header className="sticky top-0 z-50 w-full border-b border-white/10 bg-black/80 backdrop-blur-xl">
+      <div className="mx-auto flex h-[70px] max-w-7xl items-center justify-between px-4 md:h-[76px] md:px-6">
+        <div className="shrink-0">
           {navbarLogoUrl ? (
             <>
               <div
-                className="relative block max-w-full overflow-hidden md:hidden"
+                className="relative md:hidden"
                 style={{
-                  width: `${mobileLogoWidth}px`,
-                  height: `${mobileLogoHeight}px`,
+                  width: `${logoWidthMobile}px`,
+                  height: `${logoHeightMobile}px`,
                 }}
               >
                 <div className="pointer-events-none absolute inset-0">
@@ -137,7 +117,7 @@ export default function Navbar() {
                     alt="StreamingMayor"
                     fill
                     className="object-contain object-left"
-                    sizes="150px"
+                    sizes="180px"
                     priority
                     unoptimized
                   />
@@ -148,8 +128,8 @@ export default function Navbar() {
                   aria-label="Ir al inicio"
                   className="absolute left-0 top-0 z-10 block"
                   style={{
-                    width: `${mobileLogoWidth}px`,
-                    height: `${Math.min(70, mobileLogoHeight)}px`,
+                    width: `${logoWidthMobile}px`,
+                    height: `${Math.min(70, logoHeightMobile)}px`,
                   }}
                 />
               </div>
@@ -157,8 +137,8 @@ export default function Navbar() {
               <div
                 className="relative hidden md:block"
                 style={{
-                  width: `${desktopLogoWidth}px`,
-                  height: `${desktopLogoHeight}px`,
+                  width: `${logoWidthDesktop}px`,
+                  height: `${logoHeightDesktop}px`,
                 }}
               >
                 <div className="pointer-events-none absolute inset-0">
@@ -178,8 +158,8 @@ export default function Navbar() {
                   aria-label="Ir al inicio"
                   className="absolute left-0 top-0 z-10 block"
                   style={{
-                    width: `${desktopLogoWidth}px`,
-                    height: `${Math.min(76, desktopLogoHeight)}px`,
+                    width: `${logoWidthDesktop}px`,
+                    height: `${Math.min(76, logoHeightDesktop)}px`,
                   }}
                 />
               </div>
@@ -189,15 +169,15 @@ export default function Navbar() {
               <div
                 className="block md:hidden"
                 style={{
-                  width: `${mobileLogoWidth}px`,
-                  height: `${mobileLogoHeight}px`,
+                  width: `${logoWidthMobile}px`,
+                  height: `${logoHeightMobile}px`,
                 }}
               />
               <div
                 className="hidden md:block"
                 style={{
-                  width: `${desktopLogoWidth}px`,
-                  height: `${desktopLogoHeight}px`,
+                  width: `${logoWidthDesktop}px`,
+                  height: `${logoHeightDesktop}px`,
                 }}
               />
             </>
@@ -211,14 +191,17 @@ export default function Navbar() {
             </Link>
 
             {isAdmin && (
-              <Link href="/admin/products" className={navLinkClass("/admin/products")}>
+              <Link
+                href="/admin/products"
+                className={navLinkClass("/admin/products")}
+              >
                 Admin
               </Link>
             )}
           </nav>
         )}
 
-        <div className="flex shrink-0 items-center gap-2 md:gap-3">
+        <div className="flex items-center gap-2 md:gap-3">
           <button
             type="button"
             onClick={() => {
@@ -226,7 +209,7 @@ export default function Navbar() {
               openCart();
             }}
             disabled={!isLoggedIn}
-            className="relative flex h-[44px] w-[44px] items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-white transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-40 md:h-[50px] md:w-[50px]"
+            className="relative flex h-[46px] w-[46px] items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-white transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-40 md:h-[50px] md:w-[50px]"
           >
             <svg
               viewBox="0 0 24 24"
