@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { CartProvider } from "../context/CartContext";
 import CartDrawer from "../components/CartDrawer";
@@ -12,6 +12,12 @@ export const metadata: Metadata = {
   description: "Tienda online moderna",
 };
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+};
+
 export default function RootLayout({
   children,
 }: {
@@ -19,7 +25,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="es" suppressHydrationWarning>
-      <body suppressHydrationWarning>
+      <body suppressHydrationWarning className="overflow-x-hidden">
         <div className="site-background" aria-hidden="true">
           <div className="site-gradient" />
           <div className="site-vignette" />
@@ -42,7 +48,7 @@ export default function RootLayout({
           <AuthGuard>
             <SiteBrandingSync />
             <Navbar />
-            <div className="relative z-10">{children}</div>
+            <div className="relative z-10 overflow-x-hidden">{children}</div>
             <CartDrawer />
           </AuthGuard>
         </CartProvider>
