@@ -317,200 +317,207 @@ export default function AuthGuard({
         <div className="fixed inset-0 z-[120] bg-black/55 backdrop-blur-sm">
           <div className="absolute inset-0" />
 
-          <div
-            className="absolute left-1/2 top-1/2 w-[calc(100vw-32px)] max-w-[560px] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[28px] border border-white/10 bg-white shadow-2xl"
-            style={{ maxHeight: "calc(100dvh - 32px)" }}
-          >
+          <div className="fixed inset-0 flex items-center justify-center px-3 py-4 sm:px-4 sm:py-6">
             <div
-              className="overflow-y-auto overflow-x-hidden px-4 py-5 sm:px-8 sm:py-8 md:px-10 md:py-9"
-              style={{ maxHeight: "calc(100dvh - 32px)" }}
+              className="w-full max-w-[560px] overflow-hidden rounded-[28px] border border-white/10 bg-white shadow-2xl"
+              style={{
+                width: "min(560px, calc(100vw - 24px))",
+                maxHeight: "calc(100dvh - 24px)",
+                marginLeft: "auto",
+                marginRight: "auto",
+              }}
             >
-              <div className="w-full">
-                {mode === "login" ? (
-                  <>
-                    <p className="mb-2 text-sm uppercase tracking-[0.2em] text-gray-500">
-                      Bienvenido
-                    </p>
+              <div
+                className="overflow-y-auto overflow-x-hidden px-4 py-5 sm:px-8 sm:py-8 md:px-10 md:py-9"
+                style={{ maxHeight: "calc(100dvh - 24px)" }}
+              >
+                <div className="w-full">
+                  {mode === "login" ? (
+                    <>
+                      <p className="mb-2 text-sm uppercase tracking-[0.2em] text-gray-500">
+                        Bienvenido
+                      </p>
 
-                    <h1 className="text-[2rem] font-extrabold leading-tight text-gray-900 sm:text-4xl">
-                      Iniciar sesión
-                    </h1>
+                      <h1 className="text-[2rem] font-extrabold leading-tight text-gray-900 sm:text-4xl">
+                        Iniciar sesión
+                      </h1>
 
-                    <p className="mt-3 text-sm text-gray-500 sm:text-base">
-                      Ingresa a tu cuenta para continuar.
-                    </p>
+                      <p className="mt-3 text-sm text-gray-500 sm:text-base">
+                        Ingresa a tu cuenta para continuar.
+                      </p>
 
-                    <form
-                      className="mt-7 space-y-4 sm:mt-8 sm:space-y-5"
-                      onSubmit={handleLogin}
-                    >
-                      <div>
-                        <label className="mb-2 block text-sm font-semibold text-gray-700">
-                          Correo electrónico
-                        </label>
+                      <form
+                        className="mt-7 space-y-4 sm:mt-8 sm:space-y-5"
+                        onSubmit={handleLogin}
+                      >
+                        <div>
+                          <label className="mb-2 block text-sm font-semibold text-gray-700">
+                            Correo electrónico
+                          </label>
 
-                        <input
-                          type="email"
-                          placeholder="tucorreo@email.com"
-                          value={loginEmail}
-                          onChange={(e) => setLoginEmail(e.target.value)}
-                          required
-                          autoComplete="email"
-                          className="block w-full min-w-0 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-base text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:py-4"
-                        />
-                      </div>
+                          <input
+                            type="email"
+                            placeholder="tucorreo@email.com"
+                            value={loginEmail}
+                            onChange={(e) => setLoginEmail(e.target.value)}
+                            required
+                            autoComplete="email"
+                            className="block w-full min-w-0 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-base text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:py-4"
+                          />
+                        </div>
 
-                      <div>
-                        <div className="mb-2 flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
-                          <label className="block text-sm font-semibold text-gray-700">
+                        <div>
+                          <div className="mb-2 flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <label className="block text-sm font-semibold text-gray-700">
+                              Contraseña
+                            </label>
+
+                            <button
+                              type="button"
+                              onClick={handleForgotPassword}
+                              className="text-left text-xs text-blue-600 hover:underline sm:text-sm"
+                            >
+                              ¿Olvidaste tu contraseña?
+                            </button>
+                          </div>
+
+                          <input
+                            type="password"
+                            placeholder="********"
+                            value={loginPassword}
+                            onChange={(e) => setLoginPassword(e.target.value)}
+                            required
+                            autoComplete="current-password"
+                            className="block w-full min-w-0 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-base text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:py-4"
+                          />
+                        </div>
+
+                        <button
+                          type="submit"
+                          disabled={loginLoading}
+                          className="block w-full rounded-2xl bg-[#050816] px-4 py-3.5 text-center font-semibold text-white transition hover:opacity-95 disabled:opacity-50 sm:py-4"
+                        >
+                          {loginLoading ? "Entrando..." : "Iniciar sesión"}
+                        </button>
+                      </form>
+
+                      {loginMessage && (
+                        <p className="mt-4 text-center text-sm text-gray-600">
+                          {loginMessage}
+                        </p>
+                      )}
+
+                      <p className="mt-7 text-center text-sm text-gray-500 sm:mt-8">
+                        ¿No tienes cuenta?{" "}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setLoginMessage("");
+                            setMode("register");
+                          }}
+                          className="font-semibold text-blue-600 hover:underline"
+                        >
+                          Regístrate
+                        </button>
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="mb-2 text-sm uppercase tracking-[0.2em] text-gray-500">
+                        Registro
+                      </p>
+
+                      <h1 className="text-[2rem] font-extrabold leading-tight text-gray-900 sm:text-4xl">
+                        Crear cuenta
+                      </h1>
+
+                      <p className="mt-3 text-sm text-gray-500 sm:text-base">
+                        Completa tus datos para comenzar.
+                      </p>
+
+                      <form
+                        className="mt-7 space-y-4 sm:mt-8 sm:space-y-5"
+                        onSubmit={handleRegister}
+                      >
+                        <div>
+                          <label className="mb-2 block text-sm font-semibold text-gray-700">
+                            Nombre completo
+                          </label>
+
+                          <input
+                            type="text"
+                            placeholder="Tu nombre"
+                            value={registerFullName}
+                            onChange={(e) => setRegisterFullName(e.target.value)}
+                            required
+                            autoComplete="name"
+                            className="block w-full min-w-0 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-base text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:py-4"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="mb-2 block text-sm font-semibold text-gray-700">
+                            Correo electrónico
+                          </label>
+
+                          <input
+                            type="email"
+                            placeholder="tucorreo@email.com"
+                            value={registerEmail}
+                            onChange={(e) => setRegisterEmail(e.target.value)}
+                            required
+                            autoComplete="email"
+                            className="block w-full min-w-0 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-base text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:py-4"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="mb-2 block text-sm font-semibold text-gray-700">
                             Contraseña
                           </label>
 
-                          <button
-                            type="button"
-                            onClick={handleForgotPassword}
-                            className="text-left text-xs text-blue-600 hover:underline sm:text-sm"
-                          >
-                            ¿Olvidaste tu contraseña?
-                          </button>
+                          <input
+                            type="password"
+                            placeholder="********"
+                            value={registerPassword}
+                            onChange={(e) => setRegisterPassword(e.target.value)}
+                            required
+                            autoComplete="new-password"
+                            className="block w-full min-w-0 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-base text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:py-4"
+                          />
                         </div>
 
-                        <input
-                          type="password"
-                          placeholder="********"
-                          value={loginPassword}
-                          onChange={(e) => setLoginPassword(e.target.value)}
-                          required
-                          autoComplete="current-password"
-                          className="block w-full min-w-0 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-base text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:py-4"
-                        />
-                      </div>
+                        <button
+                          type="submit"
+                          disabled={registerLoading}
+                          className="block w-full rounded-2xl bg-[#050816] px-4 py-3.5 text-center font-semibold text-white transition hover:opacity-95 disabled:opacity-50 sm:py-4"
+                        >
+                          {registerLoading ? "Creando cuenta..." : "Crear cuenta"}
+                        </button>
+                      </form>
 
-                      <button
-                        type="submit"
-                        disabled={loginLoading}
-                        className="block w-full rounded-2xl bg-[#050816] px-4 py-3.5 text-center font-semibold text-white transition hover:opacity-95 disabled:opacity-50 sm:py-4"
-                      >
-                        {loginLoading ? "Entrando..." : "Iniciar sesión"}
-                      </button>
-                    </form>
+                      {registerMessage && (
+                        <p className="mt-4 text-center text-sm text-gray-600">
+                          {registerMessage}
+                        </p>
+                      )}
 
-                    {loginMessage && (
-                      <p className="mt-4 text-center text-sm text-gray-600">
-                        {loginMessage}
+                      <p className="mt-7 text-center text-sm text-gray-500 sm:mt-8">
+                        ¿Ya tienes cuenta?{" "}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRegisterMessage("");
+                            setMode("login");
+                          }}
+                          className="font-semibold text-blue-600 hover:underline"
+                        >
+                          Inicia sesión
+                        </button>
                       </p>
-                    )}
-
-                    <p className="mt-7 text-center text-sm text-gray-500 sm:mt-8">
-                      ¿No tienes cuenta?{" "}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setLoginMessage("");
-                          setMode("register");
-                        }}
-                        className="font-semibold text-blue-600 hover:underline"
-                      >
-                        Regístrate
-                      </button>
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <p className="mb-2 text-sm uppercase tracking-[0.2em] text-gray-500">
-                      Registro
-                    </p>
-
-                    <h1 className="text-[2rem] font-extrabold leading-tight text-gray-900 sm:text-4xl">
-                      Crear cuenta
-                    </h1>
-
-                    <p className="mt-3 text-sm text-gray-500 sm:text-base">
-                      Completa tus datos para comenzar.
-                    </p>
-
-                    <form
-                      className="mt-7 space-y-4 sm:mt-8 sm:space-y-5"
-                      onSubmit={handleRegister}
-                    >
-                      <div>
-                        <label className="mb-2 block text-sm font-semibold text-gray-700">
-                          Nombre completo
-                        </label>
-
-                        <input
-                          type="text"
-                          placeholder="Tu nombre"
-                          value={registerFullName}
-                          onChange={(e) => setRegisterFullName(e.target.value)}
-                          required
-                          autoComplete="name"
-                          className="block w-full min-w-0 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-base text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:py-4"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="mb-2 block text-sm font-semibold text-gray-700">
-                          Correo electrónico
-                        </label>
-
-                        <input
-                          type="email"
-                          placeholder="tucorreo@email.com"
-                          value={registerEmail}
-                          onChange={(e) => setRegisterEmail(e.target.value)}
-                          required
-                          autoComplete="email"
-                          className="block w-full min-w-0 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-base text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:py-4"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="mb-2 block text-sm font-semibold text-gray-700">
-                          Contraseña
-                        </label>
-
-                        <input
-                          type="password"
-                          placeholder="********"
-                          value={registerPassword}
-                          onChange={(e) => setRegisterPassword(e.target.value)}
-                          required
-                          autoComplete="new-password"
-                          className="block w-full min-w-0 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-base text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:py-4"
-                        />
-                      </div>
-
-                      <button
-                        type="submit"
-                        disabled={registerLoading}
-                        className="block w-full rounded-2xl bg-[#050816] px-4 py-3.5 text-center font-semibold text-white transition hover:opacity-95 disabled:opacity-50 sm:py-4"
-                      >
-                        {registerLoading ? "Creando cuenta..." : "Crear cuenta"}
-                      </button>
-                    </form>
-
-                    {registerMessage && (
-                      <p className="mt-4 text-center text-sm text-gray-600">
-                        {registerMessage}
-                      </p>
-                    )}
-
-                    <p className="mt-7 text-center text-sm text-gray-500 sm:mt-8">
-                      ¿Ya tienes cuenta?{" "}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setRegisterMessage("");
-                          setMode("login");
-                        }}
-                        className="font-semibold text-blue-600 hover:underline"
-                      >
-                        Inicia sesión
-                      </button>
-                    </p>
-                  </>
-                )}
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           </div>
