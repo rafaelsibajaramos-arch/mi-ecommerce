@@ -317,19 +317,24 @@ export default function AuthGuard({
         <div className="fixed inset-0 z-[120] bg-black/55 backdrop-blur-sm">
           <div className="absolute inset-0" />
 
-          <div className="fixed inset-0 flex items-center justify-center px-3 py-4 sm:px-4 sm:py-6">
+          <div
+            className="fixed inset-0 grid place-items-center"
+            style={{
+              paddingTop: "max(16px, env(safe-area-inset-top))",
+              paddingRight: "max(16px, env(safe-area-inset-right))",
+              paddingBottom: "max(16px, env(safe-area-inset-bottom))",
+              paddingLeft: "max(16px, env(safe-area-inset-left))",
+            }}
+          >
             <div
-              className="w-full max-w-[560px] overflow-hidden rounded-[28px] border border-white/10 bg-white shadow-2xl"
+              className="w-full max-w-[460px] overflow-hidden rounded-[26px] border border-white/10 bg-white shadow-2xl"
               style={{
-                width: "min(560px, calc(100vw - 24px))",
-                maxHeight: "calc(100dvh - 24px)",
-                marginLeft: "auto",
-                marginRight: "auto",
+                maxHeight: "calc(100dvh - 32px)",
               }}
             >
               <div
-                className="overflow-y-auto overflow-x-hidden px-4 py-5 sm:px-8 sm:py-8 md:px-10 md:py-9"
-                style={{ maxHeight: "calc(100dvh - 24px)" }}
+                className="overflow-y-auto overflow-x-hidden px-5 py-6 sm:px-7 sm:py-7 md:px-8 md:py-8"
+                style={{ maxHeight: "calc(100dvh - 32px)" }}
               >
                 <div className="w-full">
                   {mode === "login" ? (
@@ -338,7 +343,7 @@ export default function AuthGuard({
                         Bienvenido
                       </p>
 
-                      <h1 className="text-[2rem] font-extrabold leading-tight text-gray-900 sm:text-4xl">
+                      <h1 className="text-[1.9rem] font-extrabold leading-tight text-gray-900 sm:text-[2.5rem]">
                         Iniciar sesión
                       </h1>
 
@@ -347,7 +352,7 @@ export default function AuthGuard({
                       </p>
 
                       <form
-                        className="mt-7 space-y-4 sm:mt-8 sm:space-y-5"
+                        className="mt-6 space-y-4 sm:mt-7 sm:space-y-5"
                         onSubmit={handleLogin}
                       >
                         <div>
@@ -362,7 +367,7 @@ export default function AuthGuard({
                             onChange={(e) => setLoginEmail(e.target.value)}
                             required
                             autoComplete="email"
-                            className="block w-full min-w-0 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-base text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:py-4"
+                            className="block w-full min-w-0 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-base text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                           />
                         </div>
 
@@ -388,14 +393,14 @@ export default function AuthGuard({
                             onChange={(e) => setLoginPassword(e.target.value)}
                             required
                             autoComplete="current-password"
-                            className="block w-full min-w-0 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-base text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:py-4"
+                            className="block w-full min-w-0 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-base text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                           />
                         </div>
 
                         <button
                           type="submit"
                           disabled={loginLoading}
-                          className="block w-full rounded-2xl bg-[#050816] px-4 py-3.5 text-center font-semibold text-white transition hover:opacity-95 disabled:opacity-50 sm:py-4"
+                          className="block w-full rounded-2xl bg-[#050816] px-4 py-3.5 text-center font-semibold text-white transition hover:opacity-95 disabled:opacity-50"
                         >
                           {loginLoading ? "Entrando..." : "Iniciar sesión"}
                         </button>
@@ -407,7 +412,7 @@ export default function AuthGuard({
                         </p>
                       )}
 
-                      <p className="mt-7 text-center text-sm text-gray-500 sm:mt-8">
+                      <p className="mt-6 text-center text-sm text-gray-500 sm:mt-7">
                         ¿No tienes cuenta?{" "}
                         <button
                           type="button"
@@ -427,7 +432,7 @@ export default function AuthGuard({
                         Registro
                       </p>
 
-                      <h1 className="text-[2rem] font-extrabold leading-tight text-gray-900 sm:text-4xl">
+                      <h1 className="text-[1.9rem] font-extrabold leading-tight text-gray-900 sm:text-[2.5rem]">
                         Crear cuenta
                       </h1>
 
@@ -436,7 +441,7 @@ export default function AuthGuard({
                       </p>
 
                       <form
-                        className="mt-7 space-y-4 sm:mt-8 sm:space-y-5"
+                        className="mt-6 space-y-4 sm:mt-7 sm:space-y-5"
                         onSubmit={handleRegister}
                       >
                         <div>
@@ -451,7 +456,7 @@ export default function AuthGuard({
                             onChange={(e) => setRegisterFullName(e.target.value)}
                             required
                             autoComplete="name"
-                            className="block w-full min-w-0 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-base text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:py-4"
+                            className="block w-full min-w-0 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-base text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                           />
                         </div>
 
@@ -467,7 +472,7 @@ export default function AuthGuard({
                             onChange={(e) => setRegisterEmail(e.target.value)}
                             required
                             autoComplete="email"
-                            className="block w-full min-w-0 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-base text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:py-4"
+                            className="block w-full min-w-0 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-base text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                           />
                         </div>
 
@@ -483,14 +488,14 @@ export default function AuthGuard({
                             onChange={(e) => setRegisterPassword(e.target.value)}
                             required
                             autoComplete="new-password"
-                            className="block w-full min-w-0 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-base text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:py-4"
+                            className="block w-full min-w-0 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-base text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                           />
                         </div>
 
                         <button
                           type="submit"
                           disabled={registerLoading}
-                          className="block w-full rounded-2xl bg-[#050816] px-4 py-3.5 text-center font-semibold text-white transition hover:opacity-95 disabled:opacity-50 sm:py-4"
+                          className="block w-full rounded-2xl bg-[#050816] px-4 py-3.5 text-center font-semibold text-white transition hover:opacity-95 disabled:opacity-50"
                         >
                           {registerLoading ? "Creando cuenta..." : "Crear cuenta"}
                         </button>
@@ -502,7 +507,7 @@ export default function AuthGuard({
                         </p>
                       )}
 
-                      <p className="mt-7 text-center text-sm text-gray-500 sm:mt-8">
+                      <p className="mt-6 text-center text-sm text-gray-500 sm:mt-7">
                         ¿Ya tienes cuenta?{" "}
                         <button
                           type="button"
