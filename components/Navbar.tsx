@@ -77,12 +77,12 @@ export default function Navbar() {
               className="inline-flex items-center leading-none"
             >
               <span
-                className={`${bebasNeue.className} select-none text-[32px] uppercase leading-none tracking-[-0.018em] text-[#DA010D] sm:text-[36px] md:text-[50px]`}
+                className={`${bebasNeue.className} select-none text-[29px] uppercase leading-none tracking-[-0.018em] text-[#DA010D] sm:text-[32px] md:text-[50px]`}
               >
                 STREAMING
               </span>
               <span
-                className={`${bebasNeue.className} select-none text-[32px] uppercase leading-none tracking-[-0.018em] text-[#FCFCFC] sm:text-[36px] md:text-[50px]`}
+                className={`${bebasNeue.className} select-none text-[29px] uppercase leading-none tracking-[-0.018em] text-[#FCFCFC] sm:text-[32px] md:text-[50px]`}
               >
                 MAYOR
               </span>
