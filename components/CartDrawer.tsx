@@ -848,20 +848,16 @@ export default function CartDrawer() {
 
   const sliderFill = dragX + 56;
 
+  if (!isCartOpen) return null;
+
   return (
     <>
-      {isCartOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-black/55 backdrop-blur-sm"
-          onClick={closeCart}
-        />
-      )}
+      <div
+        className="fixed inset-0 z-40 bg-black/55 backdrop-blur-sm"
+        onClick={closeCart}
+      />
 
-      <aside
-        className={`fixed top-0 right-0 z-50 h-full w-full bg-[#041533] text-white shadow-2xl transition-transform duration-300 sm:w-[430px] ${
-          isCartOpen ? "translate-x-0" : "translate-x-full"
-        }`}
-      >
+      <aside className="fixed top-0 right-0 z-50 h-full w-full bg-[#041533] text-white shadow-2xl sm:w-[430px]">
         <div className="flex items-center justify-between border-b border-white/10 px-5 py-5">
           <div>
             <h2 className="text-2xl font-extrabold">Mi carrito</h2>
