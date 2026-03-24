@@ -1,13 +1,33 @@
-"use client";
-
 import type { ReactNode } from "react";
+import { redirect } from "next/navigation";
 import AdminSidebar from "../../components/admin/AdminSidebar";
+import { createClient } from "@/lib/supabase/server";
 
-export default function AdminLayout({
+export default async function AdminLayout({
   children,
 }: {
   children: ReactNode;
 }) {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/");
+  }
+
+  const { data: profile, error } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  if (error || profile?.role !== "admin") {
+    redirect("/");
+  }
+
   return (
     <main className="min-h-screen bg-[#f4f6fb] text-[#0f172a]">
       <div className="flex min-h-screen">

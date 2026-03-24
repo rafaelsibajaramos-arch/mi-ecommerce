@@ -2,9 +2,28 @@
 
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import type { User } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 
 type AuthMode = "login" | "register";
+
+type ProfileRow = {
+  id: string;
+  role: string | null;
+};
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return error.message;
+  }
+
+  return fallback;
+}
 
 export default function AuthGuard({
   children,
@@ -29,6 +48,8 @@ export default function AuthGuard({
   const [registerLoading, setRegisterLoading] = useState(false);
   const [registerMessage, setRegisterMessage] = useState("");
 
+  const isPublicPath = pathname === "/reset-password";
+
   useEffect(() => {
     let mounted = true;
 
@@ -49,6 +70,7 @@ export default function AuthGuard({
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!mounted) return;
+
       setIsLoggedIn(!!session?.user);
       setCheckingAuth(false);
     });
@@ -61,6 +83,7 @@ export default function AuthGuard({
 
   useEffect(() => {
     if (checkingAuth) return;
+    if (isPublicPath) return;
 
     if (!isLoggedIn) {
       const previousOverflow = document.body.style.overflow;
@@ -70,15 +93,101 @@ export default function AuthGuard({
         document.body.style.overflow = previousOverflow;
       };
     }
-  }, [checkingAuth, isLoggedIn]);
+  }, [checkingAuth, isLoggedIn, isPublicPath]);
+
+  const ensureOwnProfile = async (
+    user: User,
+    fallback?: { fullName?: string; email?: string }
+  ): Promise<{ profile: ProfileRow | null; errorMessage: string | null }> => {
+    const { data: existingProfile, error: existingProfileError } = await supabase
+      .from("profiles")
+      .select("id, role")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (existingProfileError) {
+      return {
+        profile: null,
+        errorMessage: getErrorMessage(
+          existingProfileError,
+          "No se pudo consultar tu perfil."
+        ),
+      };
+    }
+
+    if (existingProfile) {
+      return {
+        profile: existingProfile,
+        errorMessage: null,
+      };
+    }
+
+    const safeEmail = fallback?.email?.trim() || user.email?.trim() || "";
+    const safeFullName =
+      fallback?.fullName?.trim() ||
+      String(user.user_metadata?.full_name || "").trim() ||
+      safeEmail ||
+      "Usuario";
+
+    const { error: insertProfileError } = await supabase.from("profiles").insert({
+      id: user.id,
+      email: safeEmail,
+      full_name: safeFullName,
+      role: "user",
+      balance: 0,
+    });
+
+    if (insertProfileError) {
+      return {
+        profile: null,
+        errorMessage: getErrorMessage(
+          insertProfileError,
+          "La sesión inició, pero no se pudo crear tu perfil."
+        ),
+      };
+    }
+
+    const { data: createdProfile, error: createdProfileError } = await supabase
+      .from("profiles")
+      .select("id, role")
+      .eq("id", user.id)
+      .single();
+
+    if (createdProfileError || !createdProfile) {
+      return {
+        profile: null,
+        errorMessage: getErrorMessage(
+          createdProfileError,
+          "La sesión inició, pero no se pudo cargar tu perfil."
+        ),
+      };
+    }
+
+    return {
+      profile: createdProfile,
+      errorMessage: null,
+    };
+  };
+
+  const redirectByRole = (role: string | null | undefined) => {
+    if (role === "admin") {
+      router.replace("/admin");
+    } else {
+      router.replace("/");
+    }
+
+    router.refresh();
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginLoading(true);
     setLoginMessage("");
 
+    const cleanEmail = loginEmail.trim();
+
     const { data, error } = await supabase.auth.signInWithPassword({
-      email: loginEmail.trim(),
+      email: cleanEmail,
       password: loginPassword,
     });
 
@@ -96,28 +205,27 @@ export default function AuthGuard({
       return;
     }
 
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single();
+    const { profile, errorMessage } = await ensureOwnProfile(user, {
+      email: cleanEmail,
+    });
 
-    setLoginLoading(false);
-
-    if (profile?.role === "admin") {
-      router.push("/admin");
-    } else {
-      router.push("/");
+    if (errorMessage || !profile) {
+      setLoginMessage(errorMessage || "No se pudo cargar tu perfil.");
+      setLoginLoading(false);
+      return;
     }
 
-    router.refresh();
+    setLoginLoading(false);
+    redirectByRole(profile.role);
   };
 
   const handleForgotPassword = async () => {
     setLoginMessage("");
 
     if (!loginEmail.trim()) {
-      setLoginMessage("Escribe tu correo electrónico para recuperar tu contraseña.");
+      setLoginMessage(
+        "Escribe tu correo electrónico para recuperar tu contraseña."
+      );
       return;
     }
 
@@ -171,7 +279,7 @@ export default function AuthGuard({
 
       if (loginError) {
         setRegisterMessage(
-          "Cuenta creada, pero no se pudo iniciar sesión automáticamente."
+          "Cuenta creada. Revisa tu correo para confirmar o inicia sesión manualmente."
         );
         setRegisterLoading(false);
         return;
@@ -186,44 +294,22 @@ export default function AuthGuard({
       return;
     }
 
-    await supabase.from("profiles").upsert(
-      {
-        id: user.id,
-        email: cleanEmail,
-        full_name: cleanName,
-      },
-      { onConflict: "id" }
-    );
+    const { profile, errorMessage } = await ensureOwnProfile(user, {
+      fullName: cleanName,
+      email: cleanEmail,
+    });
 
-    let role: string | null = null;
-
-    for (let i = 0; i < 5; i++) {
-      const { data: profileData } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", user.id)
-        .single();
-
-      if (profileData?.role) {
-        role = profileData.role;
-        break;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 350));
+    if (errorMessage || !profile) {
+      setRegisterMessage(errorMessage || "No se pudo crear tu perfil.");
+      setRegisterLoading(false);
+      return;
     }
 
     setRegisterLoading(false);
-
-    if (role === "admin") {
-      router.push("/admin");
-    } else {
-      router.push("/");
-    }
-
-    router.refresh();
+    redirectByRole(profile.role);
   };
 
-  const showAuthModal = !checkingAuth && !isLoggedIn;
+  const showAuthModal = !checkingAuth && !isLoggedIn && !isPublicPath;
 
   return (
     <>
