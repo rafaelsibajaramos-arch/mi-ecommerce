@@ -24,7 +24,7 @@ export async function createClient() {
               cookieStore.set(name, value, options);
             });
           } catch {
-            // Puede ejecutarse desde Server Components donde no siempre se pueden escribir cookies
+            // En algunos Server Components no se pueden escribir cookies
           }
         },
       },

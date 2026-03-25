@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import type { User } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 
 type AuthMode = "login" | "register";
@@ -53,99 +52,43 @@ export default function AuthGuard({
   const getOwnProfile = async (
     userId: string
   ): Promise<{ profile: ProfileRow | null; errorMessage: string | null }> => {
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("id, role")
-      .eq("id", userId)
-      .maybeSingle();
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, role")
+        .eq("id", userId)
+        .maybeSingle();
 
-    if (error) {
+      if (error) {
+        return {
+          profile: null,
+          errorMessage: getErrorMessage(
+            error,
+            "No se pudo consultar tu perfil."
+          ),
+        };
+      }
+
+      if (!data) {
+        return {
+          profile: null,
+          errorMessage: "Tu cuenta fue desactivada o no tiene un perfil válido.",
+        };
+      }
+
+      return {
+        profile: data,
+        errorMessage: null,
+      };
+    } catch (error) {
       return {
         profile: null,
         errorMessage: getErrorMessage(
           error,
-          "No se pudo consultar tu perfil."
+          "Ocurrió un error revisando tu perfil."
         ),
       };
     }
-
-    if (!data) {
-      return {
-        profile: null,
-        errorMessage: "Tu cuenta fue desactivada o no tiene un perfil válido.",
-      };
-    }
-
-    return {
-      profile: data,
-      errorMessage: null,
-    };
-  };
-
-  const createOwnProfile = async (
-    user: User,
-    fallback?: { fullName?: string; email?: string }
-  ): Promise<{ profile: ProfileRow | null; errorMessage: string | null }> => {
-    const safeEmail = fallback?.email?.trim() || user.email?.trim() || "";
-    const safeFullName =
-      fallback?.fullName?.trim() ||
-      String(user.user_metadata?.full_name || "").trim() ||
-      safeEmail ||
-      "Usuario";
-
-    const { error: insertError } = await supabase.from("profiles").insert({
-      id: user.id,
-      email: safeEmail,
-      full_name: safeFullName,
-      role: "user",
-      balance: 0,
-    });
-
-    if (insertError) {
-      return {
-        profile: null,
-        errorMessage: getErrorMessage(
-          insertError,
-          "La cuenta se creó, pero no se pudo crear el perfil."
-        ),
-      };
-    }
-
-    return getOwnProfile(user.id);
-  };
-
-  const forceLogoutInvalidProfile = async (message?: string) => {
-    await supabase.auth.signOut();
-
-    setIsLoggedIn(false);
-    setCheckingAuth(false);
-
-    if (message) {
-      setLoginMessage(message);
-    }
-
-    router.replace("/");
-    router.refresh();
-  };
-
-  const verifyActiveSession = async (user: User | null) => {
-    if (!user) {
-      setIsLoggedIn(false);
-      setCheckingAuth(false);
-      return;
-    }
-
-    const { profile, errorMessage } = await getOwnProfile(user.id);
-
-    if (errorMessage || !profile) {
-      await forceLogoutInvalidProfile(
-        errorMessage || "Tu cuenta no tiene un perfil válido."
-      );
-      return;
-    }
-
-    setIsLoggedIn(true);
-    setCheckingAuth(false);
   };
 
   const redirectByRole = (role: string | null | undefined) => {
@@ -158,26 +101,76 @@ export default function AuthGuard({
     router.refresh();
   };
 
+  const forceLogoutInvalidProfile = async (message: string) => {
+    try {
+      await supabase.auth.signOut();
+    } catch {}
+
+    setIsLoggedIn(false);
+    setLoginMessage(message);
+    setCheckingAuth(false);
+
+    router.replace("/");
+    router.refresh();
+  };
+
   useEffect(() => {
     let mounted = true;
 
-    const checkSession = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+    const bootAuth = async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
 
-      if (!mounted) return;
+        if (!mounted) return;
 
-      await verifyActiveSession(user ?? null);
+        const user = session?.user;
+
+        if (!user) {
+          setIsLoggedIn(false);
+          setCheckingAuth(false);
+          return;
+        }
+
+        const { profile, errorMessage } = await getOwnProfile(user.id);
+
+        if (!mounted) return;
+
+        if (errorMessage || !profile) {
+          await forceLogoutInvalidProfile(
+            errorMessage || "Tu cuenta no tiene un perfil válido."
+          );
+          return;
+        }
+
+        setIsLoggedIn(true);
+        setCheckingAuth(false);
+      } catch {
+        if (!mounted) return;
+        setIsLoggedIn(false);
+        setCheckingAuth(false);
+        setLoginMessage("No se pudo verificar tu sesión.");
+      }
     };
 
-    checkSession();
+    bootAuth();
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
       if (!mounted) return;
-      await verifyActiveSession(session?.user ?? null);
+
+      if (event === "SIGNED_OUT") {
+        setIsLoggedIn(false);
+        setCheckingAuth(false);
+        return;
+      }
+
+      if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
+        setIsLoggedIn(!!session?.user);
+        setCheckingAuth(false);
+      }
     });
 
     return () => {
@@ -205,39 +198,47 @@ export default function AuthGuard({
     setLoginLoading(true);
     setLoginMessage("");
 
-    const cleanEmail = loginEmail.trim();
+    try {
+      const cleanEmail = loginEmail.trim();
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: cleanEmail,
-      password: loginPassword,
-    });
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: cleanEmail,
+        password: loginPassword,
+      });
 
-    if (error) {
-      setLoginMessage(error.message);
+      if (error) {
+        setLoginMessage(error.message);
+        setLoginLoading(false);
+        return;
+      }
+
+      const user = data.user;
+
+      if (!user) {
+        setLoginMessage("No se pudo iniciar sesión.");
+        setLoginLoading(false);
+        return;
+      }
+
+      const { profile, errorMessage } = await getOwnProfile(user.id);
+
+      if (errorMessage || !profile) {
+        await forceLogoutInvalidProfile(
+          errorMessage || "Tu cuenta fue desactivada o no tiene un perfil válido."
+        );
+        setLoginLoading(false);
+        return;
+      }
+
+      setIsLoggedIn(true);
       setLoginLoading(false);
-      return;
-    }
-
-    const user = data.user;
-
-    if (!user) {
-      setLoginMessage("No se pudo iniciar sesión.");
-      setLoginLoading(false);
-      return;
-    }
-
-    const { profile, errorMessage } = await getOwnProfile(user.id);
-
-    if (errorMessage || !profile) {
-      await forceLogoutInvalidProfile(
-        errorMessage || "Tu cuenta fue desactivada o no tiene un perfil válido."
+      redirectByRole(profile.role);
+    } catch (error) {
+      setLoginMessage(
+        getErrorMessage(error, "Ocurrió un error iniciando sesión.")
       );
       setLoginLoading(false);
-      return;
     }
-
-    setLoginLoading(false);
-    redirectByRole(profile.role);
   };
 
   const handleForgotPassword = async () => {
@@ -270,65 +271,92 @@ export default function AuthGuard({
     setRegisterLoading(true);
     setRegisterMessage("");
 
-    const cleanName = registerFullName.trim();
-    const cleanEmail = registerEmail.trim();
+    try {
+      const cleanName = registerFullName.trim();
+      const cleanEmail = registerEmail.trim();
 
-    const { data, error } = await supabase.auth.signUp({
-      email: cleanEmail,
-      password: registerPassword,
-      options: {
-        data: {
-          full_name: cleanName,
+      const { data, error } = await supabase.auth.signUp({
+        email: cleanEmail,
+        password: registerPassword,
+        options: {
+          data: {
+            full_name: cleanName,
+          },
         },
-      },
-    });
+      });
 
-    if (error) {
-      setRegisterMessage(error.message);
-      setRegisterLoading(false);
-      return;
-    }
+      if (error) {
+        setRegisterMessage(error.message);
+        setRegisterLoading(false);
+        return;
+      }
 
-    let user = data.user;
+      let user = data.user;
 
-    if (!data.session) {
-      const { data: loginData, error: loginError } =
-        await supabase.auth.signInWithPassword({
+      if (!data.session) {
+        const { data: loginData, error: loginError } =
+          await supabase.auth.signInWithPassword({
+            email: cleanEmail,
+            password: registerPassword,
+          });
+
+        if (loginError) {
+          setRegisterMessage(
+            "Cuenta creada. Revisa tu correo para confirmar o inicia sesión manualmente."
+          );
+          setRegisterLoading(false);
+          return;
+        }
+
+        user = loginData.user;
+      }
+
+      if (!user) {
+        setRegisterMessage("Cuenta creada, pero no se pudo obtener el usuario.");
+        setRegisterLoading(false);
+        return;
+      }
+
+      const { error: profileInsertError } = await supabase
+        .from("profiles")
+        .insert({
+          id: user.id,
           email: cleanEmail,
-          password: registerPassword,
+          full_name: cleanName,
+          role: "user",
+          balance: 0,
         });
 
-      if (loginError) {
+      if (profileInsertError) {
+        await supabase.auth.signOut();
         setRegisterMessage(
-          "Cuenta creada. Revisa tu correo para confirmar o inicia sesión manualmente."
+          getErrorMessage(
+            profileInsertError,
+            "La cuenta se creó, pero no se pudo crear el perfil."
+          )
         );
         setRegisterLoading(false);
         return;
       }
 
-      user = loginData.user;
-    }
+      const { profile, errorMessage } = await getOwnProfile(user.id);
 
-    if (!user) {
-      setRegisterMessage("Cuenta creada, pero no se pudo obtener el usuario.");
+      if (errorMessage || !profile) {
+        await supabase.auth.signOut();
+        setRegisterMessage(errorMessage || "No se pudo cargar tu perfil.");
+        setRegisterLoading(false);
+        return;
+      }
+
+      setIsLoggedIn(true);
       setRegisterLoading(false);
-      return;
-    }
-
-    const { profile, errorMessage } = await createOwnProfile(user, {
-      fullName: cleanName,
-      email: cleanEmail,
-    });
-
-    if (errorMessage || !profile) {
-      await supabase.auth.signOut();
-      setRegisterMessage(errorMessage || "No se pudo crear tu perfil.");
+      redirectByRole(profile.role);
+    } catch (error) {
+      setRegisterMessage(
+        getErrorMessage(error, "Ocurrió un error creando la cuenta.")
+      );
       setRegisterLoading(false);
-      return;
     }
-
-    setRegisterLoading(false);
-    redirectByRole(profile.role);
   };
 
   const showAuthModal = !checkingAuth && !isLoggedIn && !isPublicPath;
