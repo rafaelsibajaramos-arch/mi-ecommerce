@@ -4,207 +4,6 @@ import { useMemo, useRef, useState } from "react";
 import { useCart } from "../context/CartContext";
 import { supabase } from "../lib/supabase";
 
-type ProductType = "simple" | "variable" | "composite";
-
-type ProductRow = {
-  id: string;
-  name: string;
-  price: number;
-  stock: number;
-  is_active: boolean;
-  product_type?: ProductType;
-  avoid_repeat_license?: boolean;
-  use_priority_licenses?: boolean;
-  fallback_to_general_licenses?: boolean;
-};
-
-type VariantRow = {
-  id: string;
-  product_id: string;
-  name: string;
-  price: number;
-  stock: number;
-  is_active: boolean;
-};
-
-type ProfileRow = {
-  id: string;
-  balance: number;
-};
-
-type CreatedOrderItemRow = {
-  id: string;
-  order_id: string;
-  product_id: string;
-  variant_id: string | null;
-  quantity: number;
-  unit_price: number;
-  item_type: string;
-  product_name: string;
-  variant_name: string | null;
-};
-
-type LicenseRow = {
-  id: string;
-  product_id: string;
-  variant_id: string | null;
-  license_text: string;
-  status: string;
-  is_priority?: boolean;
-};
-
-type AssignedLicenseHistoryRow = {
-  product_id: string;
-  license_text: string;
-};
-
-const generateRandomOrderNumber = () => {
-  return Math.floor(10000 + Math.random() * 90000);
-};
-
-const normalizeLicenseText = (value: string) => value.trim();
-
-const buildItemKey = (productId: string, variantId?: string | null) =>
-  `${productId}__${variantId ?? "base"}`;
-
-async function getUniqueOrderNumber() {
-  let attempts = 0;
-
-  while (attempts < 25) {
-    const candidate = generateRandomOrderNumber();
-
-    const { data, error } = await supabase
-      .from("orders")
-      .select("id")
-      .eq("order_number", candidate)
-      .maybeSingle();
-
-    if (error) {
-      throw new Error("No se pudo validar el número de pedido.");
-    }
-
-    if (!data) {
-      return candidate;
-    }
-
-    attempts += 1;
-  }
-
-  throw new Error("No se pudo generar un número de pedido único.");
-}
-
-async function fetchAvailableLicensePool({
-  productId,
-  variantId,
-  isPriority,
-}: {
-  productId: string;
-  variantId: string | null;
-  isPriority: boolean;
-}) {
-  let query = supabase
-    .from("product_licenses")
-    .select("id, product_id, variant_id, license_text, status, is_priority")
-    .eq("product_id", productId)
-    .eq("status", "available")
-    .eq("is_priority", isPriority)
-    .order("created_at", { ascending: true });
-
-  if (variantId) {
-    query = query.eq("variant_id", variantId);
-  } else {
-    query = query.is("variant_id", null);
-  }
-
-  const { data, error } = await query;
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return (data as LicenseRow[]) || [];
-}
-
-async function selectLicensesForItem({
-  productId,
-  variantId,
-  quantity,
-  avoidRepeatLicense,
-  usePriorityLicenses,
-  fallbackToGeneralLicenses,
-  previouslyAssignedTexts,
-  alreadySelectedTexts,
-}: {
-  productId: string;
-  variantId: string | null;
-  quantity: number;
-  avoidRepeatLicense: boolean;
-  usePriorityLicenses: boolean;
-  fallbackToGeneralLicenses: boolean;
-  previouslyAssignedTexts: Set<string>;
-  alreadySelectedTexts: Set<string>;
-}) {
-  const pools: { variantId: string | null; isPriority: boolean }[] = [];
-
-  if (variantId) {
-    const priorityPool = { variantId, isPriority: true };
-    const generalPool = { variantId: null, isPriority: false };
-
-    if (usePriorityLicenses) {
-      pools.push(priorityPool);
-
-      if (fallbackToGeneralLicenses) {
-        pools.push(generalPool);
-      }
-    } else {
-      if (fallbackToGeneralLicenses) {
-        pools.push(generalPool);
-      }
-
-      pools.push(priorityPool);
-    }
-  } else {
-    pools.push({ variantId: null, isPriority: false });
-  }
-
-  const selected: LicenseRow[] = [];
-  const selectedIds = new Set<string>();
-  const selectedTexts = new Set<string>(alreadySelectedTexts);
-
-  for (const pool of pools) {
-    const poolLicenses = await fetchAvailableLicensePool({
-      productId,
-      variantId: pool.variantId,
-      isPriority: pool.isPriority,
-    });
-
-    for (const license of poolLicenses) {
-      if (selectedIds.has(license.id)) continue;
-
-      const normalizedText = normalizeLicenseText(license.license_text);
-      if (!normalizedText) continue;
-
-      if (avoidRepeatLicense) {
-        if (previouslyAssignedTexts.has(normalizedText)) continue;
-        if (selectedTexts.has(normalizedText)) continue;
-      }
-
-      selected.push(license);
-      selectedIds.add(license.id);
-
-      if (avoidRepeatLicense) {
-        selectedTexts.add(normalizedText);
-      }
-
-      if (selected.length >= quantity) {
-        return selected;
-      }
-    }
-  }
-
-  return selected;
-}
-
 export default function CartDrawer() {
   const {
     cart,
@@ -217,7 +16,7 @@ export default function CartDrawer() {
   } = useCart();
 
   const total = useMemo(
-    () => cart.reduce((acc, item) => acc + item.price * item.quantity, 0),
+    () => cart.reduce((acc, item) => acc + Number(item.price) * item.quantity, 0),
     [cart]
   );
 
@@ -227,7 +26,6 @@ export default function CartDrawer() {
   );
 
   const [message, setMessage] = useState("");
-  const [successMessage, setSuccessMessage] = useState("");
   const [processing, setProcessing] = useState(false);
 
   const trackRef = useRef<HTMLDivElement | null>(null);
@@ -249,532 +47,57 @@ export default function CartDrawer() {
 
     setProcessing(true);
     setMessage("");
-    setSuccessMessage("");
 
     try {
       const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
+        data: { session },
+      } = await supabase.auth.getSession();
 
-      if (userError || !user) {
-        setMessage("Debes iniciar sesión para completar la compra.");
-        resetSlider();
-        setProcessing(false);
-        return;
-      }
+      let accessToken = session?.access_token || null;
 
-      const { data: profileData, error: profileError } = await supabase
-        .from("profiles")
-        .select("id, balance")
-        .eq("id", user.id)
-        .single();
+      if (!accessToken) {
+        const { data: refreshed, error: refreshError } =
+          await supabase.auth.refreshSession();
 
-      if (profileError || !profileData) {
-        setMessage("No se pudo cargar tu perfil.");
-        resetSlider();
-        setProcessing(false);
-        return;
-      }
-
-      const profile = profileData as ProfileRow;
-
-      const productIds = Array.from(new Set(cart.map((item) => item.id)));
-      const variantIds = Array.from(
-        new Set(cart.map((item) => item.variantId).filter(Boolean) as string[])
-      );
-
-      const [
-        { data: productsData, error: productsError },
-        { data: variantsData, error: variantsError },
-      ] = await Promise.all([
-        supabase
-          .from("products")
-          .select(
-            "id, name, price, stock, is_active, product_type, avoid_repeat_license, use_priority_licenses, fallback_to_general_licenses"
-          )
-          .in("id", productIds),
-        variantIds.length
-          ? supabase
-              .from("product_variants")
-              .select("id, product_id, name, price, stock, is_active")
-              .in("id", variantIds)
-          : Promise.resolve({ data: [] as VariantRow[], error: null }),
-      ]);
-
-      if (productsError) {
-        setMessage("No se pudieron validar los productos.");
-        resetSlider();
-        setProcessing(false);
-        return;
-      }
-
-      if (variantsError) {
-        setMessage("No se pudieron validar las variantes.");
-        resetSlider();
-        setProcessing(false);
-        return;
-      }
-
-      const productsMap = Object.fromEntries(
-        ((productsData as ProductRow[]) || []).map((p) => [p.id, p])
-      );
-
-      const variantsMap = Object.fromEntries(
-        ((variantsData as VariantRow[]) || []).map((v) => [v.id, v])
-      );
-
-      let validatedTotal = 0;
-
-      for (const item of cart) {
-        const product = productsMap[item.id];
-
-        if (!product || !product.is_active) {
-          setMessage(`El producto "${item.name}" ya no está disponible.`);
+        if (refreshError || !refreshed.session?.access_token) {
+          setMessage("Debes iniciar sesión para completar la compra.");
           resetSlider();
-          setProcessing(false);
           return;
         }
 
-        if (item.variantId) {
-          const variant = variantsMap[item.variantId];
-
-          if (!variant || !variant.is_active) {
-            setMessage(`La variante de "${item.name}" ya no está disponible.`);
-            resetSlider();
-            setProcessing(false);
-            return;
-          }
-
-          const fallbackEnabled =
-            product.fallback_to_general_licenses !== false;
-
-          const effectiveStock =
-            Number(variant.stock) +
-            (fallbackEnabled ? Number(product.stock) : 0);
-
-          if (effectiveStock < item.quantity) {
-            setMessage(`No hay stock suficiente para "${item.name}".`);
-            resetSlider();
-            setProcessing(false);
-            return;
-          }
-
-          validatedTotal += Number(variant.price) * item.quantity;
-        } else {
-          if (Number(product.stock) < item.quantity) {
-            setMessage(`No hay stock suficiente para "${item.name}".`);
-            resetSlider();
-            setProcessing(false);
-            return;
-          }
-
-          validatedTotal += Number(product.price) * item.quantity;
-        }
+        accessToken = refreshed.session.access_token;
       }
 
-      if (Number(profile.balance) < validatedTotal) {
-        setMessage(
-          `Saldo insuficiente. Tu saldo actual es $${Number(
-            profile.balance
-          ).toLocaleString()} y el total es $${validatedTotal.toLocaleString()}.`
-        );
+      const response = await fetch("/api/checkout", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          cart: cart.map((item) => ({
+            id: item.id,
+            name: item.name,
+            price: Number(item.price),
+            quantity: Number(item.quantity),
+            variantId: item.variantId || null,
+            variantName: item.variantName || null,
+          })),
+        }),
+      });
+
+      const result = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        setMessage(result?.error || "No se pudo completar la compra.");
         resetSlider();
-        setProcessing(false);
         return;
-      }
-
-      const { data: assignedHistoryData, error: assignedHistoryError } =
-        await supabase
-          .from("product_licenses")
-          .select("product_id, license_text")
-          .eq("assigned_user_id", user.id)
-          .eq("status", "assigned")
-          .in("product_id", productIds);
-
-      if (assignedHistoryError) {
-        setMessage("No se pudo validar el historial de licencias del usuario.");
-        resetSlider();
-        setProcessing(false);
-        return;
-      }
-
-      const assignedHistoryMap = new Map<string, Set<string>>();
-
-      for (const row of ((assignedHistoryData ||
-        []) as AssignedLicenseHistoryRow[])) {
-        const normalizedText = normalizeLicenseText(row.license_text);
-        if (!normalizedText) continue;
-
-        if (!assignedHistoryMap.has(row.product_id)) {
-          assignedHistoryMap.set(row.product_id, new Set<string>());
-        }
-
-        assignedHistoryMap.get(row.product_id)!.add(normalizedText);
-      }
-
-      const orderSelectedTextsByProduct = new Map<string, Set<string>>();
-      const selectedLicensesByItemKey = new Map<string, LicenseRow[]>();
-
-      const productStockDeltas = new Map<
-        string,
-        { original: number; decrement: number }
-      >();
-
-      const variantStockDeltas = new Map<
-        string,
-        { original: number; decrement: number }
-      >();
-
-      for (const item of cart) {
-        const product = productsMap[item.id];
-        const variant = item.variantId ? variantsMap[item.variantId] : null;
-        const itemKey = buildItemKey(item.id, item.variantId || null);
-
-        if (!product) {
-          setMessage(`No se pudo preparar la compra de "${item.name}".`);
-          resetSlider();
-          setProcessing(false);
-          return;
-        }
-
-        const avoidRepeat = Boolean(product.avoid_repeat_license);
-        const usePriority = Boolean(product.use_priority_licenses);
-        const fallbackToGeneral =
-          product.fallback_to_general_licenses !== false;
-
-        const previouslyAssignedTexts =
-          assignedHistoryMap.get(item.id) || new Set<string>();
-
-        const alreadySelectedTexts =
-          orderSelectedTextsByProduct.get(item.id) || new Set<string>();
-
-        const selectedLicenses = await selectLicensesForItem({
-          productId: item.id,
-          variantId: item.variantId || null,
-          quantity: item.quantity,
-          avoidRepeatLicense: avoidRepeat,
-          usePriorityLicenses: usePriority,
-          fallbackToGeneralLicenses: fallbackToGeneral,
-          previouslyAssignedTexts,
-          alreadySelectedTexts,
-        });
-
-        if (selectedLicenses.length < item.quantity) {
-          setMessage(
-            `No hay suficientes licencias disponibles para "${item.name}" con la configuración actual.`
-          );
-          resetSlider();
-          setProcessing(false);
-          return;
-        }
-
-        selectedLicensesByItemKey.set(itemKey, selectedLicenses);
-
-        if (avoidRepeat) {
-          const updatedSelectedTexts = new Set<string>(alreadySelectedTexts);
-
-          for (const license of selectedLicenses) {
-            updatedSelectedTexts.add(normalizeLicenseText(license.license_text));
-          }
-
-          orderSelectedTextsByProduct.set(item.id, updatedSelectedTexts);
-        }
-
-        if (item.variantId && variant) {
-          const priorityCount = selectedLicenses.filter(
-            (license) => license.variant_id === item.variantId
-          ).length;
-
-          const generalCount = selectedLicenses.filter(
-            (license) => license.variant_id === null
-          ).length;
-
-          if (priorityCount > 0) {
-            const currentVariantDelta = variantStockDeltas.get(variant.id);
-            if (currentVariantDelta) {
-              currentVariantDelta.decrement += priorityCount;
-            } else {
-              variantStockDeltas.set(variant.id, {
-                original: Number(variant.stock),
-                decrement: priorityCount,
-              });
-            }
-          }
-
-          if (generalCount > 0) {
-            const currentProductDelta = productStockDeltas.get(product.id);
-            if (currentProductDelta) {
-              currentProductDelta.decrement += generalCount;
-            } else {
-              productStockDeltas.set(product.id, {
-                original: Number(product.stock),
-                decrement: generalCount,
-              });
-            }
-          }
-        } else {
-          const currentProductDelta = productStockDeltas.get(product.id);
-
-          if (currentProductDelta) {
-            currentProductDelta.decrement += selectedLicenses.length;
-          } else {
-            productStockDeltas.set(product.id, {
-              original: Number(product.stock),
-              decrement: selectedLicenses.length,
-            });
-          }
-        }
-      }
-
-      const orderNumber = await getUniqueOrderNumber();
-
-      const { data: orderData, error: orderError } = await supabase
-        .from("orders")
-        .insert([
-          {
-            user_id: user.id,
-            total: validatedTotal,
-            status: "paid",
-            order_number: orderNumber,
-          },
-        ])
-        .select()
-        .single();
-
-      if (orderError || !orderData) {
-        setMessage(orderError?.message || "No se pudo crear el pedido.");
-        resetSlider();
-        setProcessing(false);
-        return;
-      }
-
-      let createdOrderId: string | null = orderData.id;
-      let createdWalletTransactionId: string | null = null;
-      let balanceDiscounted = false;
-      const assignedLicenseIds: string[] = [];
-      const updatedVariantStockIds = new Set<string>();
-      const updatedProductStockIds = new Set<string>();
-
-      const rollbackPurchase = async () => {
-        for (const variantId of Array.from(updatedVariantStockIds)) {
-          const restore = variantStockDeltas.get(variantId);
-          if (!restore) continue;
-
-          await supabase
-            .from("product_variants")
-            .update({ stock: restore.original })
-            .eq("id", variantId);
-        }
-
-        for (const productId of Array.from(updatedProductStockIds)) {
-          const restore = productStockDeltas.get(productId);
-          if (!restore) continue;
-
-          await supabase
-            .from("products")
-            .update({ stock: restore.original })
-            .eq("id", productId);
-        }
-
-        if (assignedLicenseIds.length > 0) {
-          await supabase
-            .from("product_licenses")
-            .update({
-              status: "available",
-              assigned_order_id: null,
-              assigned_order_item_id: null,
-              assigned_user_id: null,
-            })
-            .in("id", assignedLicenseIds);
-        }
-
-        if (createdWalletTransactionId) {
-          await supabase
-            .from("wallet_transactions")
-            .delete()
-            .eq("id", createdWalletTransactionId);
-        }
-
-        if (createdOrderId) {
-          await supabase.from("orders").delete().eq("id", createdOrderId);
-        }
-
-        if (balanceDiscounted) {
-          await supabase
-            .from("profiles")
-            .update({ balance: profile.balance })
-            .eq("id", user.id);
-        }
-      };
-
-      const newBalance = Number(profile.balance) - validatedTotal;
-
-      const { error: balanceUpdateError } = await supabase
-        .from("profiles")
-        .update({ balance: newBalance })
-        .eq("id", user.id);
-
-      if (balanceUpdateError) {
-        await supabase.from("orders").delete().eq("id", orderData.id);
-        setMessage("No se pudo descontar el saldo.");
-        resetSlider();
-        setProcessing(false);
-        return;
-      }
-
-      balanceDiscounted = true;
-
-      const purchaseNote =
-        totalItems === 1
-          ? `Compra del pedido #${orderNumber}`
-          : `Compra de ${totalItems} producto(s) en el pedido #${orderNumber}`;
-
-      const { data: walletTransactionData, error: walletTransactionError } =
-        await supabase
-          .from("wallet_transactions")
-          .insert([
-            {
-              user_id: user.id,
-              type: "debit",
-              amount: validatedTotal,
-              note: purchaseNote,
-            },
-          ])
-          .select("id")
-          .single();
-
-      if (walletTransactionError || !walletTransactionData) {
-        await rollbackPurchase();
-        setMessage(
-          walletTransactionError?.message ||
-            "No se pudo registrar la transacción de compra."
-        );
-        resetSlider();
-        setProcessing(false);
-        return;
-      }
-
-      createdWalletTransactionId = walletTransactionData.id;
-
-      const createdOrderItems: CreatedOrderItemRow[] = [];
-      const orderItemsByKey = new Map<string, CreatedOrderItemRow>();
-
-      for (const item of cart) {
-        const product = productsMap[item.id];
-        const variant = item.variantId ? variantsMap[item.variantId] : null;
-        const unitPrice = Number(variant?.price ?? product?.price ?? item.price);
-
-        const { data: orderItemData, error: orderItemError } = await supabase
-          .from("order_items")
-          .insert([
-            {
-              order_id: orderData.id,
-              product_id: item.id,
-              variant_id: item.variantId || null,
-              quantity: item.quantity,
-              unit_price: unitPrice,
-              item_type: item.variantId ? "variant" : "simple",
-              product_name: product?.name || item.name,
-              variant_name: item.variantName || null,
-            },
-          ])
-          .select()
-          .single();
-
-        if (orderItemError || !orderItemData) {
-          await rollbackPurchase();
-          setMessage("No se pudo guardar el detalle del pedido.");
-          resetSlider();
-          setProcessing(false);
-          return;
-        }
-
-        const createdItem = orderItemData as CreatedOrderItemRow;
-        createdOrderItems.push(createdItem);
-        orderItemsByKey.set(
-          buildItemKey(item.id, item.variantId || null),
-          createdItem
-        );
-      }
-
-      for (const item of cart) {
-        const itemKey = buildItemKey(item.id, item.variantId || null);
-        const matchingOrderItem = orderItemsByKey.get(itemKey);
-        const selectedLicenses = selectedLicensesByItemKey.get(itemKey) || [];
-
-        if (!matchingOrderItem) {
-          await rollbackPurchase();
-          setMessage(`No se pudo completar la entrega de "${item.name}".`);
-          resetSlider();
-          setProcessing(false);
-          return;
-        }
-
-        for (const license of selectedLicenses) {
-          const { data: assignedRow, error: assignError } = await supabase
-            .from("product_licenses")
-            .update({
-              status: "assigned",
-              assigned_order_id: orderData.id,
-              assigned_order_item_id: matchingOrderItem.id,
-              assigned_user_id: user.id,
-            })
-            .eq("id", license.id)
-            .eq("status", "available")
-            .select("id")
-            .maybeSingle();
-
-          if (assignError || !assignedRow) {
-            await rollbackPurchase();
-            setMessage(`No se pudo completar la entrega de "${item.name}".`);
-            resetSlider();
-            setProcessing(false);
-            return;
-          }
-
-          assignedLicenseIds.push(license.id);
-        }
-      }
-
-      for (const [variantId, stockInfo] of variantStockDeltas.entries()) {
-        const { error } = await supabase
-          .from("product_variants")
-          .update({ stock: stockInfo.original - stockInfo.decrement })
-          .eq("id", variantId);
-
-        if (error) {
-          await rollbackPurchase();
-          setMessage("No se pudo actualizar el stock de una variante.");
-          resetSlider();
-          setProcessing(false);
-          return;
-        }
-
-        updatedVariantStockIds.add(variantId);
-      }
-
-      for (const [productId, stockInfo] of productStockDeltas.entries()) {
-        const { error } = await supabase
-          .from("products")
-          .update({ stock: stockInfo.original - stockInfo.decrement })
-          .eq("id", productId);
-
-        if (error) {
-          await rollbackPurchase();
-          setMessage("No se pudo actualizar el stock de un producto.");
-          resetSlider();
-          setProcessing(false);
-          return;
-        }
-
-        updatedProductStockIds.add(productId);
       }
 
       clearCart();
       closeCart();
       resetSlider();
-      window.location.href = "/account/orders";
+      window.location.href = result?.redirectTo || "/account/orders";
     } catch (error) {
       setMessage(
         error instanceof Error
@@ -793,7 +116,6 @@ export default function CartDrawer() {
     }
 
     setMessage("");
-    setSuccessMessage("");
 
     const trackRect = trackRef.current.getBoundingClientRect();
     const knobWidth = knobRef.current.offsetWidth;
@@ -974,12 +296,6 @@ export default function CartDrawer() {
             {message && (
               <div className="rounded-2xl border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-200">
                 {message}
-              </div>
-            )}
-
-            {successMessage && (
-              <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4 text-sm text-emerald-200">
-                {successMessage}
               </div>
             )}
 
