@@ -5,6 +5,9 @@ import { supabase } from "../lib/supabase";
 import { useCart } from "../context/CartContext";
 import Footer from "../components/Footer";
 import WhatsAppButton from "../components/WhatsAppButton";
+import OrderReceiptModal, {
+  type ReceiptOrder,
+} from "../components/OrderReceiptModal";
 
 type ProductType = "simple" | "variable" | "composite";
 
@@ -39,6 +42,43 @@ type CategoryItem = {
   count: number;
 };
 
+type ReceiptOrderRow = {
+  id: string;
+  order_number: number | null;
+  user_id: string;
+  total: number;
+  status: string | null;
+  created_at: string;
+};
+
+type ReceiptOrderItemRow = {
+  id: string;
+  order_id: string;
+  product_id: string;
+  quantity: number;
+  unit_price: number | null;
+  product_name: string | null;
+  variant_name: string | null;
+};
+
+type ReceiptProductRow = {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string | null;
+};
+
+type ReceiptLicenseRow = {
+  id: string;
+  product_id: string;
+  variant_id: string | null;
+  license_text: string;
+  status: string;
+  assigned_order_id: string | null;
+  assigned_order_item_id: string | null;
+  assigned_user_id: string | null;
+};
+
 export default function HomePage() {
   const { addToCart } = useCart();
 
@@ -53,8 +93,10 @@ export default function HomePage() {
   const [selectedCategory, setSelectedCategory] = useState("Todas");
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
+  const [receiptMessage, setReceiptMessage] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
   const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null);
+  const [receiptOrder, setReceiptOrder] = useState<ReceiptOrder | null>(null);
 
   useEffect(() => {
     fetchProducts();
@@ -84,6 +126,163 @@ export default function HomePage() {
       window.removeEventListener("keydown", handleEscape);
     };
   }, [quickViewProduct]);
+
+  useEffect(() => {
+    const pendingOrderId = sessionStorage.getItem("recentOrderReceiptId");
+    if (!pendingOrderId) return;
+
+    sessionStorage.removeItem("recentOrderReceiptId");
+
+    let cancelled = false;
+
+    const loadRecentOrderReceipt = async () => {
+      try {
+        setReceiptMessage("");
+
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser();
+
+        if (userError || !user) {
+          return;
+        }
+
+        const { data: orderData, error: orderError } = await supabase
+          .from("orders")
+          .select("id, order_number, user_id, total, status, created_at")
+          .eq("id", pendingOrderId)
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        if (orderError || !orderData) {
+          if (!cancelled) {
+            setReceiptMessage(
+              "La compra fue exitosa, pero no se pudo abrir automáticamente el comprobante."
+            );
+          }
+          return;
+        }
+
+        const { data: itemsData, error: itemsError } = await supabase
+          .from("order_items")
+          .select(
+            "id, order_id, product_id, quantity, unit_price, product_name, variant_name"
+          )
+          .eq("order_id", orderData.id);
+
+        if (itemsError) {
+          if (!cancelled) {
+            setReceiptMessage(
+              "La compra fue exitosa, pero no se pudo cargar el detalle del comprobante."
+            );
+          }
+          return;
+        }
+
+        const rawItems = (itemsData as ReceiptOrderItemRow[]) || [];
+        const productIds = Array.from(
+          new Set(rawItems.map((item) => item.product_id).filter(Boolean))
+        );
+
+        let productsMap = new Map<string, ReceiptProductRow>();
+
+        if (productIds.length > 0) {
+          const { data: productsData, error: productsError } = await supabase
+            .from("products")
+            .select("id, name, description, category")
+            .in("id", productIds);
+
+          if (productsError) {
+            if (!cancelled) {
+              setReceiptMessage(
+                "La compra fue exitosa, pero no se pudo cargar la información de los productos del comprobante."
+              );
+            }
+            return;
+          }
+
+          ((productsData as ReceiptProductRow[]) || []).forEach((product) => {
+            productsMap.set(product.id, product);
+          });
+        }
+
+        const { data: licensesData, error: licensesError } = await supabase
+          .from("product_licenses")
+          .select(
+            "id, product_id, variant_id, license_text, status, assigned_order_id, assigned_order_item_id, assigned_user_id"
+          )
+          .eq("assigned_order_id", orderData.id)
+          .eq("assigned_user_id", user.id)
+          .eq("status", "assigned");
+
+        if (licensesError) {
+          if (!cancelled) {
+            setReceiptMessage(
+              "La compra fue exitosa, pero no se pudieron cargar las licencias del comprobante."
+            );
+          }
+          return;
+        }
+
+        const rawLicenses = (licensesData as ReceiptLicenseRow[]) || [];
+
+        const builtOrder: ReceiptOrder = {
+          id: orderData.id,
+          order_number: orderData.order_number,
+          total: Number(orderData.total || 0),
+          status: orderData.status || "completed",
+          created_at: orderData.created_at,
+          items: rawItems.map((item) => {
+            const product = productsMap.get(item.product_id);
+
+            const itemLicenses = rawLicenses.filter((license) => {
+              if (license.assigned_order_item_id) {
+                return license.assigned_order_item_id === item.id;
+              }
+
+              return (
+                license.assigned_order_id === orderData.id &&
+                license.product_id === item.product_id
+              );
+            });
+
+            return {
+              id: item.id,
+              quantity: Number(item.quantity || 0),
+              price: Number(item.unit_price || 0),
+              product_id: item.product_id,
+              product_name: item.product_name || product?.name || "Producto",
+              variant_name: item.variant_name || null,
+              product_description: product?.description || null,
+              product_category: product?.category || null,
+              licenses: itemLicenses.map((license) => ({
+                id: license.id,
+                license_text: license.license_text,
+              })),
+            };
+          }),
+        };
+
+        if (!cancelled) {
+          setQuickViewProduct(null);
+          setReceiptOrder(builtOrder);
+        }
+      } catch {
+        if (!cancelled) {
+          setReceiptMessage(
+            "La compra fue exitosa, pero ocurrió un error abriendo el comprobante."
+          );
+        }
+      }
+    };
+
+    loadRecentOrderReceipt();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const fetchRole = async () => {
     const {
@@ -201,7 +400,9 @@ export default function HomePage() {
   const getSelectedVariant = (productId: string) => {
     const variants = variantsMap[productId] || [];
     const selectedVariantId = selectedVariants[productId];
-    return variants.find((variant) => variant.id === selectedVariantId) || null;
+    return (
+      variants.find((variant) => variant.id === selectedVariantId) || null
+    );
   };
 
   const getVisiblePrice = (product: Product) => {
@@ -496,6 +697,12 @@ export default function HomePage() {
             </div>
           )}
 
+          {receiptMessage && (
+            <div className="mb-6 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-200">
+              {receiptMessage}
+            </div>
+          )}
+
           {!loading && filteredProducts.length === 0 ? (
             <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-10 text-center backdrop-blur-md">
               <p className="text-lg font-semibold text-white">
@@ -618,8 +825,8 @@ export default function HomePage() {
           )}
         </section>
       </main>
-      
-        <Footer />
+
+      <Footer />
       <WhatsAppButton />
 
       {quickViewProduct && (
@@ -739,6 +946,11 @@ export default function HomePage() {
           </div>
         </div>
       )}
+
+      <OrderReceiptModal
+        order={receiptOrder}
+        onClose={() => setReceiptOrder(null)}
+      />
     </>
   );
 }

@@ -16,7 +16,8 @@ export default function CartDrawer() {
   } = useCart();
 
   const total = useMemo(
-    () => cart.reduce((acc, item) => acc + Number(item.price) * item.quantity, 0),
+    () =>
+      cart.reduce((acc, item) => acc + Number(item.price) * item.quantity, 0),
     [cart]
   );
 
@@ -94,9 +95,18 @@ export default function CartDrawer() {
         return;
       }
 
+      const currentPath = window.location.pathname;
+
       clearCart();
       closeCart();
       resetSlider();
+
+      if (result?.orderId && currentPath === "/") {
+        sessionStorage.setItem("recentOrderReceiptId", result.orderId);
+        window.location.href = "/";
+        return;
+      }
+
       window.location.href = result?.redirectTo || "/account/orders";
     } catch (error) {
       setMessage(
@@ -111,7 +121,12 @@ export default function CartDrawer() {
   };
 
   const beginDrag = (clientX: number) => {
-    if (processing || cart.length === 0 || !trackRef.current || !knobRef.current) {
+    if (
+      processing ||
+      cart.length === 0 ||
+      !trackRef.current ||
+      !knobRef.current
+    ) {
       return;
     }
 
@@ -179,7 +194,7 @@ export default function CartDrawer() {
         onClick={closeCart}
       />
 
-      <aside className="fixed top-0 right-0 z-50 h-full w-full bg-[#041533] text-white shadow-2xl sm:w-[430px]">
+      <aside className="fixed right-0 top-0 z-50 h-full w-full bg-[#041533] text-white shadow-2xl sm:w-[430px]">
         <div className="flex items-center justify-between border-b border-white/10 px-5 py-5">
           <div>
             <h2 className="text-2xl font-extrabold">Mi carrito</h2>
@@ -275,7 +290,8 @@ export default function CartDrawer() {
                         </div>
 
                         <p className="text-sm font-semibold text-blue-400">
-                          ${Number(item.price * item.quantity).toLocaleString()}
+                          $
+                          {Number(item.price * item.quantity).toLocaleString()}
                         </p>
                       </div>
                     </div>

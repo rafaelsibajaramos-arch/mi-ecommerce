@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../../lib/supabase";
+import OrderReceiptModal, {
+  type ReceiptOrder,
+} from "../../../components/OrderReceiptModal";
 
 type OrderRow = {
   id: string;
@@ -41,27 +44,7 @@ type LicenseRow = {
   assigned_user_id: string | null;
 };
 
-type OrderWithItems = {
-  id: string;
-  order_number: number | null;
-  total: number;
-  status: string;
-  created_at: string;
-  items: Array<{
-    id: string;
-    quantity: number;
-    price: number;
-    product_id: string;
-    product_name: string;
-    variant_name: string | null;
-    product_description: string | null;
-    product_category: string | null;
-    licenses: Array<{
-      id: string;
-      license_text: string;
-    }>;
-  }>;
-};
+type OrderWithItems = ReceiptOrder;
 
 const PAGE_SIZE = 10;
 
@@ -92,9 +75,9 @@ export default function AccountOrdersPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
-  const [selectedOrder, setSelectedOrder] = useState<OrderWithItems | null>(null);
-  const [copiedLicenseId, setCopiedLicenseId] = useState<string | null>(null);
-  const [copiedAllLicenses, setCopiedAllLicenses] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState<OrderWithItems | null>(
+    null
+  );
   const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
@@ -102,27 +85,8 @@ export default function AccountOrdersPage() {
   }, []);
 
   useEffect(() => {
-    const previous = document.body.style.overflow;
-
-    if (selectedOrder) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = previous || "";
-    }
-
-    return () => {
-      document.body.style.overflow = previous || "";
-    };
-  }, [selectedOrder]);
-
-  useEffect(() => {
     setCurrentPage(1);
   }, [dateFrom, dateTo]);
-
-  useEffect(() => {
-    setCopiedLicenseId(null);
-    setCopiedAllLicenses(false);
-  }, [selectedOrder]);
 
   const loadOrders = async () => {
     setLoading(true);
@@ -162,7 +126,9 @@ export default function AccountOrdersPage() {
 
     const { data: itemsData, error: itemsError } = await supabase
       .from("order_items")
-      .select("id, order_id, product_id, quantity, unit_price, product_name, variant_name")
+      .select(
+        "id, order_id, product_id, quantity, unit_price, product_name, variant_name"
+      )
       .in("order_id", orderIds);
 
     if (itemsError) {
@@ -197,7 +163,9 @@ export default function AccountOrdersPage() {
 
     const { data: licensesData, error: licensesError } = await supabase
       .from("product_licenses")
-      .select("id, product_id, variant_id, license_text, status, assigned_order_id, assigned_order_item_id, assigned_user_id")
+      .select(
+        "id, product_id, variant_id, license_text, status, assigned_order_id, assigned_order_item_id, assigned_user_id"
+      )
       .in("assigned_order_id", orderIds)
       .eq("assigned_user_id", user.id)
       .eq("status", "assigned");
@@ -310,7 +278,10 @@ export default function AccountOrdersPage() {
   };
 
   const totalInvested = useMemo(() => {
-    return filteredOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
+    return filteredOrders.reduce(
+      (sum, order) => sum + Number(order.total || 0),
+      0
+    );
   }, [filteredOrders]);
 
   const formatMoney = (value: number) => {
@@ -368,65 +339,6 @@ export default function AccountOrdersPage() {
     return "border border-white/10 bg-white/5 text-white/80";
   };
 
-  const buildLicenseCopyText = (
-    productName: string,
-    variantName: string | null,
-    licenseText: string
-  ) => {
-    const title = variantName
-      ? `${productName} - ${variantName}`
-      : productName;
-
-    return `${title}\n\n${licenseText}`;
-  };
-
-  const copyLicense = async (
-    productName: string,
-    variantName: string | null,
-    licenseText: string,
-    licenseId: string
-  ) => {
-    try {
-      const textToCopy = buildLicenseCopyText(
-        productName,
-        variantName,
-        licenseText
-      );
-
-      await navigator.clipboard.writeText(textToCopy);
-      setCopiedLicenseId(licenseId);
-      setCopiedAllLicenses(false);
-
-      setTimeout(() => setCopiedLicenseId(null), 1800);
-    } catch {
-      setCopiedLicenseId(null);
-    }
-  };
-
-  const copyAllLicenses = async (order: OrderWithItems) => {
-    try {
-      const blocks = order.items.flatMap((item) =>
-        item.licenses.map((license) =>
-          buildLicenseCopyText(
-            item.product_name,
-            item.variant_name,
-            license.license_text
-          )
-        )
-      );
-
-      if (blocks.length === 0) return;
-
-      await navigator.clipboard.writeText(blocks.join("\n\n\n"));
-      setCopiedAllLicenses(true);
-      setCopiedLicenseId(null);
-
-      setTimeout(() => setCopiedAllLicenses(false), 1800);
-    } catch {
-      setCopiedAllLicenses(false);
-    }
-  };
-
   if (loading) {
     return (
       <main className="min-h-screen bg-transparent px-6 py-10 text-white">
@@ -438,7 +350,7 @@ export default function AccountOrdersPage() {
   return (
     <>
       <main className="min-h-screen bg-transparent text-white">
-        <section className="mx-auto max-w-6xl px-4 md:px-6 py-6">
+        <section className="mx-auto max-w-6xl px-4 py-6 md:px-6">
           <div className="rounded-[28px] border border-white/10 bg-slate-800/80 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-md md:p-6">
             <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
               <div>
@@ -469,7 +381,7 @@ export default function AccountOrdersPage() {
               Filtrar por fecha
             </p>
 
-            <div className="mt-5 grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-[1fr_1fr_auto]">
+            <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-[1fr_1fr_auto]">
               <div>
                 <label className="mb-2 block text-sm font-medium text-white/70">
                   Desde
@@ -534,7 +446,7 @@ export default function AccountOrdersPage() {
                 {paginatedOrders.map((order) => (
                   <div
                     key={order.id}
-                    className="flex flex-col gap-4 px-4 py-4 md:px-6 md:py-5 lg:flex-row lg:items-center lg:justify-between"
+                    className="flex w-full flex-col gap-4 px-4 py-4 md:px-6 md:py-5 lg:flex-row lg:items-center lg:justify-between"
                   >
                     <div className="flex items-start gap-4">
                       <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/5 text-white">
@@ -566,7 +478,7 @@ export default function AccountOrdersPage() {
                       </div>
                     </div>
 
-                    <div className="flex flex-col md:flex-row md:items-center gap-3 w-full md:w-auto">
+                    <div className="flex w-full flex-col gap-3 md:flex-row md:items-center md:w-auto">
                       <span
                         className={`rounded-full px-4 py-2 text-sm font-semibold ${getStatusClasses(
                           order.status
@@ -582,7 +494,7 @@ export default function AccountOrdersPage() {
                       <button
                         type="button"
                         onClick={() => setSelectedOrder(order)}
-                        className="w-full md:w-auto text-center rounded-2xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-500"
+                        className="w-full rounded-2xl bg-blue-600 px-5 py-3 text-center text-sm font-semibold text-white transition hover:bg-blue-500 md:w-auto"
                       >
                         Ver comprobante
                       </button>
@@ -596,8 +508,9 @@ export default function AccountOrdersPage() {
           {filteredOrders.length > 0 && (
             <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <p className="text-sm text-white/60">
-                Mostrando <span className="font-semibold text-white">{pageStart}</span>{" "}
-                - <span className="font-semibold text-white">{pageEnd}</span> de{" "}
+                Mostrando{" "}
+                <span className="font-semibold text-white">{pageStart}</span> -{" "}
+                <span className="font-semibold text-white">{pageEnd}</span> de{" "}
                 <span className="font-semibold text-white">
                   {filteredOrders.length}
                 </span>{" "}
@@ -608,7 +521,9 @@ export default function AccountOrdersPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => handlePageChange(Math.max(currentPage - 1, 1))}
+                    onClick={() =>
+                      handlePageChange(Math.max(currentPage - 1, 1))
+                    }
                     disabled={currentPage === 1}
                     className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3 text-sm font-semibold text-white/80 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                   >
@@ -656,162 +571,10 @@ export default function AccountOrdersPage() {
         </section>
       </main>
 
-      {selectedOrder && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 md:p-4">
-          <div
-            className="absolute inset-0 bg-black/65 backdrop-blur-md"
-            onClick={() => setSelectedOrder(null)}
-          />
-
-          <div className="relative z-10 w-full max-w-4xl max-h-[75vh] overflow-hidden rounded-[24px] border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.6)] backdrop-blur-xl">
-            <div className="flex items-center justify-between border-b border-white/10 px-4 py-4 md:px-5">
-              <div>
-                <h3 className="text-xl md:text-2xl font-bold text-white">
-                  Pedido recibido
-                </h3>
-                <p className="mt-1 text-xs md:text-sm text-white/45">
-                  Comprobante #{formatOrderNumber(selectedOrder.order_number)}
-                </p>
-              </div>
-
-              <button
-                onClick={() => setSelectedOrder(null)}
-                className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/5 text-white/70 hover:bg-white/10"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="max-h-[65vh] overflow-y-auto p-4 md:p-5 space-y-4">
-              <section className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
-                  <p className="text-[10px] text-white/40">Pedido</p>
-                  <p className="mt-2 text-sm font-bold">
-                    {formatOrderNumber(selectedOrder.order_number)}
-                  </p>
-                </div>
-
-                <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
-                  <p className="text-[10px] text-white/40">Estado</p>
-                  <span
-                    className={`mt-2 inline-block px-2 py-1 text-xs rounded-full ${getStatusClasses(
-                      selectedOrder.status
-                    )}`}
-                  >
-                    {getStatusLabel(selectedOrder.status)}
-                  </span>
-                </div>
-
-                <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
-                  <p className="text-[10px] text-white/40">Fecha</p>
-                  <p className="mt-2 text-xs">
-                    {formatDate(selectedOrder.created_at)}
-                  </p>
-                </div>
-
-                <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
-                  <p className="text-[10px] text-white/40">Total</p>
-                  <p className="mt-2 text-sm font-bold text-emerald-300">
-                    {formatMoney(selectedOrder.total)}
-                  </p>
-                </div>
-              </section>
-
-              <section className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
-                <h4 className="text-base font-bold">Servicios</h4>
-
-                <div className="mt-3 space-y-3">
-                  {selectedOrder.items.map((item) => (
-                    <div
-                      key={item.id}
-                      className="rounded-xl border border-white/10 bg-black/20 p-3"
-                    >
-                      <div className="flex flex-col sm:flex-row sm:justify-between gap-2">
-                        <div>
-                          <p className="text-sm font-bold">
-                            {item.product_name}
-                            {item.variant_name ? ` - ${item.variant_name}` : ""}
-                          </p>
-                          <p className="text-xs text-white/50">
-                            {item.product_category || "Servicio digital"}
-                          </p>
-                        </div>
-
-                        <div className="text-xs sm:text-right">
-                          <p>Cant: {item.quantity}</p>
-                          <p className="font-bold text-emerald-300">
-                            {formatMoney(item.price * item.quantity)}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              <section className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <h4 className="text-base font-bold">Licencias</h4>
-
-                  {selectedOrder.items.some((item) => item.licenses.length > 0) && (
-                    <button
-                      type="button"
-                      onClick={() => copyAllLicenses(selectedOrder)}
-                      className="text-xs px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500"
-                    >
-                      {copiedAllLicenses ? "Copiado todo" : "Copiar todo"}
-                    </button>
-                  )}
-                </div>
-
-                {selectedOrder.items.every((item) => item.licenses.length === 0) ? (
-                  <p className="mt-3 text-xs text-white/50">
-                    Sin licencias aún.
-                  </p>
-                ) : (
-                  <div className="mt-3 space-y-3">
-                    {selectedOrder.items.map((item) =>
-                      item.licenses.map((license) => (
-                        <div
-                          key={license.id}
-                          className="rounded-xl border border-white/10 bg-black/20 p-3"
-                        >
-                          <p className="text-xs font-bold mb-2">
-                            {item.product_name}
-                            {item.variant_name ? ` - ${item.variant_name}` : ""}
-                          </p>
-
-                          <div className="bg-black/60 p-2 rounded text-xs break-all">
-                            {license.license_text}
-                          </div>
-
-                          <div className="mt-2 flex justify-end">
-                            <button
-                              onClick={() =>
-                                copyLicense(
-                                  item.product_name,
-                                  item.variant_name,
-                                  license.license_text,
-                                  license.id
-                                )
-                              }
-                              className="text-xs px-3 py-1 rounded bg-blue-600 hover:bg-blue-500"
-                            >
-                              {copiedLicenseId === license.id
-                                ? "Copiado"
-                                : "Copiar"}
-                            </button>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                )}
-              </section>
-            </div>
-          </div>
-        </div>
-      )}
+      <OrderReceiptModal
+        order={selectedOrder}
+        onClose={() => setSelectedOrder(null)}
+      />
     </>
   );
 }
