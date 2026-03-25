@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../../lib/supabase";
 
 type Profile = {
@@ -32,6 +32,8 @@ function buildPagination(current: number, total: number): Array<number | "..."> 
 }
 
 export default function AdminUsersPage() {
+  const sectionTopRef = useRef<HTMLElement | null>(null);
+
   const [users, setUsers] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -54,6 +56,11 @@ export default function AdminUsersPage() {
   useEffect(() => {
     setCurrentPage(1);
   }, [search]);
+
+  function handlePageChange(page: number) {
+    setCurrentPage(page);
+    sectionTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   const loadUsers = async () => {
     setLoading(true);
@@ -225,7 +232,7 @@ export default function AdminUsersPage() {
   };
 
   return (
-    <section className="space-y-6 text-slate-900">
+    <section ref={sectionTopRef} className="space-y-6 text-slate-900">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
@@ -404,7 +411,7 @@ export default function AdminUsersPage() {
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                onClick={() => handlePageChange(Math.max(currentPage - 1, 1))}
                 disabled={currentPage === 1}
                 className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -423,7 +430,7 @@ export default function AdminUsersPage() {
                   <button
                     key={item}
                     type="button"
-                    onClick={() => setCurrentPage(item)}
+                    onClick={() => handlePageChange(item)}
                     className={`flex h-11 min-w-[44px] items-center justify-center rounded-2xl border px-3 text-sm font-semibold transition ${
                       currentPage === item
                         ? "border-slate-900 bg-slate-900 text-white"
@@ -438,7 +445,7 @@ export default function AdminUsersPage() {
               <button
                 type="button"
                 onClick={() =>
-                  setCurrentPage((prev) => Math.min(prev + 1, totalPages))
+                  handlePageChange(Math.min(currentPage + 1, totalPages))
                 }
                 disabled={currentPage === totalPages}
                 className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"

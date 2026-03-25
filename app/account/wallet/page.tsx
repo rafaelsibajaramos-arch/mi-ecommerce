@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../../lib/supabase";
 
@@ -18,13 +18,33 @@ type ProfileBalanceRow = {
 
 type FilterType = "all" | "credit" | "debit";
 
+const PAGE_SIZE = 10;
+
+function buildPagination(current: number, total: number): Array<number | "..."> {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+
+  if (current <= 4) {
+    return [1, 2, 3, 4, "...", total];
+  }
+
+  if (current >= total - 3) {
+    return [1, "...", total - 3, total - 2, total - 1, total];
+  }
+
+  return [1, "...", current - 1, current, current + 1, "...", total];
+}
+
 export default function WalletPage() {
   const router = useRouter();
+  const historySectionRef = useRef<HTMLDivElement | null>(null);
 
   const [balance, setBalance] = useState(0);
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterType>("all");
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     const loadWallet = async () => {
@@ -37,7 +57,6 @@ export default function WalletPage() {
         return;
       }
 
-      // Tu compra real usa profiles.balance, no wallets.balance
       const { data: profileData } = await supabase
         .from("profiles")
         .select("balance")
@@ -64,6 +83,10 @@ export default function WalletPage() {
 
     loadWallet();
   }, [router]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filter]);
 
   const getTransactionKind = (tx: WalletTransaction): "credit" | "debit" => {
     const txType = (tx.type || "").toLowerCase().trim();
@@ -102,6 +125,39 @@ export default function WalletPage() {
       return filter === kind;
     });
   }, [transactions, filter]);
+
+  const totalPages = useMemo(() => {
+    return Math.max(1, Math.ceil(filteredTransactions.length / PAGE_SIZE));
+  }, [filteredTransactions.length]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  const paginatedTransactions = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    const end = start + PAGE_SIZE;
+    return filteredTransactions.slice(start, end);
+  }, [filteredTransactions, currentPage]);
+
+  const paginationItems = useMemo(() => {
+    return buildPagination(currentPage, totalPages);
+  }, [currentPage, totalPages]);
+
+  const pageStart =
+    filteredTransactions.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+
+  const pageEnd = Math.min(currentPage * PAGE_SIZE, filteredTransactions.length);
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+    historySectionRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  };
 
   const latestTransaction = transactions.length > 0 ? transactions[0] : null;
 
@@ -286,7 +342,10 @@ export default function WalletPage() {
           </div>
         )}
 
-        <div className="mt-8 rounded-[28px] border border-white/10 bg-slate-800/80 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-md">
+        <div
+          ref={historySectionRef}
+          className="mt-8 rounded-[28px] border border-white/10 bg-slate-800/80 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-md"
+        >
           <div className="border-b border-white/10 px-6 py-5">
             <h3 className="text-2xl font-extrabold">
               Historial de transacciones
@@ -299,7 +358,7 @@ export default function WalletPage() {
             </div>
           ) : (
             <div className="divide-y divide-white/10">
-              {filteredTransactions.map((tx) => {
+              {paginatedTransactions.map((tx) => {
                 const kind = getTransactionKind(tx);
 
                 return (
@@ -388,6 +447,67 @@ export default function WalletPage() {
             </div>
           )}
         </div>
+
+        {filteredTransactions.length > 0 && (
+          <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <p className="text-sm text-white/60">
+              Mostrando <span className="font-semibold text-white">{pageStart}</span>{" "}
+              - <span className="font-semibold text-white">{pageEnd}</span> de{" "}
+              <span className="font-semibold text-white">
+                {filteredTransactions.length}
+              </span>{" "}
+              transacciones
+            </p>
+
+            {totalPages > 1 && (
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handlePageChange(Math.max(currentPage - 1, 1))}
+                  disabled={currentPage === 1}
+                  className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3 text-sm font-semibold text-white/80 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  ‹
+                </button>
+
+                {paginationItems.map((item, index) =>
+                  item === "..." ? (
+                    <span
+                      key={`wallet-ellipsis-${index}`}
+                      className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-transparent px-3 text-sm font-semibold text-white/35"
+                    >
+                      ...
+                    </span>
+                  ) : (
+                    <button
+                      key={item}
+                      type="button"
+                      onClick={() => handlePageChange(item)}
+                      className={`flex h-11 min-w-[44px] items-center justify-center rounded-2xl border px-3 text-sm font-semibold transition ${
+                        currentPage === item
+                          ? "border-blue-400/40 bg-blue-500/15 text-blue-300"
+                          : "border-white/10 bg-white/5 text-white/80 hover:bg-white/10"
+                      }`}
+                    >
+                      {item}
+                    </button>
+                  )
+                )}
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    handlePageChange(Math.min(currentPage + 1, totalPages))
+                  }
+                  disabled={currentPage === totalPages}
+                  className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3 text-sm font-semibold text-white/80 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  ›
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </section>
     </main>
   );

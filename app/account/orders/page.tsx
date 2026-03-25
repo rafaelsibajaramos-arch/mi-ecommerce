@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../../lib/supabase";
 
@@ -63,8 +63,27 @@ type OrderWithItems = {
   }>;
 };
 
+const PAGE_SIZE = 10;
+
+function buildPagination(current: number, total: number): Array<number | "..."> {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+
+  if (current <= 4) {
+    return [1, 2, 3, 4, "...", total];
+  }
+
+  if (current >= total - 3) {
+    return [1, "...", total - 3, total - 2, total - 1, total];
+  }
+
+  return [1, "...", current - 1, current, current + 1, "...", total];
+}
+
 export default function AccountOrdersPage() {
   const router = useRouter();
+  const ordersSectionRef = useRef<HTMLDivElement | null>(null);
 
   const [orders, setOrders] = useState<OrderWithItems[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,6 +94,8 @@ export default function AccountOrdersPage() {
 
   const [selectedOrder, setSelectedOrder] = useState<OrderWithItems | null>(null);
   const [copiedLicenseId, setCopiedLicenseId] = useState<string | null>(null);
+  const [copiedAllLicenses, setCopiedAllLicenses] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     loadOrders();
@@ -92,6 +113,15 @@ export default function AccountOrdersPage() {
     return () => {
       document.body.style.overflow = previous || "";
     };
+  }, [selectedOrder]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [dateFrom, dateTo]);
+
+  useEffect(() => {
+    setCopiedLicenseId(null);
+    setCopiedAllLicenses(false);
   }, [selectedOrder]);
 
   const loadOrders = async () => {
@@ -131,9 +161,9 @@ export default function AccountOrdersPage() {
     const orderIds = rawOrders.map((order) => order.id);
 
     const { data: itemsData, error: itemsError } = await supabase
-  .from("order_items")
-  .select("id, order_id, product_id, quantity, unit_price, product_name, variant_name")
-  .in("order_id", orderIds);
+      .from("order_items")
+      .select("id, order_id, product_id, quantity, unit_price, product_name, variant_name")
+      .in("order_id", orderIds);
 
     if (itemsError) {
       setMessage("No se pudieron cargar los productos de tus pedidos.");
@@ -198,14 +228,14 @@ export default function AccountOrdersPage() {
           });
 
           return {
-  id: item.id,
-  quantity: Number(item.quantity || 0),
-  price: Number(item.unit_price || 0),
-  product_id: item.product_id,
-  product_name: item.product_name || product?.name || "Producto",
-  variant_name: item.variant_name || null,
-  product_description: product?.description || null,
-  product_category: product?.category || null,
+            id: item.id,
+            quantity: Number(item.quantity || 0),
+            price: Number(item.unit_price || 0),
+            product_id: item.product_id,
+            product_name: item.product_name || product?.name || "Producto",
+            variant_name: item.variant_name || null,
+            product_description: product?.description || null,
+            product_category: product?.category || null,
             licenses: itemLicenses.map((license) => ({
               id: license.id,
               license_text: license.license_text,
@@ -224,6 +254,7 @@ export default function AccountOrdersPage() {
     });
 
     setOrders(mergedOrders);
+    setCurrentPage(1);
     setLoading(false);
   };
 
@@ -244,6 +275,39 @@ export default function AccountOrdersPage() {
       return true;
     });
   }, [orders, dateFrom, dateTo]);
+
+  const totalPages = useMemo(() => {
+    return Math.max(1, Math.ceil(filteredOrders.length / PAGE_SIZE));
+  }, [filteredOrders.length]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  const paginatedOrders = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    const end = start + PAGE_SIZE;
+    return filteredOrders.slice(start, end);
+  }, [filteredOrders, currentPage]);
+
+  const paginationItems = useMemo(() => {
+    return buildPagination(currentPage, totalPages);
+  }, [currentPage, totalPages]);
+
+  const pageStart =
+    filteredOrders.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+
+  const pageEnd = Math.min(currentPage * PAGE_SIZE, filteredOrders.length);
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+    ordersSectionRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  };
 
   const totalInvested = useMemo(() => {
     return filteredOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
@@ -304,13 +368,62 @@ export default function AccountOrdersPage() {
     return "border border-white/10 bg-white/5 text-white/80";
   };
 
-  const copyLicense = async (licenseText: string, licenseId: string) => {
+  const buildLicenseCopyText = (
+    productName: string,
+    variantName: string | null,
+    licenseText: string
+  ) => {
+    const title = variantName
+      ? `${productName} - ${variantName}`
+      : productName;
+
+    return `${title}\n\n${licenseText}`;
+  };
+
+  const copyLicense = async (
+    productName: string,
+    variantName: string | null,
+    licenseText: string,
+    licenseId: string
+  ) => {
     try {
-      await navigator.clipboard.writeText(licenseText);
+      const textToCopy = buildLicenseCopyText(
+        productName,
+        variantName,
+        licenseText
+      );
+
+      await navigator.clipboard.writeText(textToCopy);
       setCopiedLicenseId(licenseId);
+      setCopiedAllLicenses(false);
+
       setTimeout(() => setCopiedLicenseId(null), 1800);
     } catch {
       setCopiedLicenseId(null);
+    }
+  };
+
+  const copyAllLicenses = async (order: OrderWithItems) => {
+    try {
+      const blocks = order.items.flatMap((item) =>
+        item.licenses.map((license) =>
+          buildLicenseCopyText(
+            item.product_name,
+            item.variant_name,
+            license.license_text
+          )
+        )
+      );
+
+      if (blocks.length === 0) return;
+
+      await navigator.clipboard.writeText(blocks.join("\n\n\n"));
+      setCopiedAllLicenses(true);
+      setCopiedLicenseId(null);
+
+      setTimeout(() => setCopiedAllLicenses(false), 1800);
+    } catch {
+      setCopiedAllLicenses(false);
     }
   };
 
@@ -324,7 +437,8 @@ export default function AccountOrdersPage() {
 
   return (
     <>
-<main className="min-h-screen bg-transparent text-white">        <section className="mx-auto max-w-6xl px-4 md:px-6 py-6">
+      <main className="min-h-screen bg-transparent text-white">
+        <section className="mx-auto max-w-6xl px-4 md:px-6 py-6">
           <div className="rounded-[28px] border border-white/10 bg-slate-800/80 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-md md:p-6">
             <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
               <div>
@@ -395,7 +509,10 @@ export default function AccountOrdersPage() {
             </div>
           </div>
 
-          <div className="mt-8 rounded-[28px] border border-white/10 bg-slate-800/80 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-md">
+          <div
+            ref={ordersSectionRef}
+            className="mt-8 rounded-[28px] border border-white/10 bg-slate-800/80 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-md"
+          >
             <div className="border-b border-white/10 px-5 py-5 md:px-6">
               <h2 className="text-xl font-bold md:text-2xl">
                 Historial de pedidos ({filteredOrders.length})
@@ -414,11 +531,11 @@ export default function AccountOrdersPage() {
               </div>
             ) : (
               <div className="divide-y divide-white/10">
-                {filteredOrders.map((order) => (
+                {paginatedOrders.map((order) => (
                   <div
-  key={order.id}
-  className="flex flex-col gap-4 px-4 py-4 md:px-6 md:py-5 lg:flex-row lg:items-center lg:justify-between"
->
+                    key={order.id}
+                    className="flex flex-col gap-4 px-4 py-4 md:px-6 md:py-5 lg:flex-row lg:items-center lg:justify-between"
+                  >
                     <div className="flex items-start gap-4">
                       <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/5 text-white">
                         <svg
@@ -449,7 +566,8 @@ export default function AccountOrdersPage() {
                       </div>
                     </div>
 
-<div className="flex flex-col md:flex-row md:items-center gap-3 w-full md:w-auto">                      <span
+                    <div className="flex flex-col md:flex-row md:items-center gap-3 w-full md:w-auto">
+                      <span
                         className={`rounded-full px-4 py-2 text-sm font-semibold ${getStatusClasses(
                           order.status
                         )}`}
@@ -462,10 +580,10 @@ export default function AccountOrdersPage() {
                       </span>
 
                       <button
-  type="button"
-  onClick={() => setSelectedOrder(order)}
-  className="w-full md:w-auto text-center rounded-2xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-500"
->
+                        type="button"
+                        onClick={() => setSelectedOrder(order)}
+                        className="w-full md:w-auto text-center rounded-2xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-500"
+                      >
                         Ver comprobante
                       </button>
                     </div>
@@ -474,151 +592,226 @@ export default function AccountOrdersPage() {
               </div>
             )}
           </div>
-        </section>
-      </main>
 
-      {selectedOrder && (
-  <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 md:p-4">
-    <div
-      className="absolute inset-0 bg-black/65 backdrop-blur-md"
-      onClick={() => setSelectedOrder(null)}
-    />
+          {filteredOrders.length > 0 && (
+            <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <p className="text-sm text-white/60">
+                Mostrando <span className="font-semibold text-white">{pageStart}</span>{" "}
+                - <span className="font-semibold text-white">{pageEnd}</span> de{" "}
+                <span className="font-semibold text-white">
+                  {filteredOrders.length}
+                </span>{" "}
+                pedidos
+              </p>
 
-    <div className="relative z-10 w-full max-w-4xl max-h-[75vh] overflow-hidden rounded-[24px] border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.6)] backdrop-blur-xl">
-
-      {/* HEADER */}
-      <div className="flex items-center justify-between border-b border-white/10 px-4 py-4 md:px-5">
-        <div>
-          <h3 className="text-xl md:text-2xl font-bold text-white">
-            Pedido recibido
-          </h3>
-          <p className="mt-1 text-xs md:text-sm text-white/45">
-            Comprobante #{formatOrderNumber(selectedOrder.order_number)}
-          </p>
-        </div>
-
-        <button
-          onClick={() => setSelectedOrder(null)}
-          className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/5 text-white/70 hover:bg-white/10"
-        >
-          ✕
-        </button>
-      </div>
-
-      {/* CONTENIDO */}
-      <div className="max-h-[65vh] overflow-y-auto p-4 md:p-5 space-y-4">
-
-        {/* 🔥 RESUMEN RESPONSIVE */}
-        <section className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
-            <p className="text-[10px] text-white/40">Pedido</p>
-            <p className="mt-2 text-sm font-bold">
-              {formatOrderNumber(selectedOrder.order_number)}
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
-            <p className="text-[10px] text-white/40">Estado</p>
-            <span className={`mt-2 inline-block px-2 py-1 text-xs rounded-full ${getStatusClasses(selectedOrder.status)}`}>
-              {getStatusLabel(selectedOrder.status)}
-            </span>
-          </div>
-
-          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
-            <p className="text-[10px] text-white/40">Fecha</p>
-            <p className="mt-2 text-xs">
-              {formatDate(selectedOrder.created_at)}
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
-            <p className="text-[10px] text-white/40">Total</p>
-            <p className="mt-2 text-sm font-bold text-emerald-300">
-              {formatMoney(selectedOrder.total)}
-            </p>
-          </div>
-        </section>
-
-        {/* SERVICIOS */}
-        <section className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
-          <h4 className="text-base font-bold">Servicios</h4>
-
-          <div className="mt-3 space-y-3">
-            {selectedOrder.items.map((item) => (
-              <div
-                key={item.id}
-                className="rounded-xl border border-white/10 bg-black/20 p-3"
-              >
-                <div className="flex flex-col sm:flex-row sm:justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-bold">
-                      {item.product_name}
-                      {item.variant_name ? ` - ${item.variant_name}` : ""}
-                    </p>
-                    <p className="text-xs text-white/50">
-                      {item.product_category || "Servicio digital"}
-                    </p>
-                  </div>
-
-                  <div className="text-xs sm:text-right">
-                    <p>Cant: {item.quantity}</p>
-                    <p className="font-bold text-emerald-300">
-                      {formatMoney(item.price * item.quantity)}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* LICENCIAS */}
-        <section className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
-          <h4 className="text-base font-bold">Licencias</h4>
-
-          {selectedOrder.items.every((item) => item.licenses.length === 0) ? (
-            <p className="mt-3 text-xs text-white/50">
-              Sin licencias aún.
-            </p>
-          ) : (
-            <div className="mt-3 space-y-3">
-              {selectedOrder.items.map((item) =>
-                item.licenses.map((license) => (
-                  <div
-                    key={license.id}
-                    className="rounded-xl border border-white/10 bg-black/20 p-3"
+              {totalPages > 1 && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handlePageChange(Math.max(currentPage - 1, 1))}
+                    disabled={currentPage === 1}
+                    className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3 text-sm font-semibold text-white/80 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <p className="text-xs font-bold mb-2">
-                      {item.product_name}
-                    </p>
+                    ‹
+                  </button>
 
-                    <div className="bg-black/60 p-2 rounded text-xs break-all">
-                      {license.license_text}
-                    </div>
-
-                    <div className="mt-2 flex justify-end">
-                      <button
-                        onClick={() =>
-                          copyLicense(license.license_text, license.id)
-                        }
-                        className="text-xs px-3 py-1 rounded bg-blue-600 hover:bg-blue-500"
+                  {paginationItems.map((item, index) =>
+                    item === "..." ? (
+                      <span
+                        key={`orders-ellipsis-${index}`}
+                        className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-transparent px-3 text-sm font-semibold text-white/35"
                       >
-                        {copiedLicenseId === license.id
-                          ? "Copiado"
-                          : "Copiar"}
+                        ...
+                      </span>
+                    ) : (
+                      <button
+                        key={item}
+                        type="button"
+                        onClick={() => handlePageChange(item)}
+                        className={`flex h-11 min-w-[44px] items-center justify-center rounded-2xl border px-3 text-sm font-semibold transition ${
+                          currentPage === item
+                            ? "border-blue-400/40 bg-blue-500/15 text-blue-300"
+                            : "border-white/10 bg-white/5 text-white/80 hover:bg-white/10"
+                        }`}
+                      >
+                        {item}
                       </button>
-                    </div>
-                  </div>
-                ))
+                    )
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handlePageChange(Math.min(currentPage + 1, totalPages))
+                    }
+                    disabled={currentPage === totalPages}
+                    className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3 text-sm font-semibold text-white/80 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    ›
+                  </button>
+                </div>
               )}
             </div>
           )}
         </section>
+      </main>
 
-      </div>
-    </div>
-  </div>
-)}
+      {selectedOrder && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 md:p-4">
+          <div
+            className="absolute inset-0 bg-black/65 backdrop-blur-md"
+            onClick={() => setSelectedOrder(null)}
+          />
+
+          <div className="relative z-10 w-full max-w-4xl max-h-[75vh] overflow-hidden rounded-[24px] border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.6)] backdrop-blur-xl">
+            <div className="flex items-center justify-between border-b border-white/10 px-4 py-4 md:px-5">
+              <div>
+                <h3 className="text-xl md:text-2xl font-bold text-white">
+                  Pedido recibido
+                </h3>
+                <p className="mt-1 text-xs md:text-sm text-white/45">
+                  Comprobante #{formatOrderNumber(selectedOrder.order_number)}
+                </p>
+              </div>
+
+              <button
+                onClick={() => setSelectedOrder(null)}
+                className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/5 text-white/70 hover:bg-white/10"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="max-h-[65vh] overflow-y-auto p-4 md:p-5 space-y-4">
+              <section className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                  <p className="text-[10px] text-white/40">Pedido</p>
+                  <p className="mt-2 text-sm font-bold">
+                    {formatOrderNumber(selectedOrder.order_number)}
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                  <p className="text-[10px] text-white/40">Estado</p>
+                  <span
+                    className={`mt-2 inline-block px-2 py-1 text-xs rounded-full ${getStatusClasses(
+                      selectedOrder.status
+                    )}`}
+                  >
+                    {getStatusLabel(selectedOrder.status)}
+                  </span>
+                </div>
+
+                <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                  <p className="text-[10px] text-white/40">Fecha</p>
+                  <p className="mt-2 text-xs">
+                    {formatDate(selectedOrder.created_at)}
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                  <p className="text-[10px] text-white/40">Total</p>
+                  <p className="mt-2 text-sm font-bold text-emerald-300">
+                    {formatMoney(selectedOrder.total)}
+                  </p>
+                </div>
+              </section>
+
+              <section className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                <h4 className="text-base font-bold">Servicios</h4>
+
+                <div className="mt-3 space-y-3">
+                  {selectedOrder.items.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-xl border border-white/10 bg-black/20 p-3"
+                    >
+                      <div className="flex flex-col sm:flex-row sm:justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-bold">
+                            {item.product_name}
+                            {item.variant_name ? ` - ${item.variant_name}` : ""}
+                          </p>
+                          <p className="text-xs text-white/50">
+                            {item.product_category || "Servicio digital"}
+                          </p>
+                        </div>
+
+                        <div className="text-xs sm:text-right">
+                          <p>Cant: {item.quantity}</p>
+                          <p className="font-bold text-emerald-300">
+                            {formatMoney(item.price * item.quantity)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <h4 className="text-base font-bold">Licencias</h4>
+
+                  {selectedOrder.items.some((item) => item.licenses.length > 0) && (
+                    <button
+                      type="button"
+                      onClick={() => copyAllLicenses(selectedOrder)}
+                      className="text-xs px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500"
+                    >
+                      {copiedAllLicenses ? "Copiado todo" : "Copiar todo"}
+                    </button>
+                  )}
+                </div>
+
+                {selectedOrder.items.every((item) => item.licenses.length === 0) ? (
+                  <p className="mt-3 text-xs text-white/50">
+                    Sin licencias aún.
+                  </p>
+                ) : (
+                  <div className="mt-3 space-y-3">
+                    {selectedOrder.items.map((item) =>
+                      item.licenses.map((license) => (
+                        <div
+                          key={license.id}
+                          className="rounded-xl border border-white/10 bg-black/20 p-3"
+                        >
+                          <p className="text-xs font-bold mb-2">
+                            {item.product_name}
+                            {item.variant_name ? ` - ${item.variant_name}` : ""}
+                          </p>
+
+                          <div className="bg-black/60 p-2 rounded text-xs break-all">
+                            {license.license_text}
+                          </div>
+
+                          <div className="mt-2 flex justify-end">
+                            <button
+                              onClick={() =>
+                                copyLicense(
+                                  item.product_name,
+                                  item.variant_name,
+                                  license.license_text,
+                                  license.id
+                                )
+                              }
+                              className="text-xs px-3 py-1 rounded bg-blue-600 hover:bg-blue-500"
+                            >
+                              {copiedLicenseId === license.id
+                                ? "Copiado"
+                                : "Copiar"}
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </section>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

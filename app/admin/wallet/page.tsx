@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { supabase } from "../../../lib/supabase";
 
 type ProfileRow = {
@@ -36,6 +42,24 @@ type BannerState = {
   kind: "success" | "error";
   text: string;
 } | null;
+
+const PAGE_SIZE = 10;
+
+function buildPagination(current: number, total: number): Array<number | "..."> {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+
+  if (current <= 4) {
+    return [1, 2, 3, 4, "...", total];
+  }
+
+  if (current >= total - 3) {
+    return [1, "...", total - 3, total - 2, total - 1, total];
+  }
+
+  return [1, "...", current - 1, current, current + 1, "...", total];
+}
 
 function formatMoney(value: number) {
   return `$ ${Number(Math.abs(value || 0)).toLocaleString("es-CO")}`;
@@ -116,6 +140,9 @@ function getTransactionClasses(type: string) {
 }
 
 export default function AdminWalletPage() {
+  const rechargeSectionRef = useRef<HTMLDivElement | null>(null);
+  const transactionSectionRef = useRef<HTMLDivElement | null>(null);
+
   const [movementType, setMovementType] = useState<"credit" | "debit">(
     "credit"
   );
@@ -138,6 +165,9 @@ export default function AdminWalletPage() {
   const [transactionStartDate, setTransactionStartDate] = useState("");
   const [transactionEndDate, setTransactionEndDate] = useState("");
 
+  const [rechargePage, setRechargePage] = useState(1);
+  const [transactionPage, setTransactionPage] = useState(1);
+
   useEffect(() => {
     loadTransactions();
   }, []);
@@ -151,6 +181,30 @@ export default function AdminWalletPage() {
 
     return () => clearTimeout(timer);
   }, [banner]);
+
+  useEffect(() => {
+    setRechargePage(1);
+  }, [searchEmail, startDate, endDate]);
+
+  useEffect(() => {
+    setTransactionPage(1);
+  }, [transactionSearchEmail, transactionStartDate, transactionEndDate]);
+
+  function handleRechargePageChange(page: number) {
+    setRechargePage(page);
+    rechargeSectionRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }
+
+  function handleTransactionPageChange(page: number) {
+    setTransactionPage(page);
+    transactionSectionRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }
 
   async function loadTransactions() {
     setLoadingHistory(true);
@@ -206,6 +260,8 @@ export default function AdminWalletPage() {
     });
 
     setAllTransactions(formatted);
+    setRechargePage(1);
+    setTransactionPage(1);
     setLoadingHistory(false);
   }
 
@@ -265,6 +321,72 @@ export default function AdminWalletPage() {
     transactionStartDate,
     transactionEndDate,
   ]);
+
+  const rechargeTotalPages = useMemo(() => {
+    return Math.max(
+      1,
+      Math.ceil(filteredRechargeTransactions.length / PAGE_SIZE)
+    );
+  }, [filteredRechargeTransactions.length]);
+
+  const transactionTotalPages = useMemo(() => {
+    return Math.max(
+      1,
+      Math.ceil(filteredClientTransactions.length / PAGE_SIZE)
+    );
+  }, [filteredClientTransactions.length]);
+
+  useEffect(() => {
+    if (rechargePage > rechargeTotalPages) {
+      setRechargePage(rechargeTotalPages);
+    }
+  }, [rechargePage, rechargeTotalPages]);
+
+  useEffect(() => {
+    if (transactionPage > transactionTotalPages) {
+      setTransactionPage(transactionTotalPages);
+    }
+  }, [transactionPage, transactionTotalPages]);
+
+  const paginatedRechargeTransactions = useMemo(() => {
+    const start = (rechargePage - 1) * PAGE_SIZE;
+    const end = start + PAGE_SIZE;
+    return filteredRechargeTransactions.slice(start, end);
+  }, [filteredRechargeTransactions, rechargePage]);
+
+  const paginatedClientTransactions = useMemo(() => {
+    const start = (transactionPage - 1) * PAGE_SIZE;
+    const end = start + PAGE_SIZE;
+    return filteredClientTransactions.slice(start, end);
+  }, [filteredClientTransactions, transactionPage]);
+
+  const rechargePaginationItems = useMemo(() => {
+    return buildPagination(rechargePage, rechargeTotalPages);
+  }, [rechargePage, rechargeTotalPages]);
+
+  const transactionPaginationItems = useMemo(() => {
+    return buildPagination(transactionPage, transactionTotalPages);
+  }, [transactionPage, transactionTotalPages]);
+
+  const rechargePageStart =
+    filteredRechargeTransactions.length === 0
+      ? 0
+      : (rechargePage - 1) * PAGE_SIZE + 1;
+
+  const rechargePageEnd = Math.min(
+    rechargePage * PAGE_SIZE,
+    filteredRechargeTransactions.length
+  );
+
+  const transactionPageStart =
+    filteredClientTransactions.length === 0
+      ? 0
+      : (transactionPage - 1) * PAGE_SIZE + 1;
+
+  const transactionPageEnd = Math.min(
+    transactionPage * PAGE_SIZE,
+    filteredClientTransactions.length
+  );
 
   async function handleMovement(e: FormEvent) {
     e.preventDefault();
@@ -607,7 +729,10 @@ export default function AdminWalletPage() {
         </form>
       </div>
 
-      <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+      <div
+        ref={rechargeSectionRef}
+        className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6"
+      >
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <h3 className="text-2xl font-extrabold text-slate-900">
@@ -685,7 +810,7 @@ export default function AdminWalletPage() {
               </div>
 
               <div className="divide-y divide-slate-200">
-                {filteredRechargeTransactions.map((transaction) => (
+                {paginatedRechargeTransactions.map((transaction) => (
                   <div key={transaction.id} className="px-5 py-5 md:px-6">
                     <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr_1fr_0.9fr] lg:items-center">
                       <div>
@@ -739,9 +864,77 @@ export default function AdminWalletPage() {
             </>
           )}
         </div>
+
+        {!loadingHistory && filteredRechargeTransactions.length > 0 && (
+          <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <p className="text-sm text-slate-600">
+              Mostrando <span className="font-semibold">{rechargePageStart}</span>{" "}
+              - <span className="font-semibold">{rechargePageEnd}</span> de{" "}
+              <span className="font-semibold">
+                {filteredRechargeTransactions.length}
+              </span>{" "}
+              recargas
+            </p>
+
+            {rechargeTotalPages > 1 && (
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleRechargePageChange(Math.max(rechargePage - 1, 1))
+                  }
+                  disabled={rechargePage === 1}
+                  className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  ‹
+                </button>
+
+                {rechargePaginationItems.map((item, index) =>
+                  item === "..." ? (
+                    <span
+                      key={`recharge-ellipsis-${index}`}
+                      className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-transparent px-3 text-sm font-semibold text-slate-400"
+                    >
+                      ...
+                    </span>
+                  ) : (
+                    <button
+                      key={item}
+                      type="button"
+                      onClick={() => handleRechargePageChange(item)}
+                      className={`flex h-11 min-w-[44px] items-center justify-center rounded-2xl border px-3 text-sm font-semibold transition ${
+                        rechargePage === item
+                          ? "border-slate-900 bg-slate-900 text-white"
+                          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      {item}
+                    </button>
+                  )
+                )}
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleRechargePageChange(
+                      Math.min(rechargePage + 1, rechargeTotalPages)
+                    )
+                  }
+                  disabled={rechargePage === rechargeTotalPages}
+                  className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  ›
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+      <div
+        ref={transactionSectionRef}
+        className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6"
+      >
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <h3 className="text-2xl font-extrabold text-slate-900">
@@ -826,7 +1019,7 @@ export default function AdminWalletPage() {
               </div>
 
               <div className="divide-y divide-slate-200">
-                {filteredClientTransactions.map((transaction) => (
+                {paginatedClientTransactions.map((transaction) => (
                   <div key={transaction.id} className="px-5 py-5 md:px-6">
                     <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr_0.8fr_1fr] lg:items-center">
                       <div>
@@ -886,6 +1079,72 @@ export default function AdminWalletPage() {
             </>
           )}
         </div>
+
+        {!loadingHistory && hasTransactionSearch && filteredClientTransactions.length > 0 && (
+          <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <p className="text-sm text-slate-600">
+              Mostrando{" "}
+              <span className="font-semibold">{transactionPageStart}</span> -{" "}
+              <span className="font-semibold">{transactionPageEnd}</span> de{" "}
+              <span className="font-semibold">
+                {filteredClientTransactions.length}
+              </span>{" "}
+              transacciones
+            </p>
+
+            {transactionTotalPages > 1 && (
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleTransactionPageChange(Math.max(transactionPage - 1, 1))
+                  }
+                  disabled={transactionPage === 1}
+                  className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  ‹
+                </button>
+
+                {transactionPaginationItems.map((item, index) =>
+                  item === "..." ? (
+                    <span
+                      key={`transaction-ellipsis-${index}`}
+                      className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-transparent px-3 text-sm font-semibold text-slate-400"
+                    >
+                      ...
+                    </span>
+                  ) : (
+                    <button
+                      key={item}
+                      type="button"
+                      onClick={() => handleTransactionPageChange(item)}
+                      className={`flex h-11 min-w-[44px] items-center justify-center rounded-2xl border px-3 text-sm font-semibold transition ${
+                        transactionPage === item
+                          ? "border-slate-900 bg-slate-900 text-white"
+                          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      {item}
+                    </button>
+                  )
+                )}
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleTransactionPageChange(
+                      Math.min(transactionPage + 1, transactionTotalPages)
+                    )
+                  }
+                  disabled={transactionPage === transactionTotalPages}
+                  className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  ›
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </section>
   );
