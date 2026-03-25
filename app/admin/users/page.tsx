@@ -13,6 +13,24 @@ type Profile = {
 
 type MessageType = "success" | "error" | "";
 
+const PAGE_SIZE = 10;
+
+function buildPagination(current: number, total: number): Array<number | "..."> {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+
+  if (current <= 4) {
+    return [1, 2, 3, 4, "...", total];
+  }
+
+  if (current >= total - 3) {
+    return [1, "...", total - 3, total - 2, total - 1, total];
+  }
+
+  return [1, "...", current - 1, current, current + 1, "...", total];
+}
+
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,10 +45,15 @@ export default function AdminUsersPage() {
 
   const [emailDrafts, setEmailDrafts] = useState<Record<string, string>>({});
   const [passwordDrafts, setPasswordDrafts] = useState<Record<string, string>>({});
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     loadUsers();
   }, []);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search]);
 
   const loadUsers = async () => {
     setLoading(true);
@@ -62,6 +85,7 @@ export default function AdminUsersPage() {
 
     setEmailDrafts(initialEmailDrafts);
     setPasswordDrafts(initialPasswordDrafts);
+    setCurrentPage(1);
     setLoading(false);
   };
 
@@ -76,6 +100,29 @@ export default function AdminUsersPage() {
       return fullName.includes(term) || email.includes(term);
     });
   }, [users, search]);
+
+  const totalPages = useMemo(() => {
+    return Math.max(1, Math.ceil(filteredUsers.length / PAGE_SIZE));
+  }, [filteredUsers.length]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  const paginatedUsers = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    const end = start + PAGE_SIZE;
+    return filteredUsers.slice(start, end);
+  }, [filteredUsers, currentPage]);
+
+  const paginationItems = useMemo(() => {
+    return buildPagination(currentPage, totalPages);
+  }, [currentPage, totalPages]);
+
+  const pageStart = filteredUsers.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+  const pageEnd = Math.min(currentPage * PAGE_SIZE, filteredUsers.length);
 
   const handleRoleChange = async (userId: string, newRole: string) => {
     setUpdatingRoleUserId(userId);
@@ -251,7 +298,7 @@ export default function AdminUsersPage() {
             </div>
 
             <div className="divide-y divide-slate-200">
-              {filteredUsers.map((user) => (
+              {paginatedUsers.map((user) => (
                 <div key={user.id} className="px-5 py-5 sm:px-6">
                   <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr_1.2fr_1.2fr] xl:items-start">
                     <div>
@@ -343,6 +390,65 @@ export default function AdminUsersPage() {
           </>
         )}
       </div>
+
+      {!loading && filteredUsers.length > 0 && (
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <p className="text-sm text-slate-600">
+            Mostrando <span className="font-semibold">{pageStart}</span> -{" "}
+            <span className="font-semibold">{pageEnd}</span> de{" "}
+            <span className="font-semibold">{filteredUsers.length}</span>{" "}
+            usuarios
+          </p>
+
+          {totalPages > 1 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                ‹
+              </button>
+
+              {paginationItems.map((item, index) =>
+                item === "..." ? (
+                  <span
+                    key={`ellipsis-${index}`}
+                    className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-transparent px-3 text-sm font-semibold text-slate-400"
+                  >
+                    ...
+                  </span>
+                ) : (
+                  <button
+                    key={item}
+                    type="button"
+                    onClick={() => setCurrentPage(item)}
+                    className={`flex h-11 min-w-[44px] items-center justify-center rounded-2xl border px-3 text-sm font-semibold transition ${
+                      currentPage === item
+                        ? "border-slate-900 bg-slate-900 text-white"
+                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    {item}
+                  </button>
+                )
+              )}
+
+              <button
+                type="button"
+                onClick={() =>
+                  setCurrentPage((prev) => Math.min(prev + 1, totalPages))
+                }
+                disabled={currentPage === totalPages}
+                className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                ›
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </section>
   );
 }

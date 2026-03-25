@@ -98,6 +98,24 @@ function truncateLicense(value: string, max = 72) {
   return `${value.slice(0, max)}...`;
 }
 
+const PAGE_SIZE = 10;
+
+function buildPagination(current: number, total: number): Array<number | "..."> {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+
+  if (current <= 4) {
+    return [1, 2, 3, 4, "...", total];
+  }
+
+  if (current >= total - 3) {
+    return [1, "...", total - 3, total - 2, total - 1, total];
+  }
+
+  return [1, "...", current - 1, current, current + 1, "...", total];
+}
+
 export default function AdminOrdersClient() {
   const router = useRouter();
 
@@ -106,10 +124,15 @@ export default function AdminOrdersClient() {
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
   const [selectedOrder, setSelectedOrder] = useState<FormattedOrder | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     checkAdminAndLoad();
   }, []);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search]);
 
   async function checkAdminAndLoad() {
     setLoading(true);
@@ -271,6 +294,7 @@ export default function AdminOrdersClient() {
     });
 
     setOrders(formattedOrders);
+    setCurrentPage(1);
   }
 
   const filteredOrders = useMemo(() => {
@@ -299,6 +323,29 @@ export default function AdminOrdersClient() {
       );
     });
   }, [orders, search]);
+
+  const totalPages = useMemo(() => {
+    return Math.max(1, Math.ceil(filteredOrders.length / PAGE_SIZE));
+  }, [filteredOrders.length]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  const paginatedOrders = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    const end = start + PAGE_SIZE;
+    return filteredOrders.slice(start, end);
+  }, [filteredOrders, currentPage]);
+
+  const paginationItems = useMemo(() => {
+    return buildPagination(currentPage, totalPages);
+  }, [currentPage, totalPages]);
+
+  const pageStart = filteredOrders.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+  const pageEnd = Math.min(currentPage * PAGE_SIZE, filteredOrders.length);
 
   const totalRevenue = useMemo(() => {
     return orders.reduce((acc, order) => acc + Number(order.total || 0), 0);
@@ -367,15 +414,6 @@ export default function AdminOrdersClient() {
           </div>
         </div>
 
-        <div className="flex justify-end">
-          <button
-            onClick={loadOrders}
-            className="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-          >
-            Recargar
-          </button>
-        </div>
-
         <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
           <div className="hidden grid-cols-[0.9fr_1.2fr_1fr_0.9fr_0.9fr] gap-4 border-b border-slate-200 px-6 py-4 text-sm font-semibold text-slate-500 lg:grid">
             <span>Pedido</span>
@@ -395,7 +433,7 @@ export default function AdminOrdersClient() {
             </div>
           ) : (
             <div className="divide-y divide-slate-200">
-              {filteredOrders.map((order) => (
+              {paginatedOrders.map((order) => (
                 <div key={order.id} className="px-5 py-5 md:px-6">
                   <div className="grid gap-4 lg:grid-cols-[0.9fr_1.2fr_1fr_0.9fr_0.9fr] lg:items-start">
                     <div>
@@ -404,9 +442,6 @@ export default function AdminOrdersClient() {
                       </p>
                       <p className="text-sm font-bold text-slate-900">
                         #{formatOrderNumber(order.order_number)}
-                      </p>
-                      <p className="mt-1 break-all text-xs text-slate-500">
-                        {order.id}
                       </p>
                     </div>
 
@@ -496,6 +531,65 @@ export default function AdminOrdersClient() {
             </div>
           )}
         </div>
+
+        {!loading && !error && filteredOrders.length > 0 && (
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <p className="text-sm text-slate-600">
+              Mostrando <span className="font-semibold">{pageStart}</span> -{" "}
+              <span className="font-semibold">{pageEnd}</span> de{" "}
+              <span className="font-semibold">{filteredOrders.length}</span>{" "}
+              pedidos
+            </p>
+
+            {totalPages > 1 && (
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1}
+                  className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  ‹
+                </button>
+
+                {paginationItems.map((item, index) =>
+                  item === "..." ? (
+                    <span
+                      key={`ellipsis-${index}`}
+                      className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-transparent px-3 text-sm font-semibold text-slate-400"
+                    >
+                      ...
+                    </span>
+                  ) : (
+                    <button
+                      key={item}
+                      type="button"
+                      onClick={() => setCurrentPage(item)}
+                      className={`flex h-11 min-w-[44px] items-center justify-center rounded-2xl border px-3 text-sm font-semibold transition ${
+                        currentPage === item
+                          ? "border-slate-900 bg-slate-900 text-white"
+                          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      {item}
+                    </button>
+                  )
+                )}
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCurrentPage((prev) => Math.min(prev + 1, totalPages))
+                  }
+                  disabled={currentPage === totalPages}
+                  className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  ›
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
       {selectedOrder && (
