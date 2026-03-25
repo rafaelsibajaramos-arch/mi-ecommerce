@@ -50,29 +50,134 @@ export default function AuthGuard({
 
   const isPublicPath = pathname === "/reset-password";
 
+  const getOwnProfile = async (
+    userId: string
+  ): Promise<{ profile: ProfileRow | null; errorMessage: string | null }> => {
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, role")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (error) {
+      return {
+        profile: null,
+        errorMessage: getErrorMessage(
+          error,
+          "No se pudo consultar tu perfil."
+        ),
+      };
+    }
+
+    if (!data) {
+      return {
+        profile: null,
+        errorMessage: "Tu cuenta fue desactivada o no tiene un perfil válido.",
+      };
+    }
+
+    return {
+      profile: data,
+      errorMessage: null,
+    };
+  };
+
+  const createOwnProfile = async (
+    user: User,
+    fallback?: { fullName?: string; email?: string }
+  ): Promise<{ profile: ProfileRow | null; errorMessage: string | null }> => {
+    const safeEmail = fallback?.email?.trim() || user.email?.trim() || "";
+    const safeFullName =
+      fallback?.fullName?.trim() ||
+      String(user.user_metadata?.full_name || "").trim() ||
+      safeEmail ||
+      "Usuario";
+
+    const { error: insertError } = await supabase.from("profiles").insert({
+      id: user.id,
+      email: safeEmail,
+      full_name: safeFullName,
+      role: "user",
+      balance: 0,
+    });
+
+    if (insertError) {
+      return {
+        profile: null,
+        errorMessage: getErrorMessage(
+          insertError,
+          "La cuenta se creó, pero no se pudo crear el perfil."
+        ),
+      };
+    }
+
+    return getOwnProfile(user.id);
+  };
+
+  const forceLogoutInvalidProfile = async (message?: string) => {
+    await supabase.auth.signOut();
+
+    setIsLoggedIn(false);
+    setCheckingAuth(false);
+
+    if (message) {
+      setLoginMessage(message);
+    }
+
+    router.replace("/");
+    router.refresh();
+  };
+
+  const verifyActiveSession = async (user: User | null) => {
+    if (!user) {
+      setIsLoggedIn(false);
+      setCheckingAuth(false);
+      return;
+    }
+
+    const { profile, errorMessage } = await getOwnProfile(user.id);
+
+    if (errorMessage || !profile) {
+      await forceLogoutInvalidProfile(
+        errorMessage || "Tu cuenta no tiene un perfil válido."
+      );
+      return;
+    }
+
+    setIsLoggedIn(true);
+    setCheckingAuth(false);
+  };
+
+  const redirectByRole = (role: string | null | undefined) => {
+    if (role === "admin") {
+      router.replace("/admin");
+    } else {
+      router.replace("/");
+    }
+
+    router.refresh();
+  };
+
   useEffect(() => {
     let mounted = true;
 
     const checkSession = async () => {
       const {
-        data: { session },
-      } = await supabase.auth.getSession();
+        data: { user },
+      } = await supabase.auth.getUser();
 
       if (!mounted) return;
 
-      setIsLoggedIn(!!session?.user);
-      setCheckingAuth(false);
+      await verifyActiveSession(user ?? null);
     };
 
     checkSession();
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (!mounted) return;
-
-      setIsLoggedIn(!!session?.user);
-      setCheckingAuth(false);
+      await verifyActiveSession(session?.user ?? null);
     });
 
     return () => {
@@ -94,90 +199,6 @@ export default function AuthGuard({
       };
     }
   }, [checkingAuth, isLoggedIn, isPublicPath]);
-
-  const ensureOwnProfile = async (
-    user: User,
-    fallback?: { fullName?: string; email?: string }
-  ): Promise<{ profile: ProfileRow | null; errorMessage: string | null }> => {
-    const { data: existingProfile, error: existingProfileError } = await supabase
-      .from("profiles")
-      .select("id, role")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    if (existingProfileError) {
-      return {
-        profile: null,
-        errorMessage: getErrorMessage(
-          existingProfileError,
-          "No se pudo consultar tu perfil."
-        ),
-      };
-    }
-
-    if (existingProfile) {
-      return {
-        profile: existingProfile,
-        errorMessage: null,
-      };
-    }
-
-    const safeEmail = fallback?.email?.trim() || user.email?.trim() || "";
-    const safeFullName =
-      fallback?.fullName?.trim() ||
-      String(user.user_metadata?.full_name || "").trim() ||
-      safeEmail ||
-      "Usuario";
-
-    const { error: insertProfileError } = await supabase.from("profiles").insert({
-      id: user.id,
-      email: safeEmail,
-      full_name: safeFullName,
-      role: "user",
-      balance: 0,
-    });
-
-    if (insertProfileError) {
-      return {
-        profile: null,
-        errorMessage: getErrorMessage(
-          insertProfileError,
-          "La sesión inició, pero no se pudo crear tu perfil."
-        ),
-      };
-    }
-
-    const { data: createdProfile, error: createdProfileError } = await supabase
-      .from("profiles")
-      .select("id, role")
-      .eq("id", user.id)
-      .single();
-
-    if (createdProfileError || !createdProfile) {
-      return {
-        profile: null,
-        errorMessage: getErrorMessage(
-          createdProfileError,
-          "La sesión inició, pero no se pudo cargar tu perfil."
-        ),
-      };
-    }
-
-    return {
-      profile: createdProfile,
-      errorMessage: null,
-    };
-  };
-
-  const redirectByRole = (role: string | null | undefined) => {
-    if (role === "admin") {
-      router.replace("/admin");
-    } else {
-      router.replace("/");
-    }
-
-    router.refresh();
-  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -205,12 +226,12 @@ export default function AuthGuard({
       return;
     }
 
-    const { profile, errorMessage } = await ensureOwnProfile(user, {
-      email: cleanEmail,
-    });
+    const { profile, errorMessage } = await getOwnProfile(user.id);
 
     if (errorMessage || !profile) {
-      setLoginMessage(errorMessage || "No se pudo cargar tu perfil.");
+      await forceLogoutInvalidProfile(
+        errorMessage || "Tu cuenta fue desactivada o no tiene un perfil válido."
+      );
       setLoginLoading(false);
       return;
     }
@@ -294,12 +315,13 @@ export default function AuthGuard({
       return;
     }
 
-    const { profile, errorMessage } = await ensureOwnProfile(user, {
+    const { profile, errorMessage } = await createOwnProfile(user, {
       fullName: cleanName,
       email: cleanEmail,
     });
 
     if (errorMessage || !profile) {
+      await supabase.auth.signOut();
       setRegisterMessage(errorMessage || "No se pudo crear tu perfil.");
       setRegisterLoading(false);
       return;
