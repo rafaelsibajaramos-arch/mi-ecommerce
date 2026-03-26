@@ -131,6 +131,32 @@ export default function AdminUsersPage() {
   const pageStart = filteredUsers.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
   const pageEnd = Math.min(currentPage * PAGE_SIZE, filteredUsers.length);
 
+  const parseApiResponse = async (response: Response) => {
+    const contentType = response.headers.get("content-type") || "";
+
+    if (contentType.includes("application/json")) {
+      return await response.json();
+    }
+
+    const rawText = await response.text();
+
+    if (rawText.includes("<!DOCTYPE")) {
+      throw new Error(
+        "La API devolvió HTML en vez de JSON. Revisa que la ruta exista bien en app/api/admin/users/... y reinicia el servidor."
+      );
+    }
+
+    throw new Error(rawText || "Respuesta inválida del servidor.");
+  };
+
+  const getAccessToken = async () => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    return session?.access_token || null;
+  };
+
   const handleRoleChange = async (userId: string, newRole: string) => {
     setUpdatingRoleUserId(userId);
     setMessage("");
@@ -186,27 +212,58 @@ export default function AdminUsersPage() {
     setMessage("");
     setMessageType("");
 
-    const { error } = await supabase
-      .from("profiles")
-      .update({ email: newEmail })
-      .eq("id", userId);
+    try {
+      const token = await getAccessToken();
 
-    if (error) {
-      setMessage("Error actualizando correo: " + error.message);
+      if (!token) {
+        setMessage("Tu sesión expiró. Inicia sesión de nuevo.");
+        setMessageType("error");
+        return;
+      }
+
+      const response = await fetch("/api/admin/users/email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          userId,
+          email: newEmail,
+        }),
+      });
+
+      const result = await parseApiResponse(response);
+
+      if (!response.ok) {
+        setMessage(result?.error || "No se pudo actualizar el correo.");
+        setMessageType("error");
+        return;
+      }
+
+      setUsers((prevUsers) =>
+        prevUsers.map((user) =>
+          user.id === userId ? { ...user, email: newEmail } : user
+        )
+      );
+
+      setEmailDrafts((prev) => ({
+        ...prev,
+        [userId]: newEmail,
+      }));
+
+      setMessage(`Correo actualizado correctamente a ${newEmail}.`);
+      setMessageType("success");
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Ocurrió un error actualizando el correo."
+      );
       setMessageType("error");
+    } finally {
       setUpdatingEmailUserId(null);
-      return;
     }
-
-    setUsers((prevUsers) =>
-      prevUsers.map((user) =>
-        user.id === userId ? { ...user, email: newEmail } : user
-      )
-    );
-
-    setMessage(`Correo actualizado correctamente a ${newEmail}.`);
-    setMessageType("success");
-    setUpdatingEmailUserId(null);
   };
 
   const handlePasswordChange = async (userId: string) => {
@@ -222,13 +279,52 @@ export default function AdminUsersPage() {
     setMessage("");
     setMessageType("");
 
-    setTimeout(() => {
+    try {
+      const token = await getAccessToken();
+
+      if (!token) {
+        setMessage("Tu sesión expiró. Inicia sesión de nuevo.");
+        setMessageType("error");
+        return;
+      }
+
+      const response = await fetch("/api/admin/users/password", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          userId,
+          password: newPassword,
+        }),
+      });
+
+      const result = await parseApiResponse(response);
+
+      if (!response.ok) {
+        setMessage(result?.error || "No se pudo cambiar la contraseña.");
+        setMessageType("error");
+        return;
+      }
+
+      setPasswordDrafts((prev) => ({
+        ...prev,
+        [userId]: "",
+      }));
+
+      setMessage("Contraseña actualizada correctamente.");
+      setMessageType("success");
+    } catch (error) {
       setMessage(
-        "La interfaz ya quedó lista, pero para cambiar la contraseña real de otro usuario en Supabase necesito un endpoint admin con service role."
+        error instanceof Error
+          ? error.message
+          : "Ocurrió un error cambiando la contraseña."
       );
       setMessageType("error");
+    } finally {
       setUpdatingPasswordUserId(null);
-    }, 350);
+    }
   };
 
   return (
