@@ -242,29 +242,34 @@ export default function AuthGuard({
   };
 
   const handleForgotPassword = async () => {
-    setLoginMessage("");
+  setLoginMessage("");
 
-    if (!loginEmail.trim()) {
-      setLoginMessage(
-        "Escribe tu correo electrónico para recuperar tu contraseña."
-      );
-      return;
-    }
-
-    const { error } = await supabase.auth.resetPasswordForEmail(
-      loginEmail.trim(),
-      {
-        redirectTo: "https://streamingmayor1.com/reset-password",
-      }
+  if (!loginEmail.trim()) {
+    setLoginMessage(
+      "Escribe tu correo electrónico para recuperar tu contraseña."
     );
+    return;
+  }
 
-    if (error) {
-      setLoginMessage(error.message);
-      return;
+  const redirectTo =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/reset-password`
+      : "https://streamingmayor1.com/reset-password";
+
+  const { error } = await supabase.auth.resetPasswordForEmail(
+    loginEmail.trim(),
+    {
+      redirectTo,
     }
+  );
 
-    setLoginMessage("Te enviamos un enlace para restablecer tu contraseña.");
-  };
+  if (error) {
+    setLoginMessage(error.message);
+    return;
+  }
+
+  setLoginMessage("Te enviamos un enlace para restablecer tu contraseña.");
+};
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
