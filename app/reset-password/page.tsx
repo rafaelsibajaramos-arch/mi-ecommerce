@@ -78,8 +78,7 @@ export default function ResetPasswordPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-            />
+className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4 text-gray-900 placeholder:text-gray-400 caret-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"            />
           </div>
 
           <div>
