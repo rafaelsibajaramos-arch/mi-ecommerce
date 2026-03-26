@@ -4,6 +4,28 @@ import { useMemo, useRef, useState } from "react";
 import { useCart } from "../context/CartContext";
 import { supabase } from "../lib/supabase";
 
+type ReceiptOrder = {
+  id: string;
+  order_number: number | null;
+  total: number;
+  status: string;
+  created_at: string;
+  items: Array<{
+    id: string;
+    quantity: number;
+    price: number;
+    product_id: string;
+    product_name: string;
+    variant_name: string | null;
+    product_description: string | null;
+    product_category: string | null;
+    licenses: Array<{
+      id: string;
+      license_text: string;
+    }>;
+  }>;
+};
+
 export default function CartDrawer() {
   const {
     cart,
@@ -100,6 +122,15 @@ export default function CartDrawer() {
       clearCart();
       closeCart();
       resetSlider();
+
+      if (currentPath === "/" && result?.receipt) {
+        window.dispatchEvent(
+          new CustomEvent<ReceiptOrder>("checkout:receipt-ready", {
+            detail: result.receipt,
+          })
+        );
+        return;
+      }
 
       if (result?.orderId && currentPath === "/") {
         sessionStorage.setItem("recentOrderReceiptId", result.orderId);

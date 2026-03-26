@@ -128,6 +128,24 @@ export default function HomePage() {
   }, [quickViewProduct]);
 
   useEffect(() => {
+    const handleReceiptReady = (event: Event) => {
+      const customEvent = event as CustomEvent<ReceiptOrder>;
+
+      if (!customEvent.detail) return;
+
+      setReceiptMessage("");
+      setQuickViewProduct(null);
+      setReceiptOrder(customEvent.detail);
+    };
+
+    window.addEventListener("checkout:receipt-ready", handleReceiptReady);
+
+    return () => {
+      window.removeEventListener("checkout:receipt-ready", handleReceiptReady);
+    };
+  }, []);
+
+  useEffect(() => {
     const pendingOrderId = sessionStorage.getItem("recentOrderReceiptId");
     if (!pendingOrderId) return;
 

@@ -16,6 +16,8 @@ type CheckoutCartItem = {
 type ProductRow = {
   id: string;
   name: string;
+  description?: string | null;
+  category?: string | null;
   price: number;
   stock: number;
   is_active: boolean;
@@ -426,7 +428,7 @@ export async function POST(request: NextRequest) {
       supabaseAdmin
         .from("products")
         .select(
-          "id, name, price, stock, is_active, product_type, avoid_repeat_license, use_priority_licenses, fallback_to_general_licenses"
+          "id, name, description, category, price, stock, is_active, product_type, avoid_repeat_license, use_priority_licenses, fallback_to_general_licenses"
         )
         .in("id", productIds),
       variantIds.length
@@ -867,11 +869,42 @@ export async function POST(request: NextRequest) {
       updatedProductStockIds.add(productId);
     }
 
+    const receiptItems = cart.map((item) => {
+      const itemKey = buildItemKey(item.id, item.variantId || null);
+      const matchingOrderItem = orderItemsByKey.get(itemKey);
+      const product = productsMap[item.id];
+      const selectedLicenses = selectedLicensesByItemKey.get(itemKey) || [];
+
+      return {
+        id: matchingOrderItem?.id || itemKey,
+        quantity: Number(item.quantity || 0),
+        price: Number(matchingOrderItem?.unit_price ?? item.price ?? 0),
+        product_id: item.id,
+        product_name: matchingOrderItem?.product_name || product?.name || item.name,
+        variant_name:
+          matchingOrderItem?.variant_name || item.variantName || null,
+        product_description: product?.description || null,
+        product_category: product?.category || null,
+        licenses: selectedLicenses.map((license) => ({
+          id: license.id,
+          license_text: license.license_text,
+        })),
+      };
+    });
+
     return NextResponse.json({
       ok: true,
       orderId: orderData.id,
       orderNumber,
       redirectTo: "/account/orders",
+      receipt: {
+        id: orderData.id,
+        order_number: orderData.order_number,
+        total: Number(orderData.total || 0),
+        status: orderData.status || "paid",
+        created_at: orderData.created_at,
+        items: receiptItems,
+      },
     });
   } catch (error) {
     return jsonError(
