@@ -620,7 +620,7 @@ export default function HomePage() {
                 src={product.image_url}
                 alt={product.name}
                 fill
-                sizes="(max-width: 640px) 50vw, (max-width: 1280px) 33vw, 25vw"
+                sizes="(max-width: 639px) 50vw, (max-width: 1279px) 33vw, 25vw"
                 className="object-contain p-2 transition duration-500 group-hover:scale-[1.04] sm:p-3"
               />
             ) : (
@@ -725,7 +725,7 @@ export default function HomePage() {
               disabled={visibleStock <= 0}
               className="mt-2.5 inline-flex h-9 w-full items-center justify-center rounded-2xl bg-white px-2 text-[11px] font-bold text-black transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 sm:mt-4 sm:h-11 sm:px-3 sm:text-sm"
             >
-              Agregar
+              Añadir al carrito
             </button>
           </div>
         </div>
@@ -842,8 +842,8 @@ export default function HomePage() {
             </div>
           )}
 
-          <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
-            <aside className="lg:sticky lg:top-24 lg:self-start">
+          <div className="grid gap-6 md:grid-cols-[230px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)]">
+            <aside className="md:sticky md:top-24 md:self-start">
               <div className="overflow-hidden rounded-[26px] border border-white/10 bg-white/[0.035] backdrop-blur-md">
                 <div className="border-b border-white/10 p-5">
                   <h3 className="text-xl font-black uppercase text-white">
@@ -951,7 +951,7 @@ export default function HomePage() {
                 </div>
               ) : (
                 <>
-                  <div className="grid grid-cols-2 gap-2 sm:gap-4 xl:grid-cols-4">
+                  <div className="grid grid-cols-2 gap-2 md:grid-cols-3 md:gap-3 xl:grid-cols-4 xl:gap-4">
                     {products.map((product) => renderProductCard(product))}
                   </div>
 
