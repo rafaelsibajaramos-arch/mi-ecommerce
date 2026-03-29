@@ -621,7 +621,11 @@ export default function EditProductPage() {
 
         const { error: uploadError } = await supabase.storage
           .from("product-images")
-          .upload(filePath, imageFile);
+          .upload(filePath, imageFile, {
+            cacheControl: "31536000",
+            upsert: false,
+            contentType: imageFile.type || undefined,
+          });
 
         if (uploadError) {
           setMessage("Error subiendo imagen: " + uploadError.message);

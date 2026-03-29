@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../../../lib/supabase";
 
@@ -21,6 +21,12 @@ export default function NewProductPage() {
     if (!imageFile) return "";
     return URL.createObjectURL(imageFile);
   }, [imageFile]);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,8 +67,9 @@ export default function NewProductPage() {
         const { error: uploadError } = await supabase.storage
           .from("product-images")
           .upload(filePath, imageFile, {
-            cacheControl: "3600",
+            cacheControl: "31536000",
             upsert: false,
+            contentType: imageFile.type || undefined,
           });
 
         if (uploadError) {

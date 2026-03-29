@@ -74,22 +74,40 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
 
   if (!profile) return null;
 
-  const balance = Number(profile.balance || 0).toLocaleString();
+  const rawBalance = Number(profile.balance || 0);
+  const balance = new Intl.NumberFormat("es-CO").format(rawBalance);
+  const compactBalance = new Intl.NumberFormat("es-CO", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(rawBalance);
+
   const fullName = profile.full_name || "Usuario";
   const email = profile.email || "Sin correo";
+
+  const itemClass =
+    "flex items-center gap-3 rounded-2xl px-3 py-2.5 text-[13px] font-medium text-white/85 transition hover:bg-white/[0.05] hover:text-white min-[390px]:py-3 min-[390px]:text-[14px] md:text-[15px]";
+
+  const iconWrapClass =
+    "flex h-8 w-8 items-center justify-center rounded-xl bg-white/[0.04] min-[390px]:h-9 min-[390px]:w-9";
 
   return (
     <div ref={dropdownRef} className="relative">
       <button
         type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className="flex h-[46px] items-center gap-2 rounded-2xl border border-white/15 bg-white/[0.03] px-3 text-white transition hover:bg-white/[0.06] md:h-[50px] md:gap-3 md:px-4"
+        className="flex h-[44px] max-w-[132px] items-center gap-1.5 rounded-[18px] border border-white/15 bg-white/[0.03] px-2 text-white transition hover:bg-white/[0.06] min-[350px]:max-w-[152px] min-[350px]:px-2.5 min-[390px]:h-[46px] min-[390px]:max-w-[175px] min-[390px]:gap-2 min-[390px]:px-3 min-[430px]:max-w-[220px] md:h-[50px] md:max-w-none md:gap-3 md:px-4"
       >
-        <span className="text-[13px] font-semibold text-white/95 md:text-[16px]">
+        <span className="hidden text-[11px] font-semibold text-white/95 min-[350px]:block min-[430px]:hidden">
+          $ {compactBalance}
+        </span>
+
+        <span className="hidden text-[13px] font-semibold text-white/95 min-[430px]:block md:text-[16px]">
           $ {balance}
         </span>
 
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-black">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-black min-[390px]:h-9 min-[390px]:w-9">
           <svg
             viewBox="0 0 24 24"
             className="h-4 w-4"
@@ -105,51 +123,49 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
         </div>
 
         <span
-          className={`text-white/40 transition ${open ? "rotate-180" : ""}`}
+          className={`hidden text-white/40 transition min-[350px]:inline-block ${
+            open ? "rotate-180" : ""
+          }`}
         >
           ▾
         </span>
       </button>
 
       {open && (
-        <div className="absolute right-0 top-[58px] z-50 w-[92vw] max-w-[360px] overflow-hidden rounded-[24px] border border-white/10 bg-[#050816]/95 shadow-[0_30px_90px_rgba(0,0,0,0.7)] backdrop-blur-2xl md:top-[64px] md:w-[360px] md:rounded-[26px]">
+        <div className="absolute right-0 top-[54px] z-50 w-[calc(100vw-24px)] max-w-[360px] overflow-hidden rounded-[22px] border border-white/10 bg-[#050816]/95 shadow-[0_30px_90px_rgba(0,0,0,0.7)] backdrop-blur-2xl min-[390px]:w-[calc(100vw-32px)] md:top-[64px] md:w-[360px] md:rounded-[26px]">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.07),transparent_38%),radial-gradient(circle_at_bottom_right,rgba(255,255,255,0.03),transparent_34%)]" />
 
-          <div className="relative z-10 p-4 md:p-6">
-            <div className="flex items-start justify-between gap-4">
+          <div className="relative z-10 p-3.5 min-[390px]:p-4 md:p-6">
+            <div className="flex items-start justify-between gap-3 min-[390px]:gap-4">
               <div className="min-w-0">
-                <p className="truncate text-[14px] font-bold text-white md:text-[15px]">
+                <p className="truncate text-[13px] font-bold text-white min-[390px]:text-[14px] md:text-[15px]">
                   {fullName}
                 </p>
-                <p className="mt-1 truncate text-xs text-white/55 md:text-sm">
+                <p className="mt-1 truncate text-[11px] text-white/55 min-[390px]:text-xs md:text-sm">
                   {email}
                 </p>
               </div>
 
-              <span className="shrink-0 rounded-full border border-blue-400/40 bg-blue-500/15 px-3 py-[5px] text-xs font-semibold text-blue-300 capitalize shadow-[0_0_12px_rgba(59,130,246,0.35)] md:px-4 md:py-[6px] md:text-sm">
+              <span className="shrink-0 rounded-full border border-blue-400/40 bg-blue-500/15 px-2.5 py-1 text-[10px] font-semibold text-blue-300 capitalize shadow-[0_0_12px_rgba(59,130,246,0.35)] min-[390px]:px-3 min-[390px]:text-xs md:px-4 md:py-[6px] md:text-sm">
                 {profile.role || "user"}
               </span>
             </div>
 
-            <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-4 md:mt-5">
+            <div className="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] px-3.5 py-3.5 min-[390px]:mt-4 min-[390px]:px-4 min-[390px]:py-4 md:mt-5">
               <p className="text-[10px] uppercase tracking-[0.18em] text-white/35 md:text-xs">
                 Saldo disponible
               </p>
-              <p className="mt-2 text-xl font-black text-sky-400 md:text-2xl">
+              <p className="mt-2 text-lg font-black text-sky-400 min-[390px]:text-xl md:text-2xl">
                 $ {balance}
               </p>
             </div>
 
-            <div className="mt-4 space-y-2 md:mt-5">
-              <Link
-                href="/"
-                onClick={() => setOpen(false)}
-                className="flex items-center gap-3 rounded-2xl px-3 py-3 text-[14px] font-medium text-white/85 transition hover:bg-white/[0.05] hover:text-white md:text-[15px]"
-              >
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/[0.04]">
+            <div className="mt-3 space-y-1.5 min-[390px]:mt-4 min-[390px]:space-y-2 md:mt-5">
+              <Link href="/" onClick={() => setOpen(false)} className={itemClass}>
+                <span className={iconWrapClass}>
                   <svg
                     viewBox="0 0 24 24"
-                    className="h-5 w-5"
+                    className="h-4 w-4 min-[390px]:h-5 min-[390px]:w-5"
                     fill="none"
                     stroke="currentColor"
                     strokeWidth="1.9"
@@ -165,14 +181,14 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
 
               {isAdmin && (
                 <Link
-                    href="/admin/products"
-                    onClick={() => setOpen(false)}
-                     className="flex items-center gap-3 rounded-2xl px-3 py-3 text-[14px] font-medium text-white/85 transition hover:bg-white/[0.05] hover:text-white md:text-[15px]"
-                   >
-                  <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/[0.04]">
+                  href="/admin/products"
+                  onClick={() => setOpen(false)}
+                  className={itemClass}
+                >
+                  <span className={iconWrapClass}>
                     <svg
                       viewBox="0 0 24 24"
-                      className="h-5 w-5"
+                      className="h-4 w-4 min-[390px]:h-5 min-[390px]:w-5"
                       fill="none"
                       stroke="currentColor"
                       strokeWidth="1.9"
@@ -190,12 +206,12 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
               <Link
                 href="/account"
                 onClick={() => setOpen(false)}
-                className="flex items-center gap-3 rounded-2xl px-3 py-3 text-[14px] font-medium text-white/85 transition hover:bg-white/[0.05] hover:text-white md:text-[15px]"
+                className={itemClass}
               >
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/[0.04]">
+                <span className={iconWrapClass}>
                   <svg
                     viewBox="0 0 24 24"
-                    className="h-5 w-5"
+                    className="h-4 w-4 min-[390px]:h-5 min-[390px]:w-5"
                     fill="none"
                     stroke="currentColor"
                     strokeWidth="1.9"
@@ -212,12 +228,12 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
               <Link
                 href="/account/wallet"
                 onClick={() => setOpen(false)}
-                className="flex items-center gap-3 rounded-2xl px-3 py-3 text-[14px] font-medium text-white/85 transition hover:bg-white/[0.05] hover:text-white md:text-[15px]"
+                className={itemClass}
               >
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/[0.04]">
+                <span className={iconWrapClass}>
                   <svg
                     viewBox="0 0 24 24"
-                    className="h-5 w-5"
+                    className="h-4 w-4 min-[390px]:h-5 min-[390px]:w-5"
                     fill="none"
                     stroke="currentColor"
                     strokeWidth="1.9"
@@ -235,12 +251,12 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
               <Link
                 href="/account/orders"
                 onClick={() => setOpen(false)}
-                className="flex items-center gap-3 rounded-2xl px-3 py-3 text-[14px] font-medium text-white/85 transition hover:bg-white/[0.05] hover:text-white md:text-[15px]"
+                className={itemClass}
               >
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/[0.04]">
+                <span className={iconWrapClass}>
                   <svg
                     viewBox="0 0 24 24"
-                    className="h-5 w-5"
+                    className="h-4 w-4 min-[390px]:h-5 min-[390px]:w-5"
                     fill="none"
                     stroke="currentColor"
                     strokeWidth="1.9"
@@ -255,16 +271,16 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
               </Link>
             </div>
 
-            <div className="mt-4 border-t border-white/10 pt-4 md:mt-5">
+            <div className="mt-3 border-t border-white/10 pt-3 min-[390px]:mt-4 min-[390px]:pt-4 md:mt-5">
               <button
                 type="button"
                 onClick={logout}
-                className="flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-[14px] font-medium text-red-400 transition hover:bg-red-500/10 hover:text-red-300 md:text-[15px]"
+                className="flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-[13px] font-medium text-red-400 transition hover:bg-red-500/10 hover:text-red-300 min-[390px]:py-3 min-[390px]:text-[14px] md:text-[15px]"
               >
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-red-500/10">
+                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-red-500/10 min-[390px]:h-9 min-[390px]:w-9">
                   <svg
                     viewBox="0 0 24 24"
-                    className="h-5 w-5"
+                    className="h-4 w-4 min-[390px]:h-5 min-[390px]:w-5"
                     fill="none"
                     stroke="currentColor"
                     strokeWidth="1.9"

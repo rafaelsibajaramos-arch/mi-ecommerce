@@ -1,5 +1,7 @@
 "use client";
 
+import Image from "next/image";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { useCart } from "../context/CartContext";
@@ -42,15 +44,6 @@ type CategoryItem = {
   count: number;
 };
 
-type ReceiptOrderRow = {
-  id: string;
-  order_number: number | null;
-  user_id: string;
-  total: number;
-  status: string | null;
-  created_at: string;
-};
-
 type ReceiptOrderItemRow = {
   id: string;
   order_id: string;
@@ -79,6 +72,9 @@ type ReceiptLicenseRow = {
   assigned_user_id: string | null;
 };
 
+const PRODUCTS_PER_PAGE = 12;
+const SEARCH_DEBOUNCE_MS = 350;
+
 export default function HomePage() {
   const { addToCart } = useCart();
 
@@ -89,7 +85,11 @@ export default function HomePage() {
   const [selectedVariants, setSelectedVariants] = useState<
     Record<string, string>
   >({});
+  const [categories, setCategories] = useState<CategoryItem[]>([
+    { name: "Todas", count: 0 },
+  ]);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("Todas");
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -97,11 +97,25 @@ export default function HomePage() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null);
   const [receiptOrder, setReceiptOrder] = useState<ReceiptOrder | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalProducts, setTotalProducts] = useState(0);
 
   useEffect(() => {
-    fetchProducts();
     fetchRole();
+    fetchCategories();
   }, []);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setDebouncedSearch(search.trim());
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timeout);
+  }, [search]);
+
+  useEffect(() => {
+    fetchProductsPage();
+  }, [currentPage, selectedCategory, debouncedSearch]);
 
   const formatPrice = (value: number | string | null | undefined) => {
     const numericValue = Math.round(Number(value || 0));
@@ -203,7 +217,7 @@ export default function HomePage() {
           new Set(rawItems.map((item) => item.product_id).filter(Boolean))
         );
 
-        let productsMap = new Map<string, ReceiptProductRow>();
+        const productsMap = new Map<string, ReceiptProductRow>();
 
         if (productIds.length > 0) {
           const { data: productsData, error: productsError } = await supabase
@@ -302,6 +316,10 @@ export default function HomePage() {
     };
   }, []);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedCategory, debouncedSearch]);
+
   const fetchRole = async () => {
     const {
       data: { user },
@@ -321,24 +339,76 @@ export default function HomePage() {
     setIsAdmin(data?.role === "admin");
   };
 
-  const fetchProducts = async () => {
+  const fetchCategories = async () => {
+    const { data, error } = await supabase
+      .from("products")
+      .select("category")
+      .eq("is_active", true);
+
+    if (error) {
+      return;
+    }
+
+    const counts = new Map<string, number>();
+
+    ((data as { category: string | null }[]) || []).forEach((item) => {
+      const category = (item.category || "").trim();
+      if (!category) return;
+      counts.set(category, (counts.get(category) || 0) + 1);
+    });
+
+    const ordered = Array.from(counts.entries())
+      .sort((a, b) => a[0].localeCompare(b[0], "es", { sensitivity: "base" }))
+      .map(([name, count]) => ({ name, count }));
+
+    setCategories([
+      {
+        name: "Todas",
+        count: ((data as { category: string | null }[]) || []).length,
+      },
+      ...ordered,
+    ]);
+  };
+
+  const fetchProductsPage = async () => {
     setLoading(true);
     setMessage("");
 
-    const { data, error } = await supabase
+    const from = (currentPage - 1) * PRODUCTS_PER_PAGE;
+    const to = from + PRODUCTS_PER_PAGE - 1;
+
+    let query = supabase
       .from("products")
-      .select("*")
+      .select("*", { count: "exact" })
       .eq("is_active", true)
-      .order("created_at", { ascending: false });
+      .order("name", { ascending: true });
+
+    if (selectedCategory !== "Todas") {
+      query = query.eq("category", selectedCategory);
+    }
+
+    if (debouncedSearch) {
+      const term = debouncedSearch.replace(/[%]/g, "").trim();
+      query = query.or(
+        `name.ilike.%${term}%,category.ilike.%${term}%,description.ilike.%${term}%`
+      );
+    }
+
+    const { data, error, count } = await query.range(from, to);
 
     if (error) {
       setMessage("Error cargando productos: " + error.message);
+      setProducts([]);
+      setVariantsMap({});
+      setSelectedVariants({});
+      setTotalProducts(0);
       setLoading(false);
       return;
     }
 
     const safeProducts = (data as Product[]) || [];
     setProducts(safeProducts);
+    setTotalProducts(count || 0);
 
     const variableProducts = safeProducts.filter(
       (product) => product.product_type === "variable"
@@ -347,7 +417,7 @@ export default function HomePage() {
     if (variableProducts.length > 0) {
       const productIds = variableProducts.map((product) => product.id);
 
-      const { data: variantsData } = await supabase
+      const { data: variantsData, error: variantsError } = await supabase
         .from("product_variants")
         .select("*")
         .in("product_id", productIds)
@@ -355,8 +425,15 @@ export default function HomePage() {
         .order("sort_order", { ascending: true })
         .order("created_at", { ascending: true });
 
+      if (variantsError) {
+        setVariantsMap({});
+        setSelectedVariants({});
+        setLoading(false);
+        return;
+      }
+
       const grouped: Record<string, ProductVariant[]> = {};
-      const initialSelected: Record<string, string> = {};
+      const nextSelected: Record<string, string> = {};
 
       ((variantsData as ProductVariant[]) || []).forEach((variant) => {
         if (!grouped[variant.product_id]) {
@@ -365,14 +442,24 @@ export default function HomePage() {
         grouped[variant.product_id].push(variant);
       });
 
-      Object.entries(grouped).forEach(([productId, variants]) => {
-        if (variants.length > 0) {
-          initialSelected[productId] = variants[0].id;
-        }
+      setSelectedVariants((prev) => {
+        Object.entries(grouped).forEach(([productId, variants]) => {
+          const previousSelection = prev[productId];
+          const stillExists = variants.some(
+            (variant) => variant.id === previousSelection
+          );
+
+          if (stillExists && previousSelection) {
+            nextSelected[productId] = previousSelection;
+          } else if (variants.length > 0) {
+            nextSelected[productId] = variants[0].id;
+          }
+        });
+
+        return nextSelected;
       });
 
       setVariantsMap(grouped);
-      setSelectedVariants(initialSelected);
     } else {
       setVariantsMap({});
       setSelectedVariants({});
@@ -381,39 +468,26 @@ export default function HomePage() {
     setLoading(false);
   };
 
-  const categories = useMemo<CategoryItem[]>(() => {
-    const counts = new Map<string, number>();
+  const totalPages = useMemo(() => {
+    return Math.max(1, Math.ceil(totalProducts / PRODUCTS_PER_PAGE));
+  }, [totalProducts]);
 
-    products.forEach((product) => {
-      const category = (product.category || "").trim();
-      if (!category) return;
-      counts.set(category, (counts.get(category) || 0) + 1);
-    });
+  const visibleRange = useMemo(() => {
+    if (totalProducts === 0) {
+      return { start: 0, end: 0 };
+    }
 
-    const ordered = Array.from(counts.entries())
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([name, count]) => ({ name, count }));
+    const start = (currentPage - 1) * PRODUCTS_PER_PAGE + 1;
+    const end = Math.min(currentPage * PRODUCTS_PER_PAGE, totalProducts);
 
-    return [{ name: "Todas", count: products.length }, ...ordered];
-  }, [products]);
+    return { start, end };
+  }, [totalProducts, currentPage]);
 
-  const filteredProducts = useMemo(() => {
-    const term = search.trim().toLowerCase();
-
-    return products.filter((product) => {
-      const matchesSearch =
-        !term ||
-        product.name.toLowerCase().includes(term) ||
-        (product.category || "").toLowerCase().includes(term) ||
-        (product.description || "").toLowerCase().includes(term);
-
-      const matchesCategory =
-        selectedCategory === "Todas" ||
-        (product.category || "").trim() === selectedCategory;
-
-      return matchesSearch && matchesCategory;
-    });
-  }, [products, search, selectedCategory]);
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   const getSelectedVariant = (productId: string) => {
     const variants = variantsMap[productId] || [];
@@ -524,6 +598,141 @@ export default function HomePage() {
     ? getVisibleStock(quickViewProduct)
     : 0;
 
+  const renderProductCard = (product: Product) => {
+    const selectedVariant =
+      product.product_type === "variable"
+        ? getSelectedVariant(product.id)
+        : null;
+
+    const visiblePrice = getVisiblePrice(product);
+    const visibleStock = getVisibleStock(product);
+
+    return (
+      <article
+        key={product.id}
+        onClick={() => handleOpenQuickView(product)}
+        className="group flex h-full cursor-pointer flex-col overflow-hidden rounded-[18px] border border-white/10 bg-white/[0.04] backdrop-blur-md transition duration-300 hover:-translate-y-1 hover:border-blue-400/30 hover:shadow-[0_20px_80px_rgba(59,130,246,0.12)] sm:rounded-[22px]"
+      >
+        <div className="p-2 pb-0 sm:p-3 sm:pb-0">
+          <div className="relative aspect-square w-full overflow-hidden rounded-[14px] bg-gradient-to-b from-white/[0.05] to-white/[0.02] sm:rounded-[18px]">
+            {product.image_url ? (
+              <Image
+                src={product.image_url}
+                alt={product.name}
+                fill
+                sizes="(max-width: 640px) 50vw, (max-width: 1280px) 33vw, 25vw"
+                className="object-contain p-2 transition duration-500 group-hover:scale-[1.04] sm:p-3"
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center bg-white/[0.02]">
+                <div className="text-center">
+                  <p className="text-xs font-bold text-white/80 sm:text-sm">
+                    Producto digital
+                  </p>
+                  <p className="mt-1 text-[10px] text-white/35 sm:text-xs">
+                    Sin imagen
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <div className="absolute left-2 top-2 z-10 sm:left-3 sm:top-3">
+              <span
+                className={
+                  visibleStock > 0
+                    ? "inline-flex rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2 py-0.5 text-[9px] font-bold text-emerald-300 sm:px-2.5 sm:py-1 sm:text-[10px]"
+                    : "inline-flex rounded-full border border-red-400/20 bg-red-400/10 px-2 py-0.5 text-[9px] font-bold text-red-300 sm:px-2.5 sm:py-1 sm:text-[10px]"
+                }
+              >
+                {visibleStock > 0 ? "Disponible" : "Agotado"}
+              </span>
+            </div>
+
+            {isAdmin && (
+              <Link
+                href={`/admin/products/${product.id}`}
+                onClick={(e) => e.stopPropagation()}
+                aria-label={`Editar ${product.name}`}
+                className="absolute right-2 top-2 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-black/45 text-white/85 shadow-[0_10px_24px_rgba(0,0,0,0.35)] transition hover:scale-105 hover:bg-white hover:text-black sm:right-3 sm:top-3 sm:h-10 sm:w-10"
+                title="Editar producto"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  className="h-3.5 w-3.5 sm:h-4.5 sm:w-4.5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M12 20h9" />
+                  <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" />
+                </svg>
+              </Link>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-1 flex-col p-2.5 sm:p-4">
+          <div className="min-h-[48px] sm:min-h-[58px]">
+            <p className="text-[8px] uppercase tracking-[0.12em] text-blue-400/80 sm:text-[10px] sm:tracking-[0.18em]">
+              {(product.category || "Producto digital").toUpperCase()}
+            </p>
+
+            <h3 className="mt-1 h-[34px] overflow-hidden text-[11px] font-extrabold uppercase leading-4 text-white sm:mt-2 sm:h-auto sm:text-[13px] sm:leading-5 md:text-[15px] md:leading-6">
+              {product.name}
+            </h3>
+          </div>
+
+          {product.product_type === "variable" && selectedVariant && (
+            <div className="mt-2 sm:mt-3" onClick={(e) => e.stopPropagation()}>
+              <select
+                value={selectedVariants[product.id] || ""}
+                onChange={(e) => handleVariantChange(e, product.id)}
+                className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-2.5 py-2 text-[11px] font-semibold text-white outline-none sm:px-3 sm:text-sm"
+              >
+                {(variantsMap[product.id] || []).map((variant) => (
+                  <option
+                    key={variant.id}
+                    value={variant.id}
+                    className="bg-[#0d0d0d] text-white"
+                  >
+                    {variant.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="mt-auto border-t border-white/10 pt-2.5 sm:pt-4">
+            <p className="text-[8px] uppercase tracking-[0.12em] text-white/30 sm:text-[10px] sm:tracking-[0.18em]">
+              Precio
+            </p>
+
+            <p className="mt-1 text-lg font-black text-white sm:text-xl md:text-2xl">
+              ${formatPrice(visiblePrice)}
+            </p>
+
+            {isAdmin && (
+              <p className="mt-1 text-[10px] font-semibold text-white/45 sm:text-xs">
+                Stock: {visibleStock}
+              </p>
+            )}
+
+            <button
+              type="button"
+              onClick={(e) => handleAddToCart(e, product)}
+              disabled={visibleStock <= 0}
+              className="mt-2.5 inline-flex h-9 w-full items-center justify-center rounded-2xl bg-white px-2 text-[11px] font-bold text-black transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 sm:mt-4 sm:h-11 sm:px-3 sm:text-sm"
+            >
+              Agregar
+            </button>
+          </div>
+        </div>
+      </article>
+    );
+  };
+
   return (
     <>
       <main className="min-h-screen bg-transparent text-white">
@@ -545,7 +754,7 @@ export default function HomePage() {
                 href="#catalogo"
                 className="inline-flex h-11 items-center justify-center rounded-2xl bg-white px-6 text-sm font-bold text-black transition hover:bg-slate-100 md:h-12 md:px-7"
               >
-                Explorar catálogo
+                Ver catálogo
               </a>
             </div>
 
@@ -611,102 +820,14 @@ export default function HomePage() {
           id="catalogo"
           className="mx-auto max-w-7xl px-4 py-12 md:px-6 md:py-14"
         >
-          <div className="mb-8 flex flex-col gap-3 md:mb-10">
-            <p className="text-2xl font-bold uppercase tracking-[0.14em] text-white md:text-3xl">
+          <div className="mb-8 flex flex-col gap-3 md:mb-10 md:flex-row md:items-center md:justify-between">
+            <h2 className="text-2xl font-black uppercase tracking-[0.14em] text-white md:text-3xl">
               CATÁLOGO
-            </p>
-            <p className="text-sm leading-6 text-white/62 md:text-base">
-              Gran variedad de servicios digitales en un solo lugar.
-            </p>
-          </div>
+            </h2>
 
-          <div className="mb-6 grid grid-cols-1 gap-3 md:mb-8 md:grid-cols-[minmax(0,1.2fr)_220px] lg:grid-cols-[minmax(0,1.4fr)_240px]">
-            <div className="rounded-[22px] border border-white/10 bg-white/[0.025] p-4 backdrop-blur-md">
-              <div className="mb-3 flex items-center gap-3">
-                <svg
-                  className="h-5 w-5 text-blue-400"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <circle cx="11" cy="11" r="7"></circle>
-                  <path d="m20 20-3.5-3.5"></path>
-                </svg>
-
-                <p className="text-base font-black uppercase tracking-[0.08em] text-white md:text-lg">
-                  Búsqueda
-                </p>
-              </div>
-
-              <div className="rounded-[18px] border border-blue-500 bg-white/[0.03] px-4 py-3 shadow-[0_0_0_1px_rgba(59,130,246,0.18)]">
-                <div className="flex items-center gap-3">
-                  <input
-                    type="text"
-                    placeholder="Filtrar productos..."
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    className="w-full bg-transparent text-sm text-white outline-none placeholder:text-white/35 md:text-base"
-                  />
-
-                  <svg
-                    className="h-5 w-5 shrink-0 text-blue-400"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <circle cx="11" cy="11" r="7"></circle>
-                    <path d="m20 20-3.5-3.5"></path>
-                  </svg>
-                </div>
-              </div>
+            <div className="inline-flex rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-semibold text-white/70">
+              {loading ? "Cargando..." : `${totalProducts} producto(s)`}
             </div>
-
-            <div className="rounded-[22px] border border-white/10 bg-white/[0.025] p-4 backdrop-blur-md">
-              <div className="mb-3 flex items-center gap-3">
-                <svg
-                  className="h-5 w-5 text-blue-400"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <rect x="3" y="3" width="7" height="7" rx="1"></rect>
-                  <rect x="14" y="3" width="7" height="7" rx="1"></rect>
-                  <rect x="3" y="14" width="7" height="7" rx="1"></rect>
-                  <rect x="14" y="14" width="7" height="7" rx="1"></rect>
-                </svg>
-
-                <p className="text-base font-black uppercase tracking-[0.08em] text-white md:text-lg">
-                  Categoría
-                </p>
-              </div>
-
-              <select
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                className="w-full rounded-[18px] border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-white outline-none md:text-base"
-              >
-                {categories.map((category) => (
-                  <option
-                    key={category.name}
-                    value={category.name}
-                    className="bg-[#0d0d0d] text-white"
-                  >
-                    {category.name} ({category.count})
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="mb-5 flex items-center justify-between">
-            <p className="text-sm text-white/45">
-              {loading
-                ? "Cargando productos..."
-                : `${filteredProducts.length} producto(s) disponibles`}
-            </p>
           </div>
 
           {message && (
@@ -721,126 +842,170 @@ export default function HomePage() {
             </div>
           )}
 
-          {!loading && filteredProducts.length === 0 ? (
-            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-10 text-center backdrop-blur-md">
-              <p className="text-lg font-semibold text-white">
-                No encontramos productos con ese filtro
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
-              {filteredProducts.map((product) => {
-                const selectedVariant =
-                  product.product_type === "variable"
-                    ? getSelectedVariant(product.id)
-                    : null;
+          <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
+            <aside className="lg:sticky lg:top-24 lg:self-start">
+              <div className="overflow-hidden rounded-[26px] border border-white/10 bg-white/[0.035] backdrop-blur-md">
+                <div className="border-b border-white/10 p-5">
+                  <h3 className="text-xl font-black uppercase text-white">
+                    Categorías
+                  </h3>
+                </div>
 
-                const visiblePrice = getVisiblePrice(product);
-                const visibleStock = getVisibleStock(product);
+                <div className="max-h-[520px] overflow-y-auto p-3">
+                  <div className="space-y-2">
+                    {categories.map((category) => {
+                      const isActive = selectedCategory === category.name;
 
-                return (
-                  <article
-                    key={product.id}
-                    onClick={() => handleOpenQuickView(product)}
-                    className="group flex h-full cursor-pointer flex-col overflow-hidden rounded-[22px] border border-white/10 bg-white/[0.035] backdrop-blur-md transition duration-300 hover:-translate-y-1 hover:border-white/20"
-                  >
-                    <div className="p-3 pb-0">
-                      <div className="aspect-[1/1] w-full overflow-hidden rounded-[18px] bg-white/[0.02]">
-                        {product.image_url ? (
-                          <img
-                            src={product.image_url}
-                            alt={product.name}
-                            className="h-full w-full object-contain transition duration-500 group-hover:scale-[1.03]"
-                          />
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center bg-white/[0.02]">
-                            <div className="text-center">
-                              <p className="text-sm font-bold text-white/80 md:text-base">
-                                Producto digital
-                              </p>
-                              <p className="mt-1 text-xs text-white/35">
-                                Sin imagen
-                              </p>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="flex flex-1 flex-col p-3.5 md:p-4">
-                      <div className="flex min-h-[58px] items-start justify-between gap-2">
-                        <h3 className="max-w-[72%] text-[12px] font-extrabold uppercase leading-5 text-white sm:text-[13px] md:text-[15px] md:leading-6">
-                          {product.name}
-                        </h3>
-
-                        <span
+                      return (
+                        <button
+                          key={category.name}
+                          type="button"
+                          onClick={() => {
+                            setSelectedCategory(category.name);
+                            setCurrentPage(1);
+                          }}
                           className={
-                            visibleStock > 0
-                              ? "shrink-0 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-bold text-emerald-300"
-                              : "shrink-0 rounded-full border border-red-400/20 bg-red-400/10 px-2.5 py-1 text-[10px] font-bold text-red-300"
+                            isActive
+                              ? "flex w-full items-center justify-between rounded-2xl border border-blue-400/30 bg-blue-500/15 px-4 py-3 text-left text-sm font-bold text-white transition"
+                              : "flex w-full items-center justify-between rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-left text-sm font-semibold text-white/70 transition hover:bg-white/[0.06] hover:text-white"
                           }
                         >
-                          {visibleStock > 0 ? "Disp." : "Agotado"}
-                        </span>
-                      </div>
+                          <span className="truncate pr-3">{category.name}</span>
+                          <span
+                            className={
+                              isActive
+                                ? "rounded-full bg-white/10 px-2.5 py-1 text-[11px] text-blue-200"
+                                : "rounded-full bg-white/[0.06] px-2.5 py-1 text-[11px] text-white/55"
+                            }
+                          >
+                            {category.count}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </aside>
 
-                      {product.product_type === "variable" && selectedVariant && (
-                        <div
-                          className="mt-2"
-                          onClick={(e) => e.stopPropagation()}
+            <div className="min-w-0">
+              <div className="mb-6 rounded-[26px] border border-white/10 bg-white/[0.035] p-4 backdrop-blur-md md:p-5">
+                <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+                  <div>
+                    <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.24em] text-blue-400">
+                      Búsqueda
+                    </p>
+
+                    <div className="rounded-[18px] border border-blue-500/40 bg-white/[0.03] px-4 py-3 shadow-[0_0_0_1px_rgba(59,130,246,0.18)]">
+                      <div className="flex items-center gap-3">
+                        <svg
+                          className="h-5 w-5 shrink-0 text-blue-400"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
                         >
-                          <select
-                            value={selectedVariants[product.id] || ""}
-                            onChange={(e) => handleVariantChange(e, product.id)}
-                            className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs font-semibold text-white outline-none md:text-sm"
-                          >
-                            {(variantsMap[product.id] || []).map((variant) => (
-                              <option
-                                key={variant.id}
-                                value={variant.id}
-                                className="bg-[#0d0d0d] text-white"
-                              >
-                                {variant.name}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
+                          <circle cx="11" cy="11" r="7"></circle>
+                          <path d="m20 20-3.5-3.5"></path>
+                        </svg>
 
-                      <div className="mt-auto border-t border-white/10 pt-3">
-                        <div className="space-y-3">
-                          <div>
-                            <p className="text-[10px] uppercase tracking-[0.18em] text-white/30">
-                              Precio
-                            </p>
-
-                            <p className="mt-1 text-xl font-black text-white md:text-2xl">
-                              ${formatPrice(visiblePrice)}
-                            </p>
-
-                            {isAdmin && (
-                              <p className="mt-1 text-xs font-semibold text-white/45">
-                                Stock: {visibleStock}
-                              </p>
-                            )}
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={(e) => handleAddToCart(e, product)}
-                            disabled={visibleStock <= 0}
-                            className="inline-flex h-10 w-full items-center justify-center rounded-2xl bg-white px-3 text-sm font-bold text-black transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            Agregar
-                          </button>
-                        </div>
+                        <input
+                          type="text"
+                          placeholder="Buscar productos..."
+                          value={search}
+                          onChange={(e) => setSearch(e.target.value)}
+                          className="w-full bg-transparent text-sm text-white outline-none placeholder:text-white/35 md:text-base"
+                        />
                       </div>
                     </div>
-                  </article>
-                );
-              })}
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/55">
+                    Mostrando{" "}
+                    <span className="font-bold text-white">
+                      {visibleRange.start}
+                    </span>
+                    -
+                    <span className="font-bold text-white">
+                      {visibleRange.end}
+                    </span>{" "}
+                    de{" "}
+                    <span className="font-bold text-white">
+                      {totalProducts}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {loading ? (
+                <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-10 text-center backdrop-blur-md">
+                  <p className="text-lg font-semibold text-white">
+                    Cargando productos...
+                  </p>
+                </div>
+              ) : products.length === 0 ? (
+                <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-10 text-center backdrop-blur-md">
+                  <p className="text-lg font-semibold text-white">
+                    No encontramos productos con ese filtro
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-2 sm:gap-4 xl:grid-cols-4">
+                    {products.map((product) => renderProductCard(product))}
+                  </div>
+
+                  {totalProducts > PRODUCTS_PER_PAGE && (
+                    <div className="mt-8 flex flex-col items-center justify-between gap-4 rounded-[24px] border border-white/10 bg-white/[0.03] p-4 backdrop-blur-md sm:flex-row">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCurrentPage((prev) => Math.max(prev - 1, 1))
+                        }
+                        disabled={currentPage === 1}
+                        className="inline-flex h-11 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] px-5 text-sm font-bold text-white transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Anterior
+                      </button>
+
+                      <div className="flex flex-wrap items-center justify-center gap-2">
+                        {Array.from(
+                          { length: totalPages },
+                          (_, index) => index + 1
+                        ).map((page) => (
+                          <button
+                            key={page}
+                            type="button"
+                            onClick={() => setCurrentPage(page)}
+                            className={
+                              currentPage === page
+                                ? "flex h-11 min-w-[44px] items-center justify-center rounded-2xl bg-white px-4 text-sm font-black text-black"
+                                : "flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] px-4 text-sm font-bold text-white transition hover:bg-white/[0.08]"
+                            }
+                          >
+                            {page}
+                          </button>
+                        ))}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCurrentPage((prev) =>
+                            Math.min(prev + 1, totalPages)
+                          )
+                        }
+                        disabled={currentPage === totalPages}
+                        className="inline-flex h-11 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] px-5 text-sm font-bold text-white transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Siguiente
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
-          )}
+          </div>
         </section>
       </main>
 
@@ -871,11 +1036,16 @@ export default function HomePage() {
                   <div className="p-3 sm:p-4 md:p-5">
                     <div className="overflow-hidden rounded-[20px] border border-white/10 bg-white/[0.03]">
                       {quickViewProduct.image_url ? (
-                        <img
-                          src={quickViewProduct.image_url}
-                          alt={quickViewProduct.name}
-                          className="h-[176px] w-full object-contain sm:h-[224px] md:h-[365px]"
-                        />
+                        <div className="relative h-[176px] w-full sm:h-[224px] md:h-[365px]">
+                          <Image
+                            src={quickViewProduct.image_url}
+                            alt={quickViewProduct.name}
+                            fill
+                            sizes="(max-width: 768px) 100vw, 50vw"
+                            className="object-contain"
+                            priority
+                          />
+                        </div>
                       ) : (
                         <div className="flex h-[176px] items-center justify-center bg-white/[0.02] sm:h-[224px] md:h-[365px]">
                           <div className="text-center">
@@ -893,11 +1063,7 @@ export default function HomePage() {
 
                   <div className="flex flex-col p-4 sm:p-5 md:p-6">
                     <div className="border-b border-white/10 pb-4">
-                      <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-blue-400">
-                        Quick View
-                      </p>
-
-                      <h2 className="mt-3 text-[2rem] font-black uppercase leading-tight text-white sm:text-[2.4rem] md:text-[3.1rem]">
+                      <h2 className="text-[2rem] font-black uppercase leading-tight text-white sm:text-[2.4rem] md:text-[3.1rem]">
                         {quickViewProduct.name}
                       </h2>
 
@@ -928,7 +1094,7 @@ export default function HomePage() {
                         quickViewSelectedVariant && (
                           <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                             <p className="text-[11px] uppercase tracking-[0.18em] text-white/35">
-                              Variante seleccionada
+                              Variante
                             </p>
                             <p className="mt-2 text-lg font-bold text-white">
                               {quickViewSelectedVariant.name}
