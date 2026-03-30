@@ -774,7 +774,7 @@ export default function AdminWalletPage() {
         ref={clientSectionRef}
         className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6"
       >
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
             <h2 className="text-2xl font-extrabold text-slate-900">
               Control de saldo por cliente
@@ -785,7 +785,7 @@ export default function AdminWalletPage() {
             </p>
           </div>
 
-          <div className="w-full lg:max-w-sm">
+          <div className="w-full md:max-w-sm">
             <label className="mb-2 block text-sm font-semibold text-slate-700">
               Buscar por email
             </label>
@@ -810,7 +810,7 @@ export default function AdminWalletPage() {
             </div>
           ) : (
             <>
-              <div className="hidden grid-cols-[1fr_1.25fr_0.8fr_0.8fr_0.7fr] gap-4 border-b border-slate-200 px-6 py-4 text-sm font-semibold text-slate-500 lg:grid">
+              <div className="hidden grid-cols-[1fr_1.25fr_0.8fr_0.8fr_0.7fr] gap-4 border-b border-slate-200 px-6 py-4 text-sm font-semibold text-slate-500 md:grid">
                 <span>Nombre de usuario</span>
                 <span>Correo electrónico</span>
                 <span>Total Spent</span>
@@ -821,7 +821,7 @@ export default function AdminWalletPage() {
               <div className="divide-y divide-slate-200">
                 {paginatedClientWalletRows.map((client) => (
                   <div key={client.id} className="px-4 py-4 md:px-6 md:py-5">
-                    <div className="lg:hidden">
+                    <div className="md:hidden">
                       <div className="grid grid-cols-[1.15fr_0.85fr] gap-4">
                         <div className="min-w-0">
                           <div>
@@ -881,7 +881,7 @@ export default function AdminWalletPage() {
                       </div>
                     </div>
 
-                    <div className="hidden gap-4 lg:grid lg:grid-cols-[1fr_1.25fr_0.8fr_0.8fr_0.7fr] lg:items-center">
+                    <div className="hidden gap-4 md:grid md:grid-cols-[1fr_1.25fr_0.8fr_0.8fr_0.7fr] md:items-center">
                       <div>
                         <p className="text-sm font-semibold text-slate-900">
                           {client.full_name || "Sin nombre"}
@@ -930,7 +930,7 @@ export default function AdminWalletPage() {
         </div>
 
         {!loadingClients && clientWalletRows.length > 0 && (
-          <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="mt-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <p className="text-sm text-slate-600">
               Mostrando <span className="font-semibold">{clientPageStart}</span>{" "}
               - <span className="font-semibold">{clientPageEnd}</span> de{" "}
@@ -997,7 +997,7 @@ export default function AdminWalletPage() {
         ref={rechargeSectionRef}
         className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6"
       >
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
             <h3 className="text-2xl font-extrabold text-slate-900">
               Historial de recargas
@@ -1066,7 +1066,7 @@ export default function AdminWalletPage() {
             </div>
           ) : (
             <>
-              <div className="hidden grid-cols-[1.2fr_0.8fr_1fr_0.9fr] gap-4 border-b border-slate-200 px-6 py-4 text-sm font-semibold text-slate-500 lg:grid">
+              <div className="hidden grid-cols-[1.2fr_0.8fr_1fr_0.9fr] gap-4 border-b border-slate-200 px-6 py-4 text-sm font-semibold text-slate-500 md:grid">
                 <span>Usuario</span>
                 <span>Monto</span>
                 <span>Fecha</span>
@@ -1076,9 +1076,9 @@ export default function AdminWalletPage() {
               <div className="divide-y divide-slate-200">
                 {paginatedRechargeTransactions.map((transaction) => (
                   <div key={transaction.id} className="px-5 py-5 md:px-6">
-                    <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr_1fr_0.9fr] lg:items-center">
+                    <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr_1fr_0.9fr] md:items-center">
                       <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 lg:hidden">
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 md:hidden">
                           Usuario
                         </p>
                         <p className="break-all text-sm font-semibold text-slate-900">
@@ -1092,7 +1092,7 @@ export default function AdminWalletPage() {
                       </div>
 
                       <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 lg:hidden">
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 md:hidden">
                           Monto
                         </p>
                         <p className="text-sm font-bold text-slate-900">
@@ -1101,7 +1101,7 @@ export default function AdminWalletPage() {
                       </div>
 
                       <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 lg:hidden">
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 md:hidden">
                           Fecha
                         </p>
                         <p className="text-sm text-slate-700">
@@ -1109,7 +1109,7 @@ export default function AdminWalletPage() {
                         </p>
                       </div>
 
-                      <div className="flex justify-start lg:justify-end">
+                      <div className="flex justify-start md:justify-end">
                         <button
                           type="button"
                           onClick={() => handleReverseRecharge(transaction)}
@@ -1130,7 +1130,7 @@ export default function AdminWalletPage() {
         </div>
 
         {!loadingHistory && filteredRechargeTransactions.length > 0 && (
-          <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="mt-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <p className="text-sm text-slate-600">
               Mostrando <span className="font-semibold">{rechargePageStart}</span>{" "}
               - <span className="font-semibold">{rechargePageEnd}</span> de{" "}
@@ -1199,7 +1199,7 @@ export default function AdminWalletPage() {
         ref={transactionSectionRef}
         className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6"
       >
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
             <h3 className="text-2xl font-extrabold text-slate-900">
               Historial de transacciones
@@ -1275,7 +1275,7 @@ export default function AdminWalletPage() {
             </div>
           ) : (
             <>
-              <div className="hidden grid-cols-[1.2fr_0.8fr_0.8fr_1fr] gap-4 border-b border-slate-200 px-6 py-4 text-sm font-semibold text-slate-500 lg:grid">
+              <div className="hidden grid-cols-[1.2fr_0.8fr_0.8fr_1fr] gap-4 border-b border-slate-200 px-6 py-4 text-sm font-semibold text-slate-500 md:grid">
                 <span>Usuario</span>
                 <span>Tipo</span>
                 <span>Monto</span>
@@ -1285,9 +1285,9 @@ export default function AdminWalletPage() {
               <div className="divide-y divide-slate-200">
                 {paginatedClientTransactions.map((transaction) => (
                   <div key={transaction.id} className="px-5 py-5 md:px-6">
-                    <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr_0.8fr_1fr] lg:items-center">
+                    <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr_0.8fr_1fr] md:items-center">
                       <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 lg:hidden">
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 md:hidden">
                           Usuario
                         </p>
                         <p className="break-all text-sm font-semibold text-slate-900">
@@ -1301,7 +1301,7 @@ export default function AdminWalletPage() {
                       </div>
 
                       <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 lg:hidden">
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 md:hidden">
                           Tipo
                         </p>
                         <span
@@ -1314,7 +1314,7 @@ export default function AdminWalletPage() {
                       </div>
 
                       <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 lg:hidden">
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 md:hidden">
                           Monto
                         </p>
                         <p
@@ -1329,7 +1329,7 @@ export default function AdminWalletPage() {
                       </div>
 
                       <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 lg:hidden">
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 md:hidden">
                           Fecha
                         </p>
                         <p className="text-sm text-slate-700">
@@ -1347,7 +1347,7 @@ export default function AdminWalletPage() {
         {!loadingHistory &&
           hasTransactionSearch &&
           filteredClientTransactions.length > 0 && (
-            <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="mt-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <p className="text-sm text-slate-600">
                 Mostrando{" "}
                 <span className="font-semibold">{transactionPageStart}</span> -{" "}
