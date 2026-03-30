@@ -35,6 +35,7 @@ export default function AuthGuard({
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [mode, setMode] = useState<AuthMode>("login");
+  const [isRecoveryFlow, setIsRecoveryFlow] = useState(false);
 
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -47,7 +48,7 @@ export default function AuthGuard({
   const [registerLoading, setRegisterLoading] = useState(false);
   const [registerMessage, setRegisterMessage] = useState("");
 
-  const isPublicPath = pathname === "/reset-password";
+  const isPublicPath = pathname === "/reset-password" || isRecoveryFlow;
 
   const getOwnProfile = async (
     userId: string
@@ -115,6 +116,34 @@ export default function AuthGuard({
   };
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const searchParams = new URLSearchParams(window.location.search);
+    const hashParams = new URLSearchParams(
+      window.location.hash.replace(/^#/, "")
+    );
+
+    const hasRecoveryCode = Boolean(searchParams.get("code"));
+    const hasRecoveryTokens =
+      hashParams.get("type") === "recovery" &&
+      Boolean(hashParams.get("access_token")) &&
+      Boolean(hashParams.get("refresh_token"));
+
+    if (!hasRecoveryCode && !hasRecoveryTokens) {
+      setIsRecoveryFlow(pathname === "/reset-password");
+      return;
+    }
+
+    setIsRecoveryFlow(true);
+
+    if (pathname !== "/reset-password") {
+      router.replace(
+        `/reset-password${window.location.search}${window.location.hash}`
+      );
+    }
+  }, [pathname, router]);
+
+  useEffect(() => {
     let mounted = true;
 
     const bootAuth = async () => {
@@ -126,6 +155,12 @@ export default function AuthGuard({
         if (!mounted) return;
 
         const user = session?.user;
+
+        if (isPublicPath) {
+          setIsLoggedIn(!!user);
+          setCheckingAuth(false);
+          return;
+        }
 
         if (!user) {
           setIsLoggedIn(false);
@@ -161,6 +196,12 @@ export default function AuthGuard({
     } = supabase.auth.onAuthStateChange((event, session) => {
       if (!mounted) return;
 
+      if (isPublicPath) {
+        setIsLoggedIn(!!session?.user);
+        setCheckingAuth(false);
+        return;
+      }
+
       if (event === "SIGNED_OUT") {
         setIsLoggedIn(false);
         setCheckingAuth(false);
@@ -177,7 +218,7 @@ export default function AuthGuard({
       mounted = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [isPublicPath]);
 
   useEffect(() => {
     if (checkingAuth) return;
@@ -242,34 +283,34 @@ export default function AuthGuard({
   };
 
   const handleForgotPassword = async () => {
-  setLoginMessage("");
+    setLoginMessage("");
 
-  if (!loginEmail.trim()) {
-    setLoginMessage(
-      "Escribe tu correo electrónico para recuperar tu contraseña."
-    );
-    return;
-  }
-
-  const redirectTo =
-    typeof window !== "undefined"
-      ? `${window.location.origin}/reset-password`
-      : "https://streamingmayor1.com/reset-password";
-
-  const { error } = await supabase.auth.resetPasswordForEmail(
-    loginEmail.trim(),
-    {
-      redirectTo,
+    if (!loginEmail.trim()) {
+      setLoginMessage(
+        "Escribe tu correo electrónico para recuperar tu contraseña."
+      );
+      return;
     }
-  );
 
-  if (error) {
-    setLoginMessage(error.message);
-    return;
-  }
+    const redirectTo =
+      typeof window !== "undefined"
+        ? `${window.location.origin}/reset-password`
+        : "https://streamingmayor1.com/reset-password";
 
-  setLoginMessage("Te enviamos un enlace para restablecer tu contraseña.");
-};
+    const { error } = await supabase.auth.resetPasswordForEmail(
+      loginEmail.trim(),
+      {
+        redirectTo,
+      }
+    );
+
+    if (error) {
+      setLoginMessage(error.message);
+      return;
+    }
+
+    setLoginMessage("Te enviamos un enlace para restablecer tu contraseña.");
+  };
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();

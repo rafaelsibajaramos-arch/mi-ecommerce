@@ -38,14 +38,26 @@ type FormattedTransaction = {
   description?: string | null;
 };
 
+type ClientWalletRow = {
+  id: string;
+  email: string;
+  full_name: string | null;
+  balance: number;
+  totalSpent: number;
+};
+
 type BannerState = {
   kind: "success" | "error";
   text: string;
 } | null;
 
 const PAGE_SIZE = 10;
+const CLIENTS_PAGE_SIZE = 20;
 
-function buildPagination(current: number, total: number): Array<number | "..."> {
+function buildPagination(
+  current: number,
+  total: number
+): Array<number | "..."> {
   if (total <= 7) {
     return Array.from({ length: total }, (_, i) => i + 1);
   }
@@ -140,15 +152,21 @@ function getTransactionClasses(type: string) {
 }
 
 export default function AdminWalletPage() {
+  const clientSectionRef = useRef<HTMLDivElement | null>(null);
   const rechargeSectionRef = useRef<HTMLDivElement | null>(null);
   const transactionSectionRef = useRef<HTMLDivElement | null>(null);
 
   const [movementType, setMovementType] = useState<"credit" | "debit">(
     "credit"
   );
-  const [email, setEmail] = useState("");
   const [amount, setAmount] = useState("");
   const [banner, setBanner] = useState<BannerState>(null);
+
+  const [profiles, setProfiles] = useState<ProfileRow[]>([]);
+  const [loadingClients, setLoadingClients] = useState(true);
+  const [selectedClient, setSelectedClient] = useState<ProfileRow | null>(null);
+  const [clientSearch, setClientSearch] = useState("");
+  const [clientPage, setClientPage] = useState(1);
 
   const [allTransactions, setAllTransactions] = useState<
     FormattedTransaction[]
@@ -170,6 +188,7 @@ export default function AdminWalletPage() {
 
   useEffect(() => {
     loadTransactions();
+    loadProfiles();
   }, []);
 
   useEffect(() => {
@@ -183,12 +202,24 @@ export default function AdminWalletPage() {
   }, [banner]);
 
   useEffect(() => {
+    setClientPage(1);
+  }, [clientSearch]);
+
+  useEffect(() => {
     setRechargePage(1);
   }, [searchEmail, startDate, endDate]);
 
   useEffect(() => {
     setTransactionPage(1);
   }, [transactionSearchEmail, transactionStartDate, transactionEndDate]);
+
+  function handleClientPageChange(page: number) {
+    setClientPage(page);
+    clientSectionRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }
 
   function handleRechargePageChange(page: number) {
     setRechargePage(page);
@@ -204,6 +235,23 @@ export default function AdminWalletPage() {
       behavior: "smooth",
       block: "start",
     });
+  }
+
+  async function loadProfiles() {
+    setLoadingClients(true);
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, email, full_name, balance");
+
+    if (error) {
+      setProfiles([]);
+      setLoadingClients(false);
+      return;
+    }
+
+    setProfiles((data as ProfileRow[]) || []);
+    setLoadingClients(false);
   }
 
   async function loadTransactions() {
@@ -264,6 +312,72 @@ export default function AdminWalletPage() {
     setTransactionPage(1);
     setLoadingHistory(false);
   }
+
+  const clientWalletRows = useMemo<ClientWalletRow[]>(() => {
+    const spentByUser = new Map<string, number>();
+
+    allTransactions.forEach((transaction) => {
+      if (!transaction.user_id) return;
+
+      if (normalizeType(transaction.type) === "debit") {
+        spentByUser.set(
+          transaction.user_id,
+          (spentByUser.get(transaction.user_id) || 0) +
+            Math.abs(Number(transaction.amount || 0))
+        );
+      }
+    });
+
+    const term = clientSearch.trim().toLowerCase();
+
+    return profiles
+      .map((profile) => ({
+        id: profile.id,
+        email: (profile.email || "Sin correo").trim(),
+        full_name: profile.full_name || null,
+        balance: Number(profile.balance || 0),
+        totalSpent: spentByUser.get(profile.id) || 0,
+      }))
+      .filter((profile) => {
+        if (!term) return true;
+        return profile.email.toLowerCase().includes(term);
+      })
+      .sort((a, b) => {
+        if (b.balance !== a.balance) {
+          return b.balance - a.balance;
+        }
+
+        return a.email.localeCompare(b.email, "es", { sensitivity: "base" });
+      });
+  }, [profiles, allTransactions, clientSearch]);
+
+  const clientTotalPages = useMemo(() => {
+    return Math.max(1, Math.ceil(clientWalletRows.length / CLIENTS_PAGE_SIZE));
+  }, [clientWalletRows.length]);
+
+  useEffect(() => {
+    if (clientPage > clientTotalPages) {
+      setClientPage(clientTotalPages);
+    }
+  }, [clientPage, clientTotalPages]);
+
+  const paginatedClientWalletRows = useMemo(() => {
+    const start = (clientPage - 1) * CLIENTS_PAGE_SIZE;
+    const end = start + CLIENTS_PAGE_SIZE;
+    return clientWalletRows.slice(start, end);
+  }, [clientWalletRows, clientPage]);
+
+  const clientPaginationItems = useMemo(() => {
+    return buildPagination(clientPage, clientTotalPages);
+  }, [clientPage, clientTotalPages]);
+
+  const clientPageStart =
+    clientWalletRows.length === 0 ? 0 : (clientPage - 1) * CLIENTS_PAGE_SIZE + 1;
+
+  const clientPageEnd = Math.min(
+    clientPage * CLIENTS_PAGE_SIZE,
+    clientWalletRows.length
+  );
 
   const rechargeTransactions = useMemo(() => {
     return allTransactions.filter((tx) => isRechargeType(tx.type));
@@ -393,13 +507,21 @@ export default function AdminWalletPage() {
     setSubmitting(true);
     setBanner(null);
 
-    const cleanEmail = email.trim().toLowerCase();
-    const numericAmount = Number(amount);
-
-    if (!cleanEmail || !numericAmount || numericAmount <= 0) {
+    if (!selectedClient?.id) {
       setBanner({
         kind: "error",
-        text: "Completa un correo válido y un monto mayor a cero.",
+        text: "Selecciona un cliente.",
+      });
+      setSubmitting(false);
+      return;
+    }
+
+    const numericAmount = Number(amount);
+
+    if (!numericAmount || numericAmount <= 0) {
+      setBanner({
+        kind: "error",
+        text: "Ingresa un monto mayor a cero.",
       });
       setSubmitting(false);
       return;
@@ -407,8 +529,8 @@ export default function AdminWalletPage() {
 
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("id, email, balance")
-      .ilike("email", cleanEmail)
+      .select("id, email, full_name, balance")
+      .eq("id", selectedClient.id)
       .single();
 
     if (profileError || !profile) {
@@ -485,14 +607,19 @@ export default function AdminWalletPage() {
       kind: "success",
       text:
         movementType === "credit"
-          ? `Se acreditó ${formatMoney(numericAmount)} al correo ${profile.email}.`
-          : `Se descontó ${formatMoney(numericAmount)} al correo ${profile.email}.`,
+          ? `Se acreditó ${formatMoney(numericAmount)} al correo ${
+              profile.email || "sin correo"
+            }.`
+          : `Se descontó ${formatMoney(numericAmount)} al correo ${
+              profile.email || "sin correo"
+            }.`,
     });
 
-    setEmail("");
+    setSelectedClient(null);
     setAmount("");
+    setMovementType("credit");
 
-    await loadTransactions();
+    await Promise.all([loadTransactions(), loadProfiles()]);
     setSubmitting(false);
   }
 
@@ -612,7 +739,7 @@ export default function AdminWalletPage() {
       text: `Se descontó ${formatMoney(rechargeAmount)} al correo ${transaction.email}.`,
     });
 
-    await loadTransactions();
+    await Promise.all([loadTransactions(), loadProfiles()]);
     setRevertingId(null);
   }
 
@@ -643,90 +770,227 @@ export default function AdminWalletPage() {
         </div>
       )}
 
-      <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-        <h2 className="text-2xl font-extrabold text-slate-900">
-          Movimiento manual
-        </h2>
-        <p className="mt-2 text-sm text-slate-500">
-          Selecciona si vas a hacer un crédito o un débito al monedero del
-          cliente.
-        </p>
-
-        <form className="mt-6 space-y-5" onSubmit={handleMovement}>
+      <div
+        ref={clientSectionRef}
+        className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6"
+      >
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
+            <h2 className="text-2xl font-extrabold text-slate-900">
+              Control de saldo por cliente
+            </h2>
+            <p className="mt-2 text-sm text-slate-500">
+              Los clientes con más saldo aparecen primero. Busca por email y
+              administra saldo desde el modal.
+            </p>
+          </div>
+
+          <div className="w-full lg:max-w-sm">
             <label className="mb-2 block text-sm font-semibold text-slate-700">
-              Tipo de movimiento
+              Buscar por email
             </label>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <button
-                type="button"
-                onClick={() => setMovementType("credit")}
-                className={`rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
-                  movementType === "credit"
-                    ? "border-emerald-300 bg-emerald-50 text-emerald-700"
-                    : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-white"
-                }`}
-              >
-                Crédito
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setMovementType("debit")}
-                className={`rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
-                  movementType === "debit"
-                    ? "border-rose-300 bg-rose-50 text-rose-700"
-                    : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-white"
-                }`}
-              >
-                Débito
-              </button>
-            </div>
+            <input
+              type="text"
+              value={clientSearch}
+              onChange={(e) => setClientSearch(e.target.value)}
+              placeholder="cliente@email.com"
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white"
+            />
           </div>
+        </div>
 
-          <div className="grid gap-5 lg:grid-cols-2">
-            <div>
-              <label className="mb-2 block text-sm font-semibold text-slate-700">
-                Correo del cliente
-              </label>
-              <input
-                type="email"
-                placeholder="cliente@email.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white"
-              />
+        <div className="mt-6 overflow-hidden rounded-[24px] border border-slate-200 bg-white">
+          {loadingClients ? (
+            <div className="px-5 py-8 text-sm text-slate-500">
+              Cargando clientes...
             </div>
-
-            <div>
-              <label className="mb-2 block text-sm font-semibold text-slate-700">
-                Monto
-              </label>
-              <input
-                type="number"
-                placeholder="50000"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white"
-              />
+          ) : clientWalletRows.length === 0 ? (
+            <div className="px-5 py-8 text-sm text-slate-500">
+              No se encontraron clientes para ese email.
             </div>
-          </div>
+          ) : (
+            <>
+              <div className="hidden grid-cols-[1fr_1.25fr_0.8fr_0.8fr_0.7fr] gap-4 border-b border-slate-200 px-6 py-4 text-sm font-semibold text-slate-500 lg:grid">
+                <span>Nombre de usuario</span>
+                <span>Correo electrónico</span>
+                <span>Total Spent</span>
+                <span>Saldo restante</span>
+                <span className="text-right">Recargar</span>
+              </div>
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <button
-              type="submit"
-              disabled={submitting}
-              className="inline-flex w-full items-center justify-center rounded-2xl bg-[#050816] px-5 py-3.5 text-sm font-semibold text-white transition hover:opacity-95 disabled:opacity-60 sm:w-auto"
-            >
-              {submitting
-                ? "Procesando..."
-                : movementType === "credit"
-                ? "Cargar saldo"
-                : "Debitar saldo"}
-            </button>
+              <div className="divide-y divide-slate-200">
+                {paginatedClientWalletRows.map((client) => (
+                  <div key={client.id} className="px-4 py-4 md:px-6 md:py-5">
+                    <div className="lg:hidden">
+                      <div className="grid grid-cols-[1.15fr_0.85fr] gap-4">
+                        <div className="min-w-0">
+                          <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                              Nombre de usuario
+                            </p>
+                            <p className="mt-1 text-sm font-semibold leading-snug text-slate-900">
+                              {client.full_name || "Sin nombre"}
+                            </p>
+                          </div>
+
+                          <div className="mt-4">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                              Correo electrónico
+                            </p>
+                            <p className="mt-1 break-all text-sm leading-snug text-slate-700">
+                              {client.email}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="border-l border-slate-200 pl-4">
+                          <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                              Total Spent
+                            </p>
+                            <p className="mt-1 text-sm font-bold text-slate-900">
+                              {formatMoney(client.totalSpent)}
+                            </p>
+                          </div>
+
+                          <div className="mt-4">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                              Saldo restante
+                            </p>
+                            <p className="mt-1 text-sm font-bold text-emerald-600">
+                              {formatMoney(client.balance)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 flex justify-start">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const profile =
+                              profiles.find((p) => p.id === client.id) || null;
+                            setSelectedClient(profile);
+                            setMovementType("credit");
+                            setAmount("");
+                          }}
+                          className="inline-flex items-center justify-center rounded-2xl bg-[#050816] px-4 py-2.5 text-sm font-semibold text-white transition hover:opacity-95"
+                        >
+                          Recargar
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="hidden gap-4 lg:grid lg:grid-cols-[1fr_1.25fr_0.8fr_0.8fr_0.7fr] lg:items-center">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">
+                          {client.full_name || "Sin nombre"}
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="break-all text-sm text-slate-700">
+                          {client.email}
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="text-sm font-bold text-slate-900">
+                          {formatMoney(client.totalSpent)}
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="text-sm font-bold text-emerald-600">
+                          {formatMoney(client.balance)}
+                        </p>
+                      </div>
+
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const profile =
+                              profiles.find((p) => p.id === client.id) || null;
+                            setSelectedClient(profile);
+                            setMovementType("credit");
+                            setAmount("");
+                          }}
+                          className="inline-flex items-center justify-center rounded-2xl bg-[#050816] px-4 py-2.5 text-sm font-semibold text-white transition hover:opacity-95"
+                        >
+                          Recargar
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        {!loadingClients && clientWalletRows.length > 0 && (
+          <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <p className="text-sm text-slate-600">
+              Mostrando <span className="font-semibold">{clientPageStart}</span>{" "}
+              - <span className="font-semibold">{clientPageEnd}</span> de{" "}
+              <span className="font-semibold">{clientWalletRows.length}</span>{" "}
+              clientes
+            </p>
+
+            {clientTotalPages > 1 && (
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleClientPageChange(Math.max(clientPage - 1, 1))
+                  }
+                  disabled={clientPage === 1}
+                  className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  ‹
+                </button>
+
+                {clientPaginationItems.map((item, index) =>
+                  item === "..." ? (
+                    <span
+                      key={`client-ellipsis-${index}`}
+                      className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-transparent px-3 text-sm font-semibold text-slate-400"
+                    >
+                      ...
+                    </span>
+                  ) : (
+                    <button
+                      key={item}
+                      type="button"
+                      onClick={() => handleClientPageChange(item)}
+                      className={`flex h-11 min-w-[44px] items-center justify-center rounded-2xl border px-3 text-sm font-semibold transition ${
+                        clientPage === item
+                          ? "border-slate-900 bg-slate-900 text-white"
+                          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      {item}
+                    </button>
+                  )
+                )}
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleClientPageChange(
+                      Math.min(clientPage + 1, clientTotalPages)
+                    )
+                  }
+                  disabled={clientPage === clientTotalPages}
+                  className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  ›
+                </button>
+              </div>
+            )}
           </div>
-        </form>
+        )}
       </div>
 
       <div
@@ -1080,72 +1344,203 @@ export default function AdminWalletPage() {
           )}
         </div>
 
-        {!loadingHistory && hasTransactionSearch && filteredClientTransactions.length > 0 && (
-          <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <p className="text-sm text-slate-600">
-              Mostrando{" "}
-              <span className="font-semibold">{transactionPageStart}</span> -{" "}
-              <span className="font-semibold">{transactionPageEnd}</span> de{" "}
-              <span className="font-semibold">
-                {filteredClientTransactions.length}
-              </span>{" "}
-              transacciones
-            </p>
+        {!loadingHistory &&
+          hasTransactionSearch &&
+          filteredClientTransactions.length > 0 && (
+            <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <p className="text-sm text-slate-600">
+                Mostrando{" "}
+                <span className="font-semibold">{transactionPageStart}</span> -{" "}
+                <span className="font-semibold">{transactionPageEnd}</span> de{" "}
+                <span className="font-semibold">
+                  {filteredClientTransactions.length}
+                </span>{" "}
+                transacciones
+              </p>
 
-            {transactionTotalPages > 1 && (
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    handleTransactionPageChange(Math.max(transactionPage - 1, 1))
-                  }
-                  disabled={transactionPage === 1}
-                  className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  ‹
-                </button>
+              {transactionTotalPages > 1 && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleTransactionPageChange(
+                        Math.max(transactionPage - 1, 1)
+                      )
+                    }
+                    disabled={transactionPage === 1}
+                    className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    ‹
+                  </button>
 
-                {transactionPaginationItems.map((item, index) =>
-                  item === "..." ? (
-                    <span
-                      key={`transaction-ellipsis-${index}`}
-                      className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-transparent px-3 text-sm font-semibold text-slate-400"
-                    >
-                      ...
-                    </span>
-                  ) : (
-                    <button
-                      key={item}
-                      type="button"
-                      onClick={() => handleTransactionPageChange(item)}
-                      className={`flex h-11 min-w-[44px] items-center justify-center rounded-2xl border px-3 text-sm font-semibold transition ${
-                        transactionPage === item
-                          ? "border-slate-900 bg-slate-900 text-white"
-                          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                      }`}
-                    >
-                      {item}
-                    </button>
-                  )
-                )}
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    handleTransactionPageChange(
-                      Math.min(transactionPage + 1, transactionTotalPages)
+                  {transactionPaginationItems.map((item, index) =>
+                    item === "..." ? (
+                      <span
+                        key={`transaction-ellipsis-${index}`}
+                        className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-transparent px-3 text-sm font-semibold text-slate-400"
+                      >
+                        ...
+                      </span>
+                    ) : (
+                      <button
+                        key={item}
+                        type="button"
+                        onClick={() => handleTransactionPageChange(item)}
+                        className={`flex h-11 min-w-[44px] items-center justify-center rounded-2xl border px-3 text-sm font-semibold transition ${
+                          transactionPage === item
+                            ? "border-slate-900 bg-slate-900 text-white"
+                            : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                        }`}
+                      >
+                        {item}
+                      </button>
                     )
-                  }
-                  disabled={transactionPage === transactionTotalPages}
-                  className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleTransactionPageChange(
+                        Math.min(transactionPage + 1, transactionTotalPages)
+                      )
+                    }
+                    disabled={transactionPage === transactionTotalPages}
+                    className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    ›
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+      </div>
+
+      {selectedClient && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <button
+            type="button"
+            aria-label="Cerrar modal"
+            onClick={() => {
+              setSelectedClient(null);
+              setAmount("");
+              setMovementType("credit");
+            }}
+            className="absolute inset-0 bg-slate-950/55 backdrop-blur-sm"
+          />
+
+          <div className="relative z-10 w-full max-w-md overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl">
+            <div className="border-b border-slate-200 px-5 py-5 sm:px-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+                    Gestión de saldo
+                  </p>
+                  <h3 className="mt-2 text-2xl font-extrabold text-slate-900">
+                    {selectedClient.full_name || "Cliente"}
+                  </h3>
+                  <p className="mt-1 break-all text-sm text-slate-500">
+                    {selectedClient.email || "Sin correo"}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedClient(null);
+                    setAmount("");
+                    setMovementType("credit");
+                  }}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 text-slate-600 transition hover:bg-slate-50"
                 >
-                  ›
+                  ✕
                 </button>
               </div>
-            )}
+            </div>
+
+            <form onSubmit={handleMovement} className="space-y-5 p-5 sm:p-6">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                  Saldo actual
+                </p>
+                <p className="mt-2 text-2xl font-extrabold text-emerald-600">
+                  {formatMoney(Number(selectedClient.balance || 0))}
+                </p>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-slate-700">
+                  Tipo de movimiento
+                </label>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => setMovementType("credit")}
+                    className={`rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
+                      movementType === "credit"
+                        ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                        : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-white"
+                    }`}
+                  >
+                    Recargar
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setMovementType("debit")}
+                    className={`rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
+                      movementType === "debit"
+                        ? "border-rose-300 bg-rose-50 text-rose-700"
+                        : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-white"
+                    }`}
+                  >
+                    Debitar
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-slate-700">
+                  Monto
+                </label>
+                <input
+                  type="number"
+                  placeholder="50000"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white"
+                />
+              </div>
+
+              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedClient(null);
+                    setAmount("");
+                    setMovementType("credit");
+                  }}
+                  className="inline-flex items-center justify-center rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+                  Cancelar
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="inline-flex items-center justify-center rounded-2xl bg-[#050816] px-5 py-3 text-sm font-semibold text-white transition hover:opacity-95 disabled:opacity-60"
+                >
+                  {submitting
+                    ? "Procesando..."
+                    : movementType === "credit"
+                    ? "Confirmar recarga"
+                    : "Confirmar débito"}
+                </button>
+              </div>
+            </form>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </section>
   );
 }

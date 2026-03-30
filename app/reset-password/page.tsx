@@ -4,6 +4,20 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabase";
 
+function getSafeMessage(message: string) {
+  const normalized = (message || "").toLowerCase();
+
+  if (
+    normalized.includes("pkce code verifier not found in storage") ||
+    normalized.includes("code verifier") ||
+    normalized.includes("@supabase/ssr")
+  ) {
+    return "";
+  }
+
+  return message;
+}
+
 export default function ResetPasswordPage() {
   const router = useRouter();
 
@@ -38,7 +52,14 @@ export default function ResetPasswordPage() {
     });
 
     if (error) {
-      setMessage(error.message);
+      const safeMessage = getSafeMessage(error.message);
+
+      if (safeMessage) {
+        setMessage(safeMessage);
+      } else {
+        setMessage("");
+      }
+
       setLoading(false);
       return;
     }
@@ -51,6 +72,8 @@ export default function ResetPasswordPage() {
       router.refresh();
     }, 1500);
   };
+
+  const visibleMessage = getSafeMessage(message);
 
   return (
     <main className="min-h-screen bg-[#060b18] flex items-center justify-center px-6 py-10">
@@ -78,7 +101,8 @@ export default function ResetPasswordPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4 text-gray-900 placeholder:text-gray-400 caret-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"            />
+              className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4 text-gray-900 placeholder:text-gray-400 caret-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            />
           </div>
 
           <div>
@@ -91,7 +115,8 @@ className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4 text-g
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               required
-className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4 text-gray-900 placeholder:text-gray-400 caret-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"            />
+              className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4 text-gray-900 placeholder:text-gray-400 caret-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            />
           </div>
 
           <button
@@ -103,8 +128,10 @@ className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4 text-g
           </button>
         </form>
 
-        {message && (
-          <p className="text-sm mt-4 text-center text-gray-600">{message}</p>
+        {visibleMessage && (
+          <p className="text-sm mt-4 text-center text-gray-600">
+            {visibleMessage}
+          </p>
         )}
       </div>
     </main>
