@@ -143,82 +143,87 @@ export default function AuthGuard({
     }
   }, [pathname, router]);
 
-  useEffect(() => {
-    let mounted = true;
+useEffect(() => {
+  let mounted = true;
 
-    const bootAuth = async () => {
-      try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
+  const bootAuth = async () => {
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-        if (!mounted) return;
-
-        const user = session?.user;
-
-        if (isPublicPath) {
-          setIsLoggedIn(!!user);
-          setCheckingAuth(false);
-          return;
-        }
-
-        if (!user) {
-          setIsLoggedIn(false);
-          setCheckingAuth(false);
-          return;
-        }
-
-        const { profile, errorMessage } = await getOwnProfile(user.id);
-
-        if (!mounted) return;
-
-        if (errorMessage || !profile) {
-          await forceLogoutInvalidProfile(
-            errorMessage || "Tu cuenta no tiene un perfil válido."
-          );
-          return;
-        }
-
-        setIsLoggedIn(true);
-        setCheckingAuth(false);
-      } catch {
-        if (!mounted) return;
-        setIsLoggedIn(false);
-        setCheckingAuth(false);
-        setLoginMessage("No se pudo verificar tu sesión.");
-      }
-    };
-
-    bootAuth();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
       if (!mounted) return;
 
+      const user = session?.user;
+
       if (isPublicPath) {
-        setIsLoggedIn(!!session?.user);
+        setIsLoggedIn(!!user);
         setCheckingAuth(false);
         return;
       }
 
-      if (event === "SIGNED_OUT") {
+      if (!user) {
         setIsLoggedIn(false);
         setCheckingAuth(false);
         return;
       }
 
-      if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
-        setIsLoggedIn(!!session?.user);
-        setCheckingAuth(false);
-      }
-    });
+      // Si hay sesión, mantenemos logueado al usuario
+      setIsLoggedIn(true);
+      setCheckingAuth(false);
 
-    return () => {
-      mounted = false;
-      subscription.unsubscribe();
-    };
-  }, [isPublicPath]);
+      // Verificación de perfil sin tumbar la sesión
+      const { profile, errorMessage } = await getOwnProfile(user.id);
+
+      if (!mounted) return;
+
+      // Si quieres, aquí solo muestras mensaje o haces logs,
+      // pero NO hagas signOut automático por un error temporal.
+      if (errorMessage || !profile) {
+        console.warn("Perfil no disponible:", errorMessage || "Sin perfil");
+      }
+    } catch {
+      if (!mounted) return;
+      setIsLoggedIn(false);
+      setCheckingAuth(false);
+      setLoginMessage("No se pudo verificar tu sesión.");
+    }
+  };
+
+  bootAuth();
+
+  const {
+    data: { subscription },
+  } = supabase.auth.onAuthStateChange((event, session) => {
+    if (!mounted) return;
+
+    if (isPublicPath) {
+      setIsLoggedIn(!!session?.user);
+      setCheckingAuth(false);
+      return;
+    }
+
+    if (event === "SIGNED_OUT") {
+      setIsLoggedIn(false);
+      setCheckingAuth(false);
+      return;
+    }
+
+    if (
+      event === "SIGNED_IN" ||
+      event === "TOKEN_REFRESHED" ||
+      event === "INITIAL_SESSION"
+    ) {
+      setIsLoggedIn(!!session?.user);
+      setCheckingAuth(false);
+    }
+  });
+
+  return () => {
+    mounted = false;
+    subscription.unsubscribe();
+  };
+}, [isPublicPath]);
 
   useEffect(() => {
     if (checkingAuth) return;

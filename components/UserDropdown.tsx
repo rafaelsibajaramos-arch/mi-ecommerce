@@ -68,7 +68,7 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
 
   const logout = async () => {
     await supabase.auth.signOut();
-    router.push("/login");
+    router.replace("/");
     router.refresh();
   };
 
