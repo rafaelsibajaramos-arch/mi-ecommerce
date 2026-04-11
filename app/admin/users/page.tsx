@@ -44,13 +44,14 @@ export default function AdminUsersPage() {
   const [updatingRoleUserId, setUpdatingRoleUserId] = useState<string | null>(null);
   const [updatingEmailUserId, setUpdatingEmailUserId] = useState<string | null>(null);
   const [updatingPasswordUserId, setUpdatingPasswordUserId] = useState<string | null>(null);
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
 
   const [emailDrafts, setEmailDrafts] = useState<Record<string, string>>({});
   const [passwordDrafts, setPasswordDrafts] = useState<Record<string, string>>({});
   const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
-    loadUsers();
+    void loadUsers();
   }, []);
 
   useEffect(() => {
@@ -327,6 +328,75 @@ export default function AdminUsersPage() {
     }
   };
 
+  const handleDeleteUser = async (user: Profile) => {
+    const confirmed = window.confirm(
+      `¿Seguro que quieres eliminar a ${user.full_name || user.email}?\n\nSe borrarán su perfil, pedidos, recargas, movimientos y accesos entregados relacionados con su cuenta. Esta acción no se puede deshacer.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingUserId(user.id);
+    setMessage("");
+    setMessageType("");
+
+    try {
+      const token = await getAccessToken();
+
+      if (!token) {
+        setMessage("Tu sesión expiró. Inicia sesión de nuevo.");
+        setMessageType("error");
+        return;
+      }
+
+      const response = await fetch("/api/admin/users/delete", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          userId: user.id,
+        }),
+      });
+
+      const result = await parseApiResponse(response);
+
+      if (!response.ok) {
+        setMessage(result?.error || "No se pudo eliminar el usuario.");
+        setMessageType("error");
+        return;
+      }
+
+      setUsers((prevUsers) => prevUsers.filter((item) => item.id !== user.id));
+      setEmailDrafts((prev) => {
+        const next = { ...prev };
+        delete next[user.id];
+        return next;
+      });
+      setPasswordDrafts((prev) => {
+        const next = { ...prev };
+        delete next[user.id];
+        return next;
+      });
+
+      setMessage(
+        `Usuario eliminado correctamente: ${user.full_name || user.email}.`
+      );
+      setMessageType("success");
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Ocurrió un error eliminando el usuario."
+      );
+      setMessageType("error");
+    } finally {
+      setDeletingUserId(null);
+    }
+  };
+
   return (
     <section ref={sectionTopRef} className="space-y-6 text-slate-900">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -338,7 +408,7 @@ export default function AdminUsersPage() {
             Gestión de usuarios
           </h1>
           <p className="mt-2 text-sm text-slate-600 sm:text-base">
-            Administra roles, correos y prepara el cambio de contraseña desde un
+            Administra roles, correos, contraseñas y elimina cuentas desde un
             panel más limpio.
           </p>
         </div>
@@ -393,27 +463,61 @@ export default function AdminUsersPage() {
           </div>
         ) : (
           <>
-            <div className="hidden grid-cols-[1.2fr_0.8fr_1.2fr_1.2fr] gap-4 border-b border-slate-200 px-6 py-4 text-sm font-semibold text-slate-500 xl:grid">
+            <div className="hidden grid-cols-[1.15fr_0.8fr_1.15fr_1.15fr_auto] gap-4 border-b border-slate-200 px-6 py-4 text-sm font-semibold text-slate-500 xl:grid">
               <span>Usuario</span>
               <span>Rol</span>
               <span>Cambiar correo</span>
               <span>Cambiar contraseña</span>
+              <span className="text-right">Eliminar</span>
             </div>
 
             <div className="divide-y divide-slate-200">
               {paginatedUsers.map((user) => (
                 <div key={user.id} className="px-5 py-5 sm:px-6">
-                  <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr_1.2fr_1.2fr] xl:items-start">
+                  <div className="grid gap-5 xl:grid-cols-[1.15fr_0.8fr_1.15fr_1.15fr_auto] xl:items-start">
                     <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 xl:hidden">
-                        Usuario
-                      </p>
-                      <p className="text-base font-bold text-slate-900">
-                        {user.full_name || "Sin nombre"}
-                      </p>
-                      <p className="mt-1 break-all text-sm text-slate-600">
-                        {user.email}
-                      </p>
+                      <div className="flex items-start justify-between gap-3 xl:block">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 xl:hidden">
+                            Usuario
+                          </p>
+                          <p className="text-base font-bold text-slate-900">
+                            {user.full_name || "Sin nombre"}
+                          </p>
+                          <p className="mt-1 break-all text-sm text-slate-600">
+                            {user.email}
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteUser(user)}
+                          disabled={deletingUserId === user.id}
+                          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60 xl:hidden"
+                          aria-label={`Eliminar a ${user.full_name || user.email}`}
+                          title="Eliminar usuario"
+                        >
+                          {deletingUserId === user.id ? (
+                            <span className="text-xs font-bold">...</span>
+                          ) : (
+                            <svg
+                              viewBox="0 0 24 24"
+                              className="h-5 w-5"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <path d="M3 6h18" />
+                              <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+                              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                              <path d="M10 11v6" />
+                              <path d="M14 11v6" />
+                            </svg>
+                          )}
+                        </button>
+                      </div>
                     </div>
 
                     <div>
@@ -425,7 +529,7 @@ export default function AdminUsersPage() {
                         onChange={(e) =>
                           handleRoleChange(user.id, e.target.value)
                         }
-                        disabled={updatingRoleUserId === user.id}
+                        disabled={updatingRoleUserId === user.id || deletingUserId === user.id}
                         className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-medium text-slate-700 outline-none focus:border-slate-500 disabled:opacity-50"
                       >
                         <option value="user">user</option>
@@ -445,12 +549,13 @@ export default function AdminUsersPage() {
                             handleEmailDraftChange(user.id, e.target.value)
                           }
                           placeholder="nuevo@email.com"
-                          className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-slate-500"
+                          disabled={deletingUserId === user.id}
+                          className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-slate-500 disabled:opacity-50"
                         />
                         <button
                           type="button"
                           onClick={() => handleEmailChange(user.id)}
-                          disabled={updatingEmailUserId === user.id}
+                          disabled={updatingEmailUserId === user.id || deletingUserId === user.id}
                           className="inline-flex w-full items-center justify-center rounded-xl bg-[#050816] px-4 py-2.5 text-sm font-semibold text-white transition hover:opacity-95 disabled:opacity-60"
                         >
                           {updatingEmailUserId === user.id
@@ -472,12 +577,13 @@ export default function AdminUsersPage() {
                             handlePasswordDraftChange(user.id, e.target.value)
                           }
                           placeholder="Nueva contraseña"
-                          className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-slate-500"
+                          disabled={deletingUserId === user.id}
+                          className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-slate-500 disabled:opacity-50"
                         />
                         <button
                           type="button"
                           onClick={() => handlePasswordChange(user.id)}
-                          disabled={updatingPasswordUserId === user.id}
+                          disabled={updatingPasswordUserId === user.id || deletingUserId === user.id}
                           className="inline-flex w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-60"
                         >
                           {updatingPasswordUserId === user.id
@@ -485,6 +591,37 @@ export default function AdminUsersPage() {
                             : "Cambiar contraseña"}
                         </button>
                       </div>
+                    </div>
+
+                    <div className="hidden justify-end xl:flex">
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteUser(user)}
+                        disabled={deletingUserId === user.id}
+                        className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        aria-label={`Eliminar a ${user.full_name || user.email}`}
+                        title="Eliminar usuario"
+                      >
+                        {deletingUserId === user.id ? (
+                          <span className="text-xs font-bold">...</span>
+                        ) : (
+                          <svg
+                            viewBox="0 0 24 24"
+                            className="h-5 w-5"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M3 6h18" />
+                            <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+                            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                            <path d="M10 11v6" />
+                            <path d="M14 11v6" />
+                          </svg>
+                        )}
+                      </button>
                     </div>
                   </div>
                 </div>
