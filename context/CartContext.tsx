@@ -30,21 +30,38 @@ type CartContextType = {
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
+// Proveedor de contexto que centraliza el estado y las acciones del carrito.
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
 
   useEffect(() => {
     const savedCart = localStorage.getItem("cart");
-    if (savedCart) {
-      setCart(JSON.parse(savedCart));
-    }
+
+    if (!savedCart) return;
+
+    const frameId = window.requestAnimationFrame(() => {
+      try {
+        const parsedCart = JSON.parse(savedCart);
+        if (Array.isArray(parsedCart)) {
+          setCart(parsedCart as CartItem[]);
+        }
+      } catch (error) {
+        console.error("No se pudo leer el carrito guardado:", error);
+        localStorage.removeItem("cart");
+      }
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
   }, []);
 
   useEffect(() => {
     localStorage.setItem("cart", JSON.stringify(cart));
   }, [cart]);
 
+  // Agrega un producto al carrito y consolida cantidades cuando ya existe.
   const addToCart = (product: Product) => {
     setCart((prev) => {
       const existingItem = prev.find(
@@ -68,6 +85,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     setIsCartOpen(true);
   };
 
+  // Aumenta en una unidad la cantidad de un producto del carrito.
   const increaseQuantity = (id: string, variantId: string | null = null) => {
     setCart((prev) =>
       prev.map((item) =>
@@ -78,6 +96,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     );
   };
 
+  // Disminuye en una unidad la cantidad de un producto del carrito.
   const decreaseQuantity = (id: string, variantId: string | null = null) => {
     setCart((prev) =>
       prev
@@ -90,6 +109,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     );
   };
 
+  // Elimina por completo un producto del carrito.
   const removeFromCart = (id: string, variantId: string | null = null) => {
     setCart((prev) =>
       prev.filter(
@@ -102,11 +122,14 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     );
   };
 
+  // Vacía todo el contenido del carrito.
   const clearCart = () => {
     setCart([]);
   };
 
+  // Abre el panel visual del carrito.
   const openCart = () => setIsCartOpen(true);
+  // Cierra el panel visual del carrito.
   const closeCart = () => setIsCartOpen(false);
 
   return (
@@ -128,6 +151,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
+// Hook de conveniencia para consumir el contexto del carrito desde cualquier componente hijo.
 export function useCart() {
   const context = useContext(CartContext);
 

@@ -1,18 +1,15 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 
 type SiteSettingsRow = {
   favicon_url: string | null;
 };
 
+// Componente silencioso que sincroniza branding o configuración visual del sitio al cargar la app.
 export default function SiteBrandingSync() {
-  useEffect(() => {
-    loadFavicon();
-  }, []);
-
-  async function loadFavicon() {
+  const loadFavicon = useCallback(async () => {
     const { data, error } = await supabase
       .from("site_settings")
       .select("favicon_url")
@@ -29,7 +26,9 @@ export default function SiteBrandingSync() {
 
     if (!faviconUrl) return;
 
-    let link = document.querySelector("link[rel='icon']") as HTMLLinkElement | null;
+    let link = document.querySelector(
+      "link[rel='icon']"
+    ) as HTMLLinkElement | null;
 
     if (!link) {
       link = document.createElement("link");
@@ -38,7 +37,11 @@ export default function SiteBrandingSync() {
     }
 
     link.href = faviconUrl;
-  }
+  }, []);
+
+  useEffect(() => {
+    void loadFavicon();
+  }, [loadFavicon]);
 
   return null;
 }

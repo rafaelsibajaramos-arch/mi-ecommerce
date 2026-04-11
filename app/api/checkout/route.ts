@@ -70,19 +70,24 @@ type AssignedLicenseHistoryRow = {
   license_text: string;
 };
 
+// Genera un número aleatorio base para intentar crear un pedido.
 const generateRandomOrderNumber = () => {
   return Math.floor(10000 + Math.random() * 90000);
 };
 
+// Normaliza el texto de una licencia para compararlo sin ruido.
 const normalizeLicenseText = (value: string) => value.trim();
 
+// Crea una clave única por producto y variante para indexar datos del carrito.
 const buildItemKey = (productId: string, variantId?: string | null) =>
   `${productId}__${variantId ?? "base"}`;
 
+// Construye una respuesta JSON de error con el código HTTP indicado.
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
 }
 
+// Extrae el token Bearer desde el encabezado Authorization.
 function getBearerToken(request: NextRequest) {
   const authHeader = request.headers.get("authorization") || "";
 
@@ -93,6 +98,7 @@ function getBearerToken(request: NextRequest) {
   return authHeader.slice(7).trim();
 }
 
+// Valida que una variable de entorno exista antes de usarla.
 function requireEnv(name: string) {
   const value = process.env[name];
 
@@ -103,6 +109,7 @@ function requireEnv(name: string) {
   return value.trim();
 }
 
+// Crea un cliente de Supabase autenticado con el token actual del usuario.
 function createSupabaseUserClientFromToken(token: string) {
   const url = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
   const anonKey = requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY");
@@ -120,6 +127,7 @@ function createSupabaseUserClientFromToken(token: string) {
   });
 }
 
+// Comprueba que el cliente admin de Supabase esté bien configurado y operativo.
 async function assertAdminClient(supabaseAdmin: SupabaseClient) {
   const { error } = await supabaseAdmin.from("profiles").select("id").limit(1);
 
@@ -134,6 +142,7 @@ async function assertAdminClient(supabaseAdmin: SupabaseClient) {
   }
 }
 
+// Genera un número de pedido único verificando que no exista previamente.
 async function getUniqueOrderNumber(supabaseAdmin: SupabaseClient) {
   let attempts = 0;
 
@@ -160,6 +169,7 @@ async function getUniqueOrderNumber(supabaseAdmin: SupabaseClient) {
   throw new Error("No se pudo generar un número de pedido único.");
 }
 
+// Consulta las licencias disponibles para un producto según variante y prioridad.
 async function fetchAvailableLicensePool({
   supabaseAdmin,
   productId,
@@ -194,6 +204,7 @@ async function fetchAvailableLicensePool({
   return (data as LicenseRow[]) || [];
 }
 
+// Selecciona las licencias a entregar respetando prioridad, fallback y reglas de no repetición.
 async function selectLicensesForItem({
   supabaseAdmin,
   productId,
@@ -277,6 +288,7 @@ async function selectLicensesForItem({
   return selected;
 }
 
+// Busca o crea el perfil que se usará durante el checkout.
 async function resolveCheckoutProfile(
   supabaseAdmin: SupabaseClient,
   user: User
@@ -662,7 +674,7 @@ export async function POST(request: NextRequest) {
       return jsonError(orderError?.message || "No se pudo crear el pedido.");
     }
 
-    let createdOrderId: string | null = orderData.id;
+    const createdOrderId: string | null = orderData.id;
     let createdWalletTransactionId: string | null = null;
     let balanceDiscounted = false;
     const assignedLicenseIds: string[] = [];

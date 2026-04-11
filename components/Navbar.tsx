@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCart } from "../context/CartContext";
 import { supabase } from "../lib/supabase";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Bebas_Neue } from "next/font/google";
 import UserDropdown from "@/components/UserDropdown";
 
@@ -13,6 +13,7 @@ const bebasNeue = Bebas_Neue({
   weight: "400",
 });
 
+// Barra de navegación principal del sitio.
 export default function Navbar() {
   const { cart, openCart } = useCart();
   const pathname = usePathname();
@@ -22,21 +23,7 @@ export default function Navbar() {
 
   const totalItems = cart.reduce((acc, item) => acc + item.quantity, 0);
 
-  useEffect(() => {
-    checkSessionAndRole();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(() => {
-      checkSessionAndRole();
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  async function checkSessionAndRole() {
+  const checkSessionAndRole = useCallback(async () => {
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -56,8 +43,26 @@ export default function Navbar() {
       .single();
 
     setIsAdmin(data?.role === "admin");
-  }
+  }, []);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void checkSessionAndRole();
+    }, 0);
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(() => {
+      void checkSessionAndRole();
+    });
+
+    return () => {
+      window.clearTimeout(timer);
+      subscription.unsubscribe();
+    };
+  }, [checkSessionAndRole]);
+
+  // Devuelve las clases CSS de los enlaces de navegación según su estado.
   const navLinkClass = (href: string) =>
     pathname === href
       ? "inline-flex h-11 items-center rounded-full border border-white/14 bg-white/[0.12] px-5 text-[14px] font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_10px_30px_rgba(0,0,0,0.28)] backdrop-blur-xl"

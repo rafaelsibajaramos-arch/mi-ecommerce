@@ -20,6 +20,7 @@ type FilterType = "all" | "credit" | "debit";
 
 const PAGE_SIZE = 10;
 
+// Genera la secuencia de páginas visible y agrega puntos suspensivos cuando la lista es larga.
 function buildPagination(current: number, total: number): Array<number | "..."> {
   if (total <= 7) {
     return Array.from({ length: total }, (_, i) => i + 1);
@@ -36,6 +37,7 @@ function buildPagination(current: number, total: number): Array<number | "..."> 
   return [1, "...", current - 1, current, current + 1, "...", total];
 }
 
+// Pantalla de billetera del usuario con saldo, filtros y paginación de movimientos.
 export default function WalletPage() {
   const router = useRouter();
   const historySectionRef = useRef<HTMLDivElement | null>(null);
@@ -47,6 +49,7 @@ export default function WalletPage() {
   const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
+    // Carga el saldo actual y el historial de movimientos del usuario.
     const loadWallet = async () => {
       const {
         data: { user },
@@ -84,10 +87,8 @@ export default function WalletPage() {
     loadWallet();
   }, [router]);
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [filter]);
 
+  // Clasifica un movimiento como crédito o débito a partir de su tipo.
   const getTransactionKind = (tx: WalletTransaction): "credit" | "debit" => {
     const txType = (tx.type || "").toLowerCase().trim();
 
@@ -130,27 +131,29 @@ export default function WalletPage() {
     return Math.max(1, Math.ceil(filteredTransactions.length / PAGE_SIZE));
   }, [filteredTransactions.length]);
 
-  useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(totalPages);
-    }
-  }, [currentPage, totalPages]);
+  const effectiveCurrentPage = Math.min(currentPage, totalPages);
 
   const paginatedTransactions = useMemo(() => {
-    const start = (currentPage - 1) * PAGE_SIZE;
+    const start = (effectiveCurrentPage - 1) * PAGE_SIZE;
     const end = start + PAGE_SIZE;
     return filteredTransactions.slice(start, end);
-  }, [filteredTransactions, currentPage]);
+  }, [effectiveCurrentPage, filteredTransactions]);
 
   const paginationItems = useMemo(() => {
-    return buildPagination(currentPage, totalPages);
-  }, [currentPage, totalPages]);
+    return buildPagination(effectiveCurrentPage, totalPages);
+  }, [effectiveCurrentPage, totalPages]);
 
   const pageStart =
-    filteredTransactions.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+    filteredTransactions.length === 0
+      ? 0
+      : (effectiveCurrentPage - 1) * PAGE_SIZE + 1;
 
-  const pageEnd = Math.min(currentPage * PAGE_SIZE, filteredTransactions.length);
+  const pageEnd = Math.min(
+    effectiveCurrentPage * PAGE_SIZE,
+    filteredTransactions.length
+  );
 
+  // Maneja la acción de page change.
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
     historySectionRef.current?.scrollIntoView({
@@ -161,10 +164,12 @@ export default function WalletPage() {
 
   const latestTransaction = transactions.length > 0 ? transactions[0] : null;
 
+  // Formatea un valor numérico como dinero para mostrarlo en la interfaz.
   const formatMoney = (value: number) => {
     return Number(value || 0).toLocaleString("es-CO");
   };
 
+  // Muestra un monto con signo positivo o negativo según el tipo de movimiento.
   const formatSignedMoney = (tx: WalletTransaction) => {
     const amount = Number(tx.amount || 0);
     const kind = getTransactionKind(tx);
@@ -172,6 +177,7 @@ export default function WalletPage() {
     return `${kind === "credit" ? "+" : "-"}$ ${formatMoney(amount)}`;
   };
 
+  // Convierte una fecha técnica en un texto legible para la interfaz.
   const formatDate = (date: string) => {
     try {
       return new Date(date).toLocaleString("es-CO", {
@@ -186,6 +192,7 @@ export default function WalletPage() {
     }
   };
 
+  // Genera un título legible para cada transacción.
   const getTransactionTitle = (tx: WalletTransaction) => {
     const txType = (tx.type || "").toLowerCase().trim();
     const txNote = (tx.note || "").toLowerCase().trim();
@@ -276,7 +283,10 @@ export default function WalletPage() {
             <div className="mt-5 flex flex-wrap gap-3">
               <button
                 type="button"
-                onClick={() => setFilter("all")}
+                onClick={() => {
+                  setFilter("all");
+                  setCurrentPage(1);
+                }}
                 className={
                   filter === "all"
                     ? "rounded-2xl border border-blue-400/30 bg-blue-500/15 px-5 py-3 text-sm font-semibold text-blue-300 shadow-[0_0_14px_rgba(59,130,246,0.18)]"
@@ -288,7 +298,10 @@ export default function WalletPage() {
 
               <button
                 type="button"
-                onClick={() => setFilter("credit")}
+                onClick={() => {
+                  setFilter("credit");
+                  setCurrentPage(1);
+                }}
                 className={
                   filter === "credit"
                     ? "rounded-2xl border border-emerald-400/30 bg-emerald-500/15 px-5 py-3 text-sm font-semibold text-emerald-300 shadow-[0_0_14px_rgba(16,185,129,0.18)]"
@@ -300,7 +313,10 @@ export default function WalletPage() {
 
               <button
                 type="button"
-                onClick={() => setFilter("debit")}
+                onClick={() => {
+                  setFilter("debit");
+                  setCurrentPage(1);
+                }}
                 className={
                   filter === "debit"
                     ? "rounded-2xl border border-red-400/30 bg-red-500/15 px-5 py-3 text-sm font-semibold text-red-300 shadow-[0_0_14px_rgba(239,68,68,0.18)]"
@@ -463,8 +479,10 @@ export default function WalletPage() {
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => handlePageChange(Math.max(currentPage - 1, 1))}
-                  disabled={currentPage === 1}
+                  onClick={() =>
+                    handlePageChange(Math.max(effectiveCurrentPage - 1, 1))
+                  }
+                  disabled={effectiveCurrentPage === 1}
                   className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3 text-sm font-semibold text-white/80 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   ‹
@@ -484,7 +502,7 @@ export default function WalletPage() {
                       type="button"
                       onClick={() => handlePageChange(item)}
                       className={`flex h-11 min-w-[44px] items-center justify-center rounded-2xl border px-3 text-sm font-semibold transition ${
-                        currentPage === item
+                        effectiveCurrentPage === item
                           ? "border-blue-400/40 bg-blue-500/15 text-blue-300"
                           : "border-white/10 bg-white/5 text-white/80 hover:bg-white/10"
                       }`}
@@ -497,9 +515,11 @@ export default function WalletPage() {
                 <button
                   type="button"
                   onClick={() =>
-                    handlePageChange(Math.min(currentPage + 1, totalPages))
+                    handlePageChange(
+                      Math.min(effectiveCurrentPage + 1, totalPages)
+                    )
                   }
-                  disabled={currentPage === totalPages}
+                  disabled={effectiveCurrentPage === totalPages}
                   className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3 text-sm font-semibold text-white/80 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   ›

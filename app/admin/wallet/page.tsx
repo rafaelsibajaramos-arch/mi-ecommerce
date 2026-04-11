@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -54,6 +55,7 @@ type BannerState = {
 const PAGE_SIZE = 10;
 const CLIENTS_PAGE_SIZE = 20;
 
+// Genera la secuencia de páginas visible y agrega puntos suspensivos cuando la lista es larga.
 function buildPagination(
   current: number,
   total: number
@@ -73,16 +75,19 @@ function buildPagination(
   return [1, "...", current - 1, current, current + 1, "...", total];
 }
 
+// Formatea un valor numérico como dinero para mostrarlo en la interfaz.
 function formatMoney(value: number) {
   return `$ ${Number(Math.abs(value || 0)).toLocaleString("es-CO")}`;
 }
 
+// Muestra un monto con signo positivo o negativo según el tipo de movimiento.
 function formatSignedMoney(type: string, value: number) {
   const normalized = normalizeType(type);
   const prefix = normalized === "credit" ? "+" : "-";
   return `${prefix}${formatMoney(value)}`;
 }
 
+// Convierte una fecha técnica en un texto legible para la interfaz.
 function formatDate(value: string) {
   try {
     return new Date(value).toLocaleString("es-CO", {
@@ -97,7 +102,9 @@ function formatDate(value: string) {
   }
 }
 
+// Normaliza distintos nombres de movimientos en una clasificación común.
 function normalizeType(type: string | null) {
+  // Normaliza d para facilitar comparaciones.
   const normalized = (type || "").toLowerCase().trim();
 
   if (
@@ -124,10 +131,12 @@ function normalizeType(type: string | null) {
   return normalized || "movement";
 }
 
+// Indica si una transacción corresponde a una recarga.
 function isRechargeType(type: string | null) {
   return normalizeType(type) === "credit";
 }
 
+// Devuelve la etiqueta legible del tipo de transacción.
 function getTransactionLabel(type: string) {
   const normalized = normalizeType(type);
 
@@ -137,6 +146,7 @@ function getTransactionLabel(type: string) {
   return "Movimiento";
 }
 
+// Devuelve las clases visuales asociadas al tipo de transacción.
 function getTransactionClasses(type: string) {
   const normalized = normalizeType(type);
 
@@ -151,6 +161,7 @@ function getTransactionClasses(type: string) {
   return "border border-slate-200 bg-slate-50 text-slate-700";
 }
 
+// Panel administrativo para gestionar saldo manual y revisar el historial de movimientos.
 export default function AdminWalletPage() {
   const clientSectionRef = useRef<HTMLDivElement | null>(null);
   const rechargeSectionRef = useRef<HTMLDivElement | null>(null);
@@ -186,58 +197,7 @@ export default function AdminWalletPage() {
   const [rechargePage, setRechargePage] = useState(1);
   const [transactionPage, setTransactionPage] = useState(1);
 
-  useEffect(() => {
-    loadTransactions();
-    loadProfiles();
-  }, []);
-
-  useEffect(() => {
-    if (!banner) return;
-
-    const timer = setTimeout(() => {
-      setBanner(null);
-    }, 5000);
-
-    return () => clearTimeout(timer);
-  }, [banner]);
-
-  useEffect(() => {
-    setClientPage(1);
-  }, [clientSearch]);
-
-  useEffect(() => {
-    setRechargePage(1);
-  }, [searchEmail, startDate, endDate]);
-
-  useEffect(() => {
-    setTransactionPage(1);
-  }, [transactionSearchEmail, transactionStartDate, transactionEndDate]);
-
-  function handleClientPageChange(page: number) {
-    setClientPage(page);
-    clientSectionRef.current?.scrollIntoView({
-      behavior: "smooth",
-      block: "start",
-    });
-  }
-
-  function handleRechargePageChange(page: number) {
-    setRechargePage(page);
-    rechargeSectionRef.current?.scrollIntoView({
-      behavior: "smooth",
-      block: "start",
-    });
-  }
-
-  function handleTransactionPageChange(page: number) {
-    setTransactionPage(page);
-    transactionSectionRef.current?.scrollIntoView({
-      behavior: "smooth",
-      block: "start",
-    });
-  }
-
-  async function loadProfiles() {
+  const loadProfiles = useCallback(async () => {
     setLoadingClients(true);
 
     const { data, error } = await supabase
@@ -252,9 +212,9 @@ export default function AdminWalletPage() {
 
     setProfiles((data as ProfileRow[]) || []);
     setLoadingClients(false);
-  }
+  }, []);
 
-  async function loadTransactions() {
+  const loadTransactions = useCallback(async () => {
     setLoadingHistory(true);
 
     const { data: transactionsData, error: transactionsError } = await supabase
@@ -311,6 +271,54 @@ export default function AdminWalletPage() {
     setRechargePage(1);
     setTransactionPage(1);
     setLoadingHistory(false);
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadTransactions();
+      void loadProfiles();
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [loadProfiles, loadTransactions]);
+
+  useEffect(() => {
+    if (!banner) return;
+
+    const timer = setTimeout(() => {
+      setBanner(null);
+    }, 5000);
+
+    return () => clearTimeout(timer);
+  }, [banner]);
+
+  // Cambia la página del listado de clientes y hace scroll a la sección.
+  function handleClientPageChange(page: number) {
+    setClientPage(page);
+    clientSectionRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }
+
+  // Cambia la página del historial de recargas y vuelve al inicio de la sección.
+  function handleRechargePageChange(page: number) {
+    setRechargePage(page);
+    rechargeSectionRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }
+
+  // Cambia la página del historial filtrado de transacciones y reposiciona la vista.
+  function handleTransactionPageChange(page: number) {
+    setTransactionPage(page);
+    transactionSectionRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
   }
 
   const clientWalletRows = useMemo<ClientWalletRow[]>(() => {
@@ -355,27 +363,25 @@ export default function AdminWalletPage() {
     return Math.max(1, Math.ceil(clientWalletRows.length / CLIENTS_PAGE_SIZE));
   }, [clientWalletRows.length]);
 
-  useEffect(() => {
-    if (clientPage > clientTotalPages) {
-      setClientPage(clientTotalPages);
-    }
-  }, [clientPage, clientTotalPages]);
+  const effectiveClientPage = Math.min(clientPage, clientTotalPages);
 
   const paginatedClientWalletRows = useMemo(() => {
-    const start = (clientPage - 1) * CLIENTS_PAGE_SIZE;
+    const start = (effectiveClientPage - 1) * CLIENTS_PAGE_SIZE;
     const end = start + CLIENTS_PAGE_SIZE;
     return clientWalletRows.slice(start, end);
-  }, [clientWalletRows, clientPage]);
+  }, [clientWalletRows, effectiveClientPage]);
 
   const clientPaginationItems = useMemo(() => {
-    return buildPagination(clientPage, clientTotalPages);
-  }, [clientPage, clientTotalPages]);
+    return buildPagination(effectiveClientPage, clientTotalPages);
+  }, [effectiveClientPage, clientTotalPages]);
 
   const clientPageStart =
-    clientWalletRows.length === 0 ? 0 : (clientPage - 1) * CLIENTS_PAGE_SIZE + 1;
+    clientWalletRows.length === 0
+      ? 0
+      : (effectiveClientPage - 1) * CLIENTS_PAGE_SIZE + 1;
 
   const clientPageEnd = Math.min(
-    clientPage * CLIENTS_PAGE_SIZE,
+    effectiveClientPage * CLIENTS_PAGE_SIZE,
     clientWalletRows.length
   );
 
@@ -450,58 +456,53 @@ export default function AdminWalletPage() {
     );
   }, [filteredClientTransactions.length]);
 
-  useEffect(() => {
-    if (rechargePage > rechargeTotalPages) {
-      setRechargePage(rechargeTotalPages);
-    }
-  }, [rechargePage, rechargeTotalPages]);
-
-  useEffect(() => {
-    if (transactionPage > transactionTotalPages) {
-      setTransactionPage(transactionTotalPages);
-    }
-  }, [transactionPage, transactionTotalPages]);
+  const effectiveRechargePage = Math.min(rechargePage, rechargeTotalPages);
+  const effectiveTransactionPage = Math.min(
+    transactionPage,
+    transactionTotalPages
+  );
 
   const paginatedRechargeTransactions = useMemo(() => {
-    const start = (rechargePage - 1) * PAGE_SIZE;
+    const start = (effectiveRechargePage - 1) * PAGE_SIZE;
     const end = start + PAGE_SIZE;
     return filteredRechargeTransactions.slice(start, end);
-  }, [filteredRechargeTransactions, rechargePage]);
+  }, [filteredRechargeTransactions, effectiveRechargePage]);
 
   const paginatedClientTransactions = useMemo(() => {
-    const start = (transactionPage - 1) * PAGE_SIZE;
+    const start = (effectiveTransactionPage - 1) * PAGE_SIZE;
     const end = start + PAGE_SIZE;
     return filteredClientTransactions.slice(start, end);
-  }, [filteredClientTransactions, transactionPage]);
+  }, [filteredClientTransactions, effectiveTransactionPage]);
 
   const rechargePaginationItems = useMemo(() => {
-    return buildPagination(rechargePage, rechargeTotalPages);
-  }, [rechargePage, rechargeTotalPages]);
+    return buildPagination(effectiveRechargePage, rechargeTotalPages);
+  }, [effectiveRechargePage, rechargeTotalPages]);
 
   const transactionPaginationItems = useMemo(() => {
-    return buildPagination(transactionPage, transactionTotalPages);
-  }, [transactionPage, transactionTotalPages]);
+    return buildPagination(effectiveTransactionPage, transactionTotalPages);
+  }, [effectiveTransactionPage, transactionTotalPages]);
 
   const rechargePageStart =
     filteredRechargeTransactions.length === 0
       ? 0
-      : (rechargePage - 1) * PAGE_SIZE + 1;
+      : (effectiveRechargePage - 1) * PAGE_SIZE + 1;
 
   const rechargePageEnd = Math.min(
-    rechargePage * PAGE_SIZE,
+    effectiveRechargePage * PAGE_SIZE,
     filteredRechargeTransactions.length
   );
 
   const transactionPageStart =
     filteredClientTransactions.length === 0
       ? 0
-      : (transactionPage - 1) * PAGE_SIZE + 1;
+      : (effectiveTransactionPage - 1) * PAGE_SIZE + 1;
 
   const transactionPageEnd = Math.min(
-    transactionPage * PAGE_SIZE,
+    effectiveTransactionPage * PAGE_SIZE,
     filteredClientTransactions.length
   );
 
+  // Aplica manualmente un crédito o un débito al cliente seleccionado.
   async function handleMovement(e: FormEvent) {
     e.preventDefault();
     setSubmitting(true);
@@ -623,6 +624,7 @@ export default function AdminWalletPage() {
     setSubmitting(false);
   }
 
+  // Revierte una recarga manual descontando saldo y registrando el movimiento inverso.
   async function handleReverseRecharge(transaction: FormattedTransaction) {
     if (!transaction.user_id) {
       setBanner({
@@ -792,7 +794,10 @@ export default function AdminWalletPage() {
             <input
               type="text"
               value={clientSearch}
-              onChange={(e) => setClientSearch(e.target.value)}
+              onChange={(e) => {
+                setClientSearch(e.target.value);
+                setClientPage(1);
+              }}
               placeholder="cliente@email.com"
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white"
             />
@@ -943,9 +948,9 @@ export default function AdminWalletPage() {
                 <button
                   type="button"
                   onClick={() =>
-                    handleClientPageChange(Math.max(clientPage - 1, 1))
+                    handleClientPageChange(Math.max(effectiveClientPage - 1, 1))
                   }
-                  disabled={clientPage === 1}
+                  disabled={effectiveClientPage === 1}
                   className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   ‹
@@ -965,7 +970,7 @@ export default function AdminWalletPage() {
                       type="button"
                       onClick={() => handleClientPageChange(item)}
                       className={`flex h-11 min-w-[44px] items-center justify-center rounded-2xl border px-3 text-sm font-semibold transition ${
-                        clientPage === item
+                        effectiveClientPage === item
                           ? "border-slate-900 bg-slate-900 text-white"
                           : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                       }`}
@@ -979,10 +984,10 @@ export default function AdminWalletPage() {
                   type="button"
                   onClick={() =>
                     handleClientPageChange(
-                      Math.min(clientPage + 1, clientTotalPages)
+                      Math.min(effectiveClientPage + 1, clientTotalPages)
                     )
                   }
-                  disabled={clientPage === clientTotalPages}
+                  disabled={effectiveClientPage === clientTotalPages}
                   className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   ›
@@ -1024,7 +1029,10 @@ export default function AdminWalletPage() {
             <input
               type="text"
               value={searchEmail}
-              onChange={(e) => setSearchEmail(e.target.value)}
+              onChange={(e) => {
+                setSearchEmail(e.target.value);
+                setRechargePage(1);
+              }}
               placeholder="cliente@email.com"
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white"
             />
@@ -1037,7 +1045,10 @@ export default function AdminWalletPage() {
             <input
               type="date"
               value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
+              onChange={(e) => {
+                setStartDate(e.target.value);
+                setRechargePage(1);
+              }}
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white"
             />
           </div>
@@ -1049,7 +1060,10 @@ export default function AdminWalletPage() {
             <input
               type="date"
               value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
+              onChange={(e) => {
+                setEndDate(e.target.value);
+                setRechargePage(1);
+              }}
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white"
             />
           </div>
@@ -1145,9 +1159,9 @@ export default function AdminWalletPage() {
                 <button
                   type="button"
                   onClick={() =>
-                    handleRechargePageChange(Math.max(rechargePage - 1, 1))
+                    handleRechargePageChange(Math.max(effectiveRechargePage - 1, 1))
                   }
-                  disabled={rechargePage === 1}
+                  disabled={effectiveRechargePage === 1}
                   className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   ‹
@@ -1167,7 +1181,7 @@ export default function AdminWalletPage() {
                       type="button"
                       onClick={() => handleRechargePageChange(item)}
                       className={`flex h-11 min-w-[44px] items-center justify-center rounded-2xl border px-3 text-sm font-semibold transition ${
-                        rechargePage === item
+                        effectiveRechargePage === item
                           ? "border-slate-900 bg-slate-900 text-white"
                           : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                       }`}
@@ -1181,10 +1195,10 @@ export default function AdminWalletPage() {
                   type="button"
                   onClick={() =>
                     handleRechargePageChange(
-                      Math.min(rechargePage + 1, rechargeTotalPages)
+                      Math.min(effectiveRechargePage + 1, rechargeTotalPages)
                     )
                   }
-                  disabled={rechargePage === rechargeTotalPages}
+                  disabled={effectiveRechargePage === rechargeTotalPages}
                   className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   ›
@@ -1227,7 +1241,10 @@ export default function AdminWalletPage() {
             <input
               type="text"
               value={transactionSearchEmail}
-              onChange={(e) => setTransactionSearchEmail(e.target.value)}
+              onChange={(e) => {
+                setTransactionSearchEmail(e.target.value);
+                setTransactionPage(1);
+              }}
               placeholder="cliente@email.com"
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white"
             />
@@ -1240,7 +1257,10 @@ export default function AdminWalletPage() {
             <input
               type="date"
               value={transactionStartDate}
-              onChange={(e) => setTransactionStartDate(e.target.value)}
+              onChange={(e) => {
+                setTransactionStartDate(e.target.value);
+                setTransactionPage(1);
+              }}
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white"
             />
           </div>
@@ -1252,7 +1272,10 @@ export default function AdminWalletPage() {
             <input
               type="date"
               value={transactionEndDate}
-              onChange={(e) => setTransactionEndDate(e.target.value)}
+              onChange={(e) => {
+                setTransactionEndDate(e.target.value);
+                setTransactionPage(1);
+              }}
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white"
             />
           </div>
@@ -1364,10 +1387,10 @@ export default function AdminWalletPage() {
                     type="button"
                     onClick={() =>
                       handleTransactionPageChange(
-                        Math.max(transactionPage - 1, 1)
+                        Math.max(effectiveTransactionPage - 1, 1)
                       )
                     }
-                    disabled={transactionPage === 1}
+                    disabled={effectiveTransactionPage === 1}
                     className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     ‹
@@ -1387,7 +1410,7 @@ export default function AdminWalletPage() {
                         type="button"
                         onClick={() => handleTransactionPageChange(item)}
                         className={`flex h-11 min-w-[44px] items-center justify-center rounded-2xl border px-3 text-sm font-semibold transition ${
-                          transactionPage === item
+                          effectiveTransactionPage === item
                             ? "border-slate-900 bg-slate-900 text-white"
                             : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                         }`}
@@ -1401,10 +1424,10 @@ export default function AdminWalletPage() {
                     type="button"
                     onClick={() =>
                       handleTransactionPageChange(
-                        Math.min(transactionPage + 1, transactionTotalPages)
+                        Math.min(effectiveTransactionPage + 1, transactionTotalPages)
                       )
                     }
-                    disabled={transactionPage === transactionTotalPages}
+                    disabled={effectiveTransactionPage === transactionTotalPages}
                     className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     ›

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabase";
 
@@ -15,6 +15,7 @@ type Profile = {
 
 type TabType = "info" | "security";
 
+// Pantalla principal del perfil del usuario para editar datos y contraseña.
 export default function AccountPage() {
   const router = useRouter();
 
@@ -32,6 +33,7 @@ export default function AccountPage() {
   const [passwordMessage, setPasswordMessage] = useState("");
 
   useEffect(() => {
+    // Carga el usuario autenticado y recupera su perfil desde la base de datos.
     const loadUser = async () => {
       const {
         data: { user },
@@ -63,7 +65,8 @@ export default function AccountPage() {
     loadUser();
   }, [router]);
 
-  const memberSince = useMemo(() => {
+  // Calcula el texto que muestra desde cuándo pertenece el usuario al sistema.
+  const memberSince = (() => {
     if (!profile?.created_at) return "No disponible";
 
     try {
@@ -74,8 +77,9 @@ export default function AccountPage() {
     } catch {
       return "No disponible";
     }
-  }, [profile?.created_at]);
+  })();
 
+  // Guarda los cambios de la información básica del perfil.
   const handleSaveInfo = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -112,6 +116,7 @@ export default function AccountPage() {
     setSavingInfo(false);
   };
 
+  // Valida y actualiza la contraseña del usuario.
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setPasswordMessage("");

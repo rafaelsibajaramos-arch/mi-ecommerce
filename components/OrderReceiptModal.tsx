@@ -24,6 +24,7 @@ export type ReceiptOrder = {
   }>;
 };
 
+// Modal contenedor que muestra el comprobante de compra cuando existe un pedido seleccionado.
 export default function OrderReceiptModal({
   order,
   onClose,
@@ -31,15 +32,27 @@ export default function OrderReceiptModal({
   order: ReceiptOrder | null;
   onClose: () => void;
 }) {
+  if (!order) return null;
+
+  return <OrderReceiptModalContent key={order.id} order={order} onClose={onClose} />;
+}
+
+// Contenido visual e interactivo del comprobante con productos, licencias y acciones de copiado.
+function OrderReceiptModalContent({
+  order,
+  onClose,
+}: {
+  order: ReceiptOrder;
+  onClose: () => void;
+}) {
   const [copiedLicenseId, setCopiedLicenseId] = useState<string | null>(null);
   const [copiedAllLicenses, setCopiedAllLicenses] = useState(false);
 
   useEffect(() => {
-    if (!order) return;
-
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
+    // Cierra el modal o limpia estados cuando el usuario presiona Escape.
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
@@ -50,19 +63,14 @@ export default function OrderReceiptModal({
       document.body.style.overflow = previousOverflow || "";
       window.removeEventListener("keydown", handleEscape);
     };
-  }, [order, onClose]);
+  }, [onClose]);
 
-  useEffect(() => {
-    setCopiedLicenseId(null);
-    setCopiedAllLicenses(false);
-  }, [order]);
-
-  if (!order) return null;
-
+  // Formatea un valor numérico como dinero para mostrarlo en la interfaz.
   const formatMoney = (value: number) => {
     return `$ ${Number(value || 0).toLocaleString("es-CO")}`;
   };
 
+  // Convierte una fecha técnica en un texto legible para la interfaz.
   const formatDate = (date: string) => {
     try {
       return new Date(date).toLocaleDateString("es-CO", {
@@ -75,12 +83,15 @@ export default function OrderReceiptModal({
     }
   };
 
+  // Formatea el número de pedido con longitud fija para mostrarlo mejor.
   const formatOrderNumber = (value: number | null) => {
     if (!value) return "-----";
     return String(value).padStart(5, "0");
   };
 
+  // Convierte un estado interno en una etiqueta legible para el usuario.
   const getStatusLabel = (status: string) => {
+    // Normaliza d para facilitar comparaciones.
     const normalized = (status || "").toLowerCase();
 
     if (normalized === "completed") return "Entregado";
@@ -92,7 +103,9 @@ export default function OrderReceiptModal({
     return status || "Completado";
   };
 
+  // Devuelve las clases visuales adecuadas según el estado mostrado.
   const getStatusClasses = (status: string) => {
+    // Normaliza d para facilitar comparaciones.
     const normalized = (status || "").toLowerCase();
 
     if (normalized === "completed" || normalized === "paid") {
@@ -114,18 +127,18 @@ export default function OrderReceiptModal({
     return "border border-white/10 bg-white/5 text-white/80";
   };
 
+  // Construye el texto consolidado que se copiará al portapapeles.
   const buildLicenseCopyText = (
     productName: string,
     variantName: string | null,
     licenseText: string
   ) => {
-    const title = variantName
-      ? `${productName} - ${variantName}`
-      : productName;
+    const title = variantName ? `${productName} - ${variantName}` : productName;
 
     return `${title}\n\n${licenseText}`;
   };
 
+  // Copia una licencia individual al portapapeles.
   const copyLicense = async (
     productName: string,
     variantName: string | null,
@@ -149,6 +162,7 @@ export default function OrderReceiptModal({
     }
   };
 
+  // Copia en bloque todas las licencias visibles del comprobante.
   const copyAllLicenses = async () => {
     try {
       const blocks = order.items.flatMap((item) =>
@@ -310,9 +324,7 @@ export default function OrderReceiptModal({
                           }
                           className="rounded bg-blue-600 px-3 py-1 text-xs hover:bg-blue-500"
                         >
-                          {copiedLicenseId === license.id
-                            ? "Copiado"
-                            : "Copiar"}
+                          {copiedLicenseId === license.id ? "Copiado" : "Copiar"}
                         </button>
                       </div>
                     </div>

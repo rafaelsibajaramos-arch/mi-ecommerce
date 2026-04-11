@@ -16,6 +16,7 @@ type Product = {
   created_at?: string;
 };
 
+// Listado administrativo de productos con filtros básicos y acciones rápidas.
 export default function AdminProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -23,10 +24,8 @@ export default function AdminProductsPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [onlyOutOfStock, setOnlyOutOfStock] = useState(false);
 
+  // Carga el listado de productos del panel administrativo.
   const fetchProducts = async () => {
-    setLoading(true);
-    setMessage("");
-
     const { data, error } = await supabase
       .from("products")
       .select("*")
@@ -43,6 +42,7 @@ export default function AdminProductsPage() {
     setLoading(false);
   };
 
+  // Elimina un producto después de confirmar la acción.
   const handleDelete = async (id: string) => {
     const confirmed = window.confirm(
       "¿Seguro que quieres eliminar este producto?"
@@ -62,9 +62,16 @@ export default function AdminProductsPage() {
   };
 
   useEffect(() => {
-    fetchProducts();
+    const timer = window.setTimeout(() => {
+      void fetchProducts();
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
   }, []);
 
+  // Formatea price para mostrarlo en la interfaz.
   const formatPrice = (value: number) => {
     return `$${Number(value || 0).toLocaleString("es-CO")}`;
   };

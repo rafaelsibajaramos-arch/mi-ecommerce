@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 
 const adminLinks = [
@@ -12,11 +12,27 @@ const adminLinks = [
   { href: "/admin/wallet", label: "Wallet" },
 ];
 
+// Barra lateral del panel administrativo con navegación responsive y cierre de sesión.
 export default function AdminSidebar() {
   const router = useRouter();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const [openPathname, setOpenPathname] = useState<string | null>(null);
 
+  const isMenuOpen = open && openPathname === pathname;
+
+  // Abre el menú lateral del panel administrativo.
+  const openMenu = () => {
+    setOpenPathname(pathname);
+    setOpen(true);
+  };
+
+  // Cierra el menú lateral del panel administrativo.
+  const closeMenu = () => {
+    setOpen(false);
+  };
+
+  // Cierra la sesión desde el panel administrativo.
   const handleLogout = async () => {
     await supabase.auth.signOut();
     router.push("/login");
@@ -24,15 +40,11 @@ export default function AdminSidebar() {
   };
 
   useEffect(() => {
-    setOpen(false);
-  }, [pathname]);
-
-  useEffect(() => {
-    document.body.style.overflow = open ? "hidden" : "";
+    document.body.style.overflow = isMenuOpen ? "hidden" : "";
     return () => {
       document.body.style.overflow = "";
     };
-  }, [open]);
+  }, [isMenuOpen]);
 
   const currentSection = useMemo(() => {
     const current = adminLinks.find((item) => {
@@ -45,6 +57,7 @@ export default function AdminSidebar() {
     return current?.label || "Panel admin";
   }, [pathname]);
 
+  // Indica si una ruta coincide con la sección actual del panel.
   const isActive = (href: string) => {
     if (href === "/admin/orders") {
       return pathname === "/admin" || pathname === "/admin/orders";
@@ -53,6 +66,7 @@ export default function AdminSidebar() {
     return pathname === href || pathname.startsWith(`${href}/`);
   };
 
+  // Devuelve las clases visuales de cada enlace del panel administrativo.
   const navClass = (href: string) =>
     isActive(href)
       ? "flex items-center rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-[#050816] shadow-sm"
@@ -62,7 +76,7 @@ export default function AdminSidebar() {
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={openMenu}
         className="fixed left-4 top-[96px] z-[120] inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-lg transition hover:bg-slate-50 lg:hidden"
         aria-label="Abrir menú admin"
       >
@@ -87,15 +101,17 @@ export default function AdminSidebar() {
       </div>
 
       <div
-        onClick={() => setOpen(false)}
+        onClick={closeMenu}
         className={`fixed inset-0 z-[130] bg-black/55 transition-opacity duration-300 lg:hidden ${
-          open ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
+          isMenuOpen
+            ? "pointer-events-auto opacity-100"
+            : "pointer-events-none opacity-0"
         }`}
       />
 
       <aside
         className={`fixed left-0 top-0 z-[140] flex h-dvh w-[84vw] max-w-[320px] flex-col bg-[#050816] text-white shadow-2xl transition-transform duration-300 lg:hidden ${
-          open ? "translate-x-0" : "-translate-x-full"
+          isMenuOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
         <div className="flex items-center justify-between border-b border-white/10 px-5 py-5">
@@ -108,7 +124,7 @@ export default function AdminSidebar() {
 
           <button
             type="button"
-            onClick={() => setOpen(false)}
+            onClick={closeMenu}
             className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-white/10 text-white transition hover:bg-white/15"
             aria-label="Cerrar menú"
           >
@@ -135,7 +151,12 @@ export default function AdminSidebar() {
 
           <nav className="space-y-2">
             {adminLinks.map((item) => (
-              <Link key={item.href} href={item.href} className={navClass(item.href)}>
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={closeMenu}
+                className={navClass(item.href)}
+              >
                 {item.label}
               </Link>
             ))}

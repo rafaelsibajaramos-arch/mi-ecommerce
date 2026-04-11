@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
 
@@ -11,6 +11,7 @@ type ProfileRow = {
   role: string | null;
 };
 
+// Extrae un mensaje legible desde un error desconocido y usa un texto por defecto cuando hace falta.
 function getErrorMessage(error: unknown, fallback: string) {
   if (
     error &&
@@ -24,10 +25,12 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+// Crea una pausa asíncrona corta para reintentos o esperas controladas.
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Componente que protege la aplicación, gestiona login y registro, y bloquea la UI cuando no hay sesión válida.
 export default function AuthGuard({
   children,
 }: {
@@ -39,7 +42,6 @@ export default function AuthGuard({
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [mode, setMode] = useState<AuthMode>("login");
-  const [isRecoveryFlow, setIsRecoveryFlow] = useState(false);
 
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -52,8 +54,44 @@ export default function AuthGuard({
   const [registerLoading, setRegisterLoading] = useState(false);
   const [registerMessage, setRegisterMessage] = useState("");
 
-  const isPublicPath = pathname === "/reset-password" || isRecoveryFlow;
+  const recoveryState = useMemo(() => {
+    if (typeof window === "undefined") {
+      return {
+        isRecoveryFlow: pathname === "/reset-password",
+        shouldRedirect: false,
+        redirectPath: "",
+      };
+    }
 
+    const searchParams = new URLSearchParams(window.location.search);
+    const hashParams = new URLSearchParams(
+      window.location.hash.replace(/^#/, "")
+    );
+
+    const hasRecoveryCode = Boolean(searchParams.get("code"));
+    const hasRecoveryTokens =
+      hashParams.get("type") === "recovery" &&
+      Boolean(hashParams.get("access_token")) &&
+      Boolean(hashParams.get("refresh_token"));
+
+    const isRecoveryFlow =
+      pathname === "/reset-password" || hasRecoveryCode || hasRecoveryTokens;
+
+    const shouldRedirect =
+      (hasRecoveryCode || hasRecoveryTokens) && pathname !== "/reset-password";
+
+    return {
+      isRecoveryFlow,
+      shouldRedirect,
+      redirectPath: shouldRedirect
+        ? `/reset-password${window.location.search}${window.location.hash}`
+        : "",
+    };
+  }, [pathname]);
+
+  const isPublicPath = recoveryState.isRecoveryFlow;
+
+  // Consulta el perfil del usuario autenticado y devuelve un resultado uniforme.
   const getOwnProfile = async (
     userId: string
   ): Promise<{ profile: ProfileRow | null; errorMessage: string | null }> => {
@@ -96,6 +134,7 @@ export default function AuthGuard({
     }
   };
 
+  // Reintenta la consulta del perfil durante unos segundos hasta que exista o falle.
   const waitForOwnProfile = async (
     userId: string,
     retries = 6,
@@ -116,6 +155,7 @@ export default function AuthGuard({
     return getOwnProfile(userId);
   };
 
+  // Garantiza que el perfil exista después del registro y resuelve duplicados sin romper la sesión.
   const ensureProfileAfterRegister = async (
     userId: string,
     email: string,
@@ -166,6 +206,7 @@ export default function AuthGuard({
     return { ok: true, message: null as string | null };
   };
 
+  // Redirige al usuario según el rol detectado en su perfil.
   const redirectByRole = (role: string | null | undefined) => {
     if (role === "admin") {
       router.replace("/admin");
@@ -176,6 +217,7 @@ export default function AuthGuard({
     router.refresh();
   };
 
+  // Cierra la sesión cuando el perfil es inválido para evitar estados inconsistentes.
   const forceLogoutInvalidProfile = async (message: string) => {
     try {
       await supabase.auth.signOut();
@@ -190,36 +232,15 @@ export default function AuthGuard({
   };
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const searchParams = new URLSearchParams(window.location.search);
-    const hashParams = new URLSearchParams(
-      window.location.hash.replace(/^#/, "")
-    );
-
-    const hasRecoveryCode = Boolean(searchParams.get("code"));
-    const hasRecoveryTokens =
-      hashParams.get("type") === "recovery" &&
-      Boolean(hashParams.get("access_token")) &&
-      Boolean(hashParams.get("refresh_token"));
-
-    if (!hasRecoveryCode && !hasRecoveryTokens) {
-      setIsRecoveryFlow(pathname === "/reset-password");
-      return;
+    if (recoveryState.shouldRedirect && recoveryState.redirectPath) {
+      router.replace(recoveryState.redirectPath);
     }
-
-    setIsRecoveryFlow(true);
-
-    if (pathname !== "/reset-password") {
-      router.replace(
-        `/reset-password${window.location.search}${window.location.hash}`
-      );
-    }
-  }, [pathname, router]);
+  }, [recoveryState.redirectPath, recoveryState.shouldRedirect, router]);
 
   useEffect(() => {
     let mounted = true;
 
+    // Realiza la verificación inicial de sesión y estado del perfil al montar el componente.
     const bootAuth = async () => {
       try {
         const {
@@ -260,7 +281,7 @@ export default function AuthGuard({
       }
     };
 
-    bootAuth();
+    void bootAuth();
 
     const {
       data: { subscription },
@@ -309,6 +330,7 @@ export default function AuthGuard({
     }
   }, [checkingAuth, isLoggedIn, isPublicPath]);
 
+  // Procesa el inicio de sesión y valida que el usuario tenga un perfil utilizable.
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginLoading(true);
@@ -357,6 +379,7 @@ export default function AuthGuard({
     }
   };
 
+  // Envía el flujo de recuperación de contraseña al correo indicado.
   const handleForgotPassword = async () => {
     setLoginMessage("");
 
@@ -387,6 +410,7 @@ export default function AuthGuard({
     setLoginMessage("Te enviamos un enlace para restablecer tu contraseña.");
   };
 
+  // Crea la cuenta, asegura el perfil y redirige al usuario al finalizar.
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setRegisterLoading(true);

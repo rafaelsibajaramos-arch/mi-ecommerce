@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -13,27 +13,17 @@ type Profile = {
   role: string | null;
 };
 
+// Menú desplegable del usuario con accesos rápidos y cierre de sesión.
 export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean }) {
   const [open, setOpen] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
 
-  useEffect(() => {
-    loadProfile();
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(() => {
-      loadProfile();
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, []);
 
   useEffect(() => {
+    // Cierra el menú cuando el usuario hace clic fuera del componente.
     const handleClickOutside = (event: MouseEvent) => {
       if (!dropdownRef.current) return;
       if (!dropdownRef.current.contains(event.target as Node)) {
@@ -45,7 +35,7 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const loadProfile = async () => {
+  const loadProfile = useCallback(async () => {
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -64,8 +54,26 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
     if (data) {
       setProfile(data);
     }
-  };
+  }, []);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadProfile();
+    }, 0);
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(() => {
+      void loadProfile();
+    });
+
+    return () => {
+      window.clearTimeout(timer);
+      subscription.unsubscribe();
+    };
+  }, [loadProfile]);
+
+  // Cierra la sesión del usuario actual y limpia la navegación.
   const logout = async () => {
     await supabase.auth.signOut();
     router.replace("/");

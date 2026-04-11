@@ -51,10 +51,45 @@ type ProductLicenseRow = {
   is_priority: boolean;
 };
 
+type ProductVariantDbRow = {
+  id: string;
+  name: string | null;
+  slug: string | null;
+  description: string | null;
+  price: number | null;
+  stock: number | null;
+  is_active: boolean | null;
+  sort_order: number | null;
+};
+
+type ProductComponentDbRow = {
+  id: string;
+  child_product_id: string | null;
+  child_variant_id: string | null;
+  quantity: number | null;
+  sort_order: number | null;
+};
+
+// Extrae un mensaje legible desde un error desconocido y usa un texto por defecto cuando hace falta.
+function getErrorMessage(error: unknown, fallback: string) {
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return error.message;
+  }
+
+  return fallback;
+}
+
+// Genera un identificador temporal para elementos aún no guardados en la base de datos.
 function makeTempId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+// Convierte un texto libre en un slug limpio y apto para URLs.
 function slugify(value: string) {
   return value
     .normalize("NFD")
@@ -66,6 +101,7 @@ function slugify(value: string) {
     .replace(/-+/g, "-");
 }
 
+// Limpia un bloque de texto y devuelve solo las líneas útiles, sin vacíos.
 function normalizeLines(text: string) {
   return text
     .split("\n")
@@ -73,6 +109,7 @@ function normalizeLines(text: string) {
     .filter(Boolean);
 }
 
+// Cuenta repeticiones por valor para sincronizar licencias sin duplicar ni perder registros.
 function buildCountMap(lines: string[]) {
   const map = new Map<string, number>();
 
@@ -96,6 +133,7 @@ const fileInputClass =
 const checkboxClass =
   "h-5 w-5 rounded border-slate-300 accent-slate-900 cursor-pointer";
 
+// Tarjeta reutilizable del editor de productos que puede expandirse o colapsarse.
 function SectionCard({
   title,
   subtitle,
@@ -135,6 +173,7 @@ function SectionCard({
   );
 }
 
+// Pantalla administrativa para editar productos simples, variables o compuestos.
 export default function EditProductPage() {
   const params = useParams();
   const id = params.id as string;
@@ -188,6 +227,7 @@ export default function EditProductPage() {
     return grouped;
   }, [allVariants]);
 
+  // Carga la información principal del producto que se está editando.
   const fetchProduct = async () => {
     const { data, error } = await supabase
       .from("products")
@@ -213,6 +253,7 @@ export default function EditProductPage() {
     setCurrentImageUrl(data.image_url || "");
   };
 
+  // Carga las variantes asociadas al producto actual.
   const fetchVariants = async () => {
     const { data, error } = await supabase
       .from("product_variants")
@@ -227,7 +268,7 @@ export default function EditProductPage() {
     }
 
     setVariants(
-      (data || []).map((item: any, index: number) => ({
+      ((data as ProductVariantDbRow[] | null) || []).map((item, index) => ({
         id: item.id,
         tempId: item.id || makeTempId(),
         name: item.name || "",
@@ -242,6 +283,7 @@ export default function EditProductPage() {
     );
   };
 
+  // Carga los componentes de un producto compuesto o combo.
   const fetchComponents = async () => {
     const { data, error } = await supabase
       .from("product_components")
@@ -256,7 +298,7 @@ export default function EditProductPage() {
     }
 
     setComponents(
-      (data || []).map((item: any, index: number) => ({
+      ((data as ProductComponentDbRow[] | null) || []).map((item, index) => ({
         id: item.id,
         tempId: item.id || makeTempId(),
         child_product_id: item.child_product_id || "",
@@ -267,6 +309,7 @@ export default function EditProductPage() {
     );
   };
 
+  // Carga productos y variantes auxiliares para poblar selectores del editor.
   const fetchCatalogData = async () => {
     const [{ data: productsData }, { data: variantsData }] = await Promise.all([
       supabase
@@ -284,6 +327,7 @@ export default function EditProductPage() {
     setAllVariants((variantsData as ProductVariantOption[]) || []);
   };
 
+  // Carga las licencias disponibles y las reparte entre generales y prioritarias.
   const fetchLicenses = async () => {
     const { data, error } = await supabase
       .from("product_licenses")
@@ -324,6 +368,7 @@ export default function EditProductPage() {
     );
   };
 
+  // Ejecuta la carga inicial de todos los datos necesarios para la pantalla.
   const loadAll = async () => {
     setLoading(true);
     setMessage("");
@@ -359,6 +404,7 @@ export default function EditProductPage() {
     };
   }, [previewUrl]);
 
+  // Agrega una nueva variante vacía al estado local del formulario.
   const addVariant = () => {
     setVariants((prev) => [
       ...prev,
@@ -376,6 +422,7 @@ export default function EditProductPage() {
     ]);
   };
 
+  // Actualiza un campo concreto de una variante dentro del estado local.
   const updateVariant = (
     tempId: string,
     field: keyof VariantRow,
@@ -396,6 +443,7 @@ export default function EditProductPage() {
     );
   };
 
+  // Elimina una variante del estado y registra su borrado si ya existía en base de datos.
   const removeVariant = (tempId: string) => {
     setVariants((prev) => {
       const found = prev.find((item) => item.tempId === tempId);
@@ -406,6 +454,7 @@ export default function EditProductPage() {
     });
   };
 
+  // Agrega un nuevo componente al combo dentro del formulario.
   const addComponent = () => {
     setComponents((prev) => [
       ...prev,
@@ -419,6 +468,7 @@ export default function EditProductPage() {
     ]);
   };
 
+  // Actualiza un campo específico de un componente del combo.
   const updateComponent = (
     tempId: string,
     field: keyof ComponentRow,
@@ -431,10 +481,12 @@ export default function EditProductPage() {
     );
   };
 
+  // Quita un componente del combo del estado local.
   const removeComponent = (tempId: string) => {
     setComponents((prev) => prev.filter((item) => item.tempId !== tempId));
   };
 
+  // Sincroniza en la base de datos las licencias disponibles con las líneas ingresadas en el formulario.
   const syncAvailableLicenses = async ({
     productId,
     variantId,
@@ -530,6 +582,7 @@ export default function EditProductPage() {
     }
   };
 
+  // Valida el formulario y guarda producto, variantes, componentes e inventario de licencias.
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -790,8 +843,10 @@ export default function EditProductPage() {
       setMessage("Producto actualizado correctamente.");
       await loadAll();
       await fetchLicenses();
-    } catch (err: any) {
-      setMessage(err?.message || "Ocurrió un error guardando el producto.");
+    } catch (error) {
+      setMessage(
+        getErrorMessage(error, "Ocurrió un error guardando el producto.")
+      );
     } finally {
       setSaving(false);
     }

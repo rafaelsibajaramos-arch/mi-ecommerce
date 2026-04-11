@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../../lib/supabase";
 import OrderReceiptModal, {
@@ -48,6 +48,7 @@ type OrderWithItems = ReceiptOrder;
 
 const PAGE_SIZE = 10;
 
+// Genera la secuencia de páginas visible y agrega puntos suspensivos cuando la lista es larga.
 function buildPagination(current: number, total: number): Array<number | "..."> {
   if (total <= 7) {
     return Array.from({ length: total }, (_, i) => i + 1);
@@ -64,6 +65,7 @@ function buildPagination(current: number, total: number): Array<number | "..."> 
   return [1, "...", current - 1, current, current + 1, "...", total];
 }
 
+// Pantalla de cuenta que lista pedidos del usuario, permite filtrarlos y abrir su comprobante.
 export default function AccountOrdersPage() {
   const router = useRouter();
   const ordersSectionRef = useRef<HTMLDivElement | null>(null);
@@ -80,15 +82,7 @@ export default function AccountOrdersPage() {
   );
   const [currentPage, setCurrentPage] = useState(1);
 
-  useEffect(() => {
-    loadOrders();
-  }, []);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [dateFrom, dateTo]);
-
-  const loadOrders = async () => {
+  const loadOrders = useCallback(async () => {
     setLoading(true);
     setMessage("");
 
@@ -142,7 +136,7 @@ export default function AccountOrdersPage() {
       new Set(rawItems.map((item) => item.product_id).filter(Boolean))
     );
 
-    let productsMap = new Map<string, ProductRow>();
+    const productsMap = new Map<string, ProductRow>();
 
     if (productIds.length > 0) {
       const { data: productsData, error: productsError } = await supabase
@@ -224,7 +218,17 @@ export default function AccountOrdersPage() {
     setOrders(mergedOrders);
     setCurrentPage(1);
     setLoading(false);
-  };
+  }, [router]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadOrders();
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [loadOrders]);
 
   const filteredOrders = useMemo(() => {
     return orders.filter((order) => {
@@ -248,27 +252,29 @@ export default function AccountOrdersPage() {
     return Math.max(1, Math.ceil(filteredOrders.length / PAGE_SIZE));
   }, [filteredOrders.length]);
 
-  useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(totalPages);
-    }
-  }, [currentPage, totalPages]);
+  const effectiveCurrentPage = Math.min(currentPage, totalPages);
 
   const paginatedOrders = useMemo(() => {
-    const start = (currentPage - 1) * PAGE_SIZE;
+    const start = (effectiveCurrentPage - 1) * PAGE_SIZE;
     const end = start + PAGE_SIZE;
     return filteredOrders.slice(start, end);
-  }, [filteredOrders, currentPage]);
+  }, [effectiveCurrentPage, filteredOrders]);
 
   const paginationItems = useMemo(() => {
-    return buildPagination(currentPage, totalPages);
-  }, [currentPage, totalPages]);
+    return buildPagination(effectiveCurrentPage, totalPages);
+  }, [effectiveCurrentPage, totalPages]);
 
   const pageStart =
-    filteredOrders.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+    filteredOrders.length === 0
+      ? 0
+      : (effectiveCurrentPage - 1) * PAGE_SIZE + 1;
 
-  const pageEnd = Math.min(currentPage * PAGE_SIZE, filteredOrders.length);
+  const pageEnd = Math.min(
+    effectiveCurrentPage * PAGE_SIZE,
+    filteredOrders.length
+  );
 
+  // Maneja la acción de page change.
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
     ordersSectionRef.current?.scrollIntoView({
@@ -284,10 +290,12 @@ export default function AccountOrdersPage() {
     );
   }, [filteredOrders]);
 
+  // Formatea un valor numérico como dinero para mostrarlo en la interfaz.
   const formatMoney = (value: number) => {
     return `$ ${Number(value || 0).toLocaleString("es-CO")}`;
   };
 
+  // Convierte una fecha técnica en un texto legible para la interfaz.
   const formatDate = (date: string) => {
     try {
       return new Date(date).toLocaleDateString("es-CO", {
@@ -300,12 +308,15 @@ export default function AccountOrdersPage() {
     }
   };
 
+  // Formatea el número de pedido con longitud fija para mostrarlo mejor.
   const formatOrderNumber = (value: number | null) => {
     if (!value) return "-----";
     return String(value).padStart(5, "0");
   };
 
+  // Convierte un estado interno en una etiqueta legible para el usuario.
   const getStatusLabel = (status: string) => {
+    // Normaliza d para facilitar comparaciones.
     const normalized = (status || "").toLowerCase();
 
     if (normalized === "completed") return "Entregado";
@@ -317,7 +328,9 @@ export default function AccountOrdersPage() {
     return status || "Completado";
   };
 
+  // Devuelve las clases visuales adecuadas según el estado mostrado.
   const getStatusClasses = (status: string) => {
+    // Normaliza d para facilitar comparaciones.
     const normalized = (status || "").toLowerCase();
 
     if (normalized === "completed" || normalized === "paid") {
@@ -389,7 +402,10 @@ export default function AccountOrdersPage() {
                 <input
                   type="date"
                   value={dateFrom}
-                  onChange={(e) => setDateFrom(e.target.value)}
+                  onChange={(e) => {
+                    setDateFrom(e.target.value);
+                    setCurrentPage(1);
+                  }}
                   className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none focus:border-blue-500/50"
                 />
               </div>
@@ -401,7 +417,10 @@ export default function AccountOrdersPage() {
                 <input
                   type="date"
                   value={dateTo}
-                  onChange={(e) => setDateTo(e.target.value)}
+                  onChange={(e) => {
+                    setDateTo(e.target.value);
+                    setCurrentPage(1);
+                  }}
                   className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none focus:border-blue-500/50"
                 />
               </div>
@@ -412,6 +431,7 @@ export default function AccountOrdersPage() {
                   onClick={() => {
                     setDateFrom("");
                     setDateTo("");
+                    setCurrentPage(1);
                   }}
                   className="w-full rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-white/75 transition hover:bg-white/10 hover:text-white md:w-auto"
                 >
@@ -522,9 +542,9 @@ export default function AccountOrdersPage() {
                   <button
                     type="button"
                     onClick={() =>
-                      handlePageChange(Math.max(currentPage - 1, 1))
+                      handlePageChange(Math.max(effectiveCurrentPage - 1, 1))
                     }
-                    disabled={currentPage === 1}
+                    disabled={effectiveCurrentPage === 1}
                     className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3 text-sm font-semibold text-white/80 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     ‹
@@ -544,7 +564,7 @@ export default function AccountOrdersPage() {
                         type="button"
                         onClick={() => handlePageChange(item)}
                         className={`flex h-11 min-w-[44px] items-center justify-center rounded-2xl border px-3 text-sm font-semibold transition ${
-                          currentPage === item
+                          effectiveCurrentPage === item
                             ? "border-blue-400/40 bg-blue-500/15 text-blue-300"
                             : "border-white/10 bg-white/5 text-white/80 hover:bg-white/10"
                         }`}
@@ -557,9 +577,11 @@ export default function AccountOrdersPage() {
                   <button
                     type="button"
                     onClick={() =>
-                      handlePageChange(Math.min(currentPage + 1, totalPages))
+                      handlePageChange(
+                        Math.min(effectiveCurrentPage + 1, totalPages)
+                      )
                     }
-                    disabled={currentPage === totalPages}
+                    disabled={effectiveCurrentPage === totalPages}
                     className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3 text-sm font-semibold text-white/80 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     ›
