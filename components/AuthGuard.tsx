@@ -24,6 +24,10 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export default function AuthGuard({
   children,
 }: {
@@ -92,6 +96,76 @@ export default function AuthGuard({
     }
   };
 
+  const waitForOwnProfile = async (
+    userId: string,
+    retries = 6,
+    delayMs = 500
+  ): Promise<{ profile: ProfileRow | null; errorMessage: string | null }> => {
+    for (let attempt = 0; attempt < retries; attempt += 1) {
+      const result = await getOwnProfile(userId);
+
+      if (result.profile && !result.errorMessage) {
+        return result;
+      }
+
+      if (attempt < retries - 1) {
+        await sleep(delayMs);
+      }
+    }
+
+    return getOwnProfile(userId);
+  };
+
+  const ensureProfileAfterRegister = async (
+    userId: string,
+    email: string,
+    fullName: string
+  ) => {
+    const { error: profileInsertError } = await supabase.from("profiles").insert({
+      id: userId,
+      email,
+      full_name: fullName,
+      role: "user",
+      balance: 0,
+    });
+
+    if (!profileInsertError) {
+      return { ok: true, message: null as string | null };
+    }
+
+    const profileInsertMessage = getErrorMessage(
+      profileInsertError,
+      "La cuenta se creó, pero no se pudo crear el perfil."
+    );
+
+    const isDuplicateProfileError =
+      profileInsertMessage.includes("duplicate key value") ||
+      profileInsertMessage.includes("profiles_pkey") ||
+      profileInsertMessage.includes("duplicate key") ||
+      profileInsertMessage.includes("23505");
+
+    if (!isDuplicateProfileError) {
+      return { ok: false, message: profileInsertMessage };
+    }
+
+    const { error: profileUpdateError } = await supabase
+      .from("profiles")
+      .update({
+        email,
+        full_name: fullName,
+      })
+      .eq("id", userId);
+
+    if (profileUpdateError) {
+      console.warn(
+        "El perfil ya existía y no se pudo actualizar después del registro:",
+        profileUpdateError
+      );
+    }
+
+    return { ok: true, message: null as string | null };
+  };
+
   const redirectByRole = (role: string | null | undefined) => {
     if (role === "admin") {
       router.replace("/admin");
@@ -143,87 +217,83 @@ export default function AuthGuard({
     }
   }, [pathname, router]);
 
-useEffect(() => {
-  let mounted = true;
+  useEffect(() => {
+    let mounted = true;
 
-  const bootAuth = async () => {
-    try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+    const bootAuth = async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
 
+        if (!mounted) return;
+
+        const user = session?.user;
+
+        if (isPublicPath) {
+          setIsLoggedIn(!!user);
+          setCheckingAuth(false);
+          return;
+        }
+
+        if (!user) {
+          setIsLoggedIn(false);
+          setCheckingAuth(false);
+          return;
+        }
+
+        setIsLoggedIn(true);
+        setCheckingAuth(false);
+
+        const { profile, errorMessage } = await getOwnProfile(user.id);
+
+        if (!mounted) return;
+
+        if (errorMessage || !profile) {
+          console.warn("Perfil no disponible:", errorMessage || "Sin perfil");
+        }
+      } catch {
+        if (!mounted) return;
+        setIsLoggedIn(false);
+        setCheckingAuth(false);
+        setLoginMessage("No se pudo verificar tu sesión.");
+      }
+    };
+
+    bootAuth();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
       if (!mounted) return;
 
-      const user = session?.user;
-
       if (isPublicPath) {
-        setIsLoggedIn(!!user);
+        setIsLoggedIn(!!session?.user);
         setCheckingAuth(false);
         return;
       }
 
-      if (!user) {
+      if (event === "SIGNED_OUT") {
         setIsLoggedIn(false);
         setCheckingAuth(false);
         return;
       }
 
-      // Si hay sesión, mantenemos logueado al usuario
-      setIsLoggedIn(true);
-      setCheckingAuth(false);
-
-      // Verificación de perfil sin tumbar la sesión
-      const { profile, errorMessage } = await getOwnProfile(user.id);
-
-      if (!mounted) return;
-
-      // Si quieres, aquí solo muestras mensaje o haces logs,
-      // pero NO hagas signOut automático por un error temporal.
-      if (errorMessage || !profile) {
-        console.warn("Perfil no disponible:", errorMessage || "Sin perfil");
+      if (
+        event === "SIGNED_IN" ||
+        event === "TOKEN_REFRESHED" ||
+        event === "INITIAL_SESSION"
+      ) {
+        setIsLoggedIn(!!session?.user);
+        setCheckingAuth(false);
       }
-    } catch {
-      if (!mounted) return;
-      setIsLoggedIn(false);
-      setCheckingAuth(false);
-      setLoginMessage("No se pudo verificar tu sesión.");
-    }
-  };
+    });
 
-  bootAuth();
-
-  const {
-    data: { subscription },
-  } = supabase.auth.onAuthStateChange((event, session) => {
-    if (!mounted) return;
-
-    if (isPublicPath) {
-      setIsLoggedIn(!!session?.user);
-      setCheckingAuth(false);
-      return;
-    }
-
-    if (event === "SIGNED_OUT") {
-      setIsLoggedIn(false);
-      setCheckingAuth(false);
-      return;
-    }
-
-    if (
-      event === "SIGNED_IN" ||
-      event === "TOKEN_REFRESHED" ||
-      event === "INITIAL_SESSION"
-    ) {
-      setIsLoggedIn(!!session?.user);
-      setCheckingAuth(false);
-    }
-  });
-
-  return () => {
-    mounted = false;
-    subscription.unsubscribe();
-  };
-}, [isPublicPath]);
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, [isPublicPath]);
 
   useEffect(() => {
     if (checkingAuth) return;
@@ -368,29 +438,23 @@ useEffect(() => {
         return;
       }
 
-      const { error: profileInsertError } = await supabase
-        .from("profiles")
-        .insert({
-          id: user.id,
-          email: cleanEmail,
-          full_name: cleanName,
-          role: "user",
-          balance: 0,
-        });
+      const ensureProfileResult = await ensureProfileAfterRegister(
+        user.id,
+        cleanEmail,
+        cleanName
+      );
 
-      if (profileInsertError) {
+      if (!ensureProfileResult.ok) {
         await supabase.auth.signOut();
         setRegisterMessage(
-          getErrorMessage(
-            profileInsertError,
+          ensureProfileResult.message ||
             "La cuenta se creó, pero no se pudo crear el perfil."
-          )
         );
         setRegisterLoading(false);
         return;
       }
 
-      const { profile, errorMessage } = await getOwnProfile(user.id);
+      const { profile, errorMessage } = await waitForOwnProfile(user.id);
 
       if (errorMessage || !profile) {
         await supabase.auth.signOut();
@@ -577,6 +641,7 @@ useEffect(() => {
                             value={registerPassword}
                             onChange={(e) => setRegisterPassword(e.target.value)}
                             required
+                            minLength={6}
                             className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-black outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:py-4"
                           />
                         </div>
