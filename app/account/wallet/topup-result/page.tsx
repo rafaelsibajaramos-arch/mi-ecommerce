@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "../../../../lib/supabase";
@@ -27,7 +27,7 @@ function normalizeStatus(value: string | null | undefined) {
   return String(value || "PENDING").trim().toUpperCase();
 }
 
-export default function WalletTopupResultPage() {
+function WalletTopupResultContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -83,7 +83,11 @@ export default function WalletTopupResultPage() {
         if (normalizedStatus === "APPROVED") {
           setMessage("Tu recarga fue aprobada y ya quedó abonada en tu billetera.");
           setLoading(false);
-          if (intervalId) window.clearInterval(intervalId);
+
+          if (intervalId) {
+            window.clearInterval(intervalId);
+          }
+
           return;
         }
 
@@ -97,7 +101,11 @@ export default function WalletTopupResultPage() {
               "La recarga no se pudo completar. Intenta de nuevo."
           );
           setLoading(false);
-          if (intervalId) window.clearInterval(intervalId);
+
+          if (intervalId) {
+            window.clearInterval(intervalId);
+          }
+
           return;
         }
 
@@ -107,6 +115,7 @@ export default function WalletTopupResultPage() {
         setLoading(false);
       } catch (error) {
         if (cancelled) return;
+
         setMessage(
           error instanceof Error
             ? error.message
@@ -123,13 +132,17 @@ export default function WalletTopupResultPage() {
     }
 
     void syncStatus();
+
     intervalId = window.setInterval(() => {
       void syncStatus();
     }, 5000);
 
     return () => {
       cancelled = true;
-      if (intervalId) window.clearInterval(intervalId);
+
+      if (intervalId) {
+        window.clearInterval(intervalId);
+      }
     };
   }, [reference, router, transactionId]);
 
@@ -151,13 +164,17 @@ export default function WalletTopupResultPage() {
           <p className="text-sm uppercase tracking-[0.2em] text-white/45">
             Wallet
           </p>
+
           <h1 className="mt-2 text-3xl font-extrabold md:text-4xl">
             Estado de tu recarga
           </h1>
+
           <p className="mt-3 text-white/65">{message}</p>
 
           <div className="mt-6 flex flex-wrap items-center gap-3">
-            <span className={`rounded-full px-4 py-2 text-sm font-semibold ${badgeClass}`}>
+            <span
+              className={`rounded-full px-4 py-2 text-sm font-semibold ${badgeClass}`}
+            >
               {status === "APPROVED"
                 ? "Aprobada"
                 : status === "DECLINED"
@@ -221,5 +238,31 @@ export default function WalletTopupResultPage() {
         </div>
       </section>
     </main>
+  );
+}
+
+function WalletTopupResultFallback() {
+  return (
+    <main className="min-h-screen bg-transparent px-6 py-10 text-white">
+      <section className="mx-auto max-w-3xl">
+        <div className="rounded-[28px] border border-white/10 bg-slate-800/80 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-md md:p-8">
+          <p className="text-sm uppercase tracking-[0.2em] text-white/45">
+            Wallet
+          </p>
+          <h1 className="mt-2 text-3xl font-extrabold md:text-4xl">
+            Estado de tu recarga
+          </h1>
+          <p className="mt-3 text-white/65">Cargando información de la recarga...</p>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+export default function WalletTopupResultPage() {
+  return (
+    <Suspense fallback={<WalletTopupResultFallback />}>
+      <WalletTopupResultContent />
+    </Suspense>
   );
 }
