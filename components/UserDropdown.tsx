@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -13,17 +13,27 @@ type Profile = {
   role: string | null;
 };
 
-// Menú desplegable del usuario con accesos rápidos y cierre de sesión.
 export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean }) {
   const [open, setOpen] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
 
+  useEffect(() => {
+    loadProfile();
 
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(() => {
+      loadProfile();
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
-    // Cierra el menú cuando el usuario hace clic fuera del componente.
     const handleClickOutside = (event: MouseEvent) => {
       if (!dropdownRef.current) return;
       if (!dropdownRef.current.contains(event.target as Node)) {
@@ -35,7 +45,7 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const loadProfile = useCallback(async () => {
+  const loadProfile = async () => {
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -54,26 +64,8 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
     if (data) {
       setProfile(data);
     }
-  }, []);
+  };
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void loadProfile();
-    }, 0);
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(() => {
-      void loadProfile();
-    });
-
-    return () => {
-      window.clearTimeout(timer);
-      subscription.unsubscribe();
-    };
-  }, [loadProfile]);
-
-  // Cierra la sesión del usuario actual y limpia la navegación.
   const logout = async () => {
     await supabase.auth.signOut();
     router.replace("/");
@@ -254,6 +246,29 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
                   </svg>
                 </span>
                 <span>Mi billetera</span>
+              </Link>
+
+              <Link
+                href="/recargas-automaticas"
+                onClick={() => setOpen(false)}
+                className={itemClass}
+              >
+                <span className={iconWrapClass}>
+                  <svg
+                    viewBox="0 0 24 24"
+                    className="h-4 w-4 min-[390px]:h-5 min-[390px]:w-5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.9"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M12 3v18" />
+                    <path d="M17 8l-5-5-5 5" />
+                    <path d="M21 14v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  </svg>
+                </span>
+                <span>Recargas automáticas</span>
               </Link>
 
               <Link

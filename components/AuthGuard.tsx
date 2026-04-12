@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
 
@@ -11,7 +11,6 @@ type ProfileRow = {
   role: string | null;
 };
 
-// Extrae un mensaje legible desde un error desconocido y usa un texto por defecto cuando hace falta.
 function getErrorMessage(error: unknown, fallback: string) {
   if (
     error &&
@@ -25,12 +24,6 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
-// Crea una pausa asíncrona corta para reintentos o esperas controladas.
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// Componente que protege la aplicación, gestiona login y registro, y bloquea la UI cuando no hay sesión válida.
 export default function AuthGuard({
   children,
 }: {
@@ -42,6 +35,7 @@ export default function AuthGuard({
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [mode, setMode] = useState<AuthMode>("login");
+  const [isRecoveryFlow, setIsRecoveryFlow] = useState(false);
 
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -54,44 +48,9 @@ export default function AuthGuard({
   const [registerLoading, setRegisterLoading] = useState(false);
   const [registerMessage, setRegisterMessage] = useState("");
 
-  const recoveryState = useMemo(() => {
-    if (typeof window === "undefined") {
-      return {
-        isRecoveryFlow: pathname === "/reset-password",
-        shouldRedirect: false,
-        redirectPath: "",
-      };
-    }
+  const publicPaths = ["/reset-password", "/recargas-automaticas"];
+  const isPublicPath = publicPaths.includes(pathname) || isRecoveryFlow;
 
-    const searchParams = new URLSearchParams(window.location.search);
-    const hashParams = new URLSearchParams(
-      window.location.hash.replace(/^#/, "")
-    );
-
-    const hasRecoveryCode = Boolean(searchParams.get("code"));
-    const hasRecoveryTokens =
-      hashParams.get("type") === "recovery" &&
-      Boolean(hashParams.get("access_token")) &&
-      Boolean(hashParams.get("refresh_token"));
-
-    const isRecoveryFlow =
-      pathname === "/reset-password" || hasRecoveryCode || hasRecoveryTokens;
-
-    const shouldRedirect =
-      (hasRecoveryCode || hasRecoveryTokens) && pathname !== "/reset-password";
-
-    return {
-      isRecoveryFlow,
-      shouldRedirect,
-      redirectPath: shouldRedirect
-        ? `/reset-password${window.location.search}${window.location.hash}`
-        : "",
-    };
-  }, [pathname]);
-
-  const isPublicPath = recoveryState.isRecoveryFlow;
-
-  // Consulta el perfil del usuario autenticado y devuelve un resultado uniforme.
   const getOwnProfile = async (
     userId: string
   ): Promise<{ profile: ProfileRow | null; errorMessage: string | null }> => {
@@ -134,79 +93,6 @@ export default function AuthGuard({
     }
   };
 
-  // Reintenta la consulta del perfil durante unos segundos hasta que exista o falle.
-  const waitForOwnProfile = async (
-    userId: string,
-    retries = 6,
-    delayMs = 500
-  ): Promise<{ profile: ProfileRow | null; errorMessage: string | null }> => {
-    for (let attempt = 0; attempt < retries; attempt += 1) {
-      const result = await getOwnProfile(userId);
-
-      if (result.profile && !result.errorMessage) {
-        return result;
-      }
-
-      if (attempt < retries - 1) {
-        await sleep(delayMs);
-      }
-    }
-
-    return getOwnProfile(userId);
-  };
-
-  // Garantiza que el perfil exista después del registro y resuelve duplicados sin romper la sesión.
-  const ensureProfileAfterRegister = async (
-    userId: string,
-    email: string,
-    fullName: string
-  ) => {
-    const { error: profileInsertError } = await supabase.from("profiles").insert({
-      id: userId,
-      email,
-      full_name: fullName,
-      role: "user",
-      balance: 0,
-    });
-
-    if (!profileInsertError) {
-      return { ok: true, message: null as string | null };
-    }
-
-    const profileInsertMessage = getErrorMessage(
-      profileInsertError,
-      "La cuenta se creó, pero no se pudo crear el perfil."
-    );
-
-    const isDuplicateProfileError =
-      profileInsertMessage.includes("duplicate key value") ||
-      profileInsertMessage.includes("profiles_pkey") ||
-      profileInsertMessage.includes("duplicate key") ||
-      profileInsertMessage.includes("23505");
-
-    if (!isDuplicateProfileError) {
-      return { ok: false, message: profileInsertMessage };
-    }
-
-    const { error: profileUpdateError } = await supabase
-      .from("profiles")
-      .update({
-        email,
-        full_name: fullName,
-      })
-      .eq("id", userId);
-
-    if (profileUpdateError) {
-      console.warn(
-        "El perfil ya existía y no se pudo actualizar después del registro:",
-        profileUpdateError
-      );
-    }
-
-    return { ok: true, message: null as string | null };
-  };
-
-  // Redirige al usuario según el rol detectado en su perfil.
   const redirectByRole = (role: string | null | undefined) => {
     if (role === "admin") {
       router.replace("/admin");
@@ -217,7 +103,6 @@ export default function AuthGuard({
     router.refresh();
   };
 
-  // Cierra la sesión cuando el perfil es inválido para evitar estados inconsistentes.
   const forceLogoutInvalidProfile = async (message: string) => {
     try {
       await supabase.auth.signOut();
@@ -232,15 +117,36 @@ export default function AuthGuard({
   };
 
   useEffect(() => {
-    if (recoveryState.shouldRedirect && recoveryState.redirectPath) {
-      router.replace(recoveryState.redirectPath);
+    if (typeof window === "undefined") return;
+
+    const searchParams = new URLSearchParams(window.location.search);
+    const hashParams = new URLSearchParams(
+      window.location.hash.replace(/^#/, "")
+    );
+
+    const hasRecoveryCode = Boolean(searchParams.get("code"));
+    const hasRecoveryTokens =
+      hashParams.get("type") === "recovery" &&
+      Boolean(hashParams.get("access_token")) &&
+      Boolean(hashParams.get("refresh_token"));
+
+    if (!hasRecoveryCode && !hasRecoveryTokens) {
+      setIsRecoveryFlow(pathname === "/reset-password");
+      return;
     }
-  }, [recoveryState.redirectPath, recoveryState.shouldRedirect, router]);
+
+    setIsRecoveryFlow(true);
+
+    if (pathname !== "/reset-password") {
+      router.replace(
+        `/reset-password${window.location.search}${window.location.hash}`
+      );
+    }
+  }, [pathname, router]);
 
   useEffect(() => {
     let mounted = true;
 
-    // Realiza la verificación inicial de sesión y estado del perfil al montar el componente.
     const bootAuth = async () => {
       try {
         const {
@@ -330,7 +236,6 @@ export default function AuthGuard({
     }
   }, [checkingAuth, isLoggedIn, isPublicPath]);
 
-  // Procesa el inicio de sesión y valida que el usuario tenga un perfil utilizable.
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginLoading(true);
@@ -379,7 +284,6 @@ export default function AuthGuard({
     }
   };
 
-  // Envía el flujo de recuperación de contraseña al correo indicado.
   const handleForgotPassword = async () => {
     setLoginMessage("");
 
@@ -410,7 +314,6 @@ export default function AuthGuard({
     setLoginMessage("Te enviamos un enlace para restablecer tu contraseña.");
   };
 
-  // Crea la cuenta, asegura el perfil y redirige al usuario al finalizar.
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setRegisterLoading(true);
@@ -462,34 +365,52 @@ export default function AuthGuard({
         return;
       }
 
-      const ensureProfileResult = await ensureProfileAfterRegister(
-        user.id,
-        cleanEmail,
-        cleanName
-      );
+      const { error: profileInsertError } = await supabase.from("profiles").insert({
+        id: user.id,
+        email: cleanEmail,
+        full_name: cleanName,
+        role: "user",
+        balance: 0,
+      });
 
-      if (!ensureProfileResult.ok) {
-        await supabase.auth.signOut();
-        setRegisterMessage(
-          ensureProfileResult.message ||
-            "La cuenta se creó, pero no se pudo crear el perfil."
+      if (profileInsertError) {
+        const profileInsertMessage = getErrorMessage(
+          profileInsertError,
+          "La cuenta se creó, pero no se pudo crear el perfil."
         );
-        setRegisterLoading(false);
-        return;
-      }
 
-      const { profile, errorMessage } = await waitForOwnProfile(user.id);
+        const isDuplicateProfileError =
+          profileInsertMessage.includes("duplicate key value") ||
+          profileInsertMessage.includes("profiles_pkey") ||
+          profileInsertMessage.includes("duplicate key") ||
+          profileInsertMessage.includes("23505");
 
-      if (errorMessage || !profile) {
-        await supabase.auth.signOut();
-        setRegisterMessage(errorMessage || "No se pudo cargar tu perfil.");
-        setRegisterLoading(false);
-        return;
+        if (!isDuplicateProfileError) {
+          await supabase.auth.signOut();
+          setRegisterMessage(profileInsertMessage);
+          setRegisterLoading(false);
+          return;
+        }
+
+        const { error: profileUpdateError } = await supabase
+          .from("profiles")
+          .update({
+            email: cleanEmail,
+            full_name: cleanName,
+          })
+          .eq("id", user.id);
+
+        if (profileUpdateError) {
+          console.warn(
+            "El perfil ya existía y no se pudo actualizar después del registro:",
+            profileUpdateError
+          );
+        }
       }
 
       setIsLoggedIn(true);
       setRegisterLoading(false);
-      redirectByRole(profile.role);
+      redirectByRole("user");
     } catch (error) {
       setRegisterMessage(
         getErrorMessage(error, "Ocurrió un error creando la cuenta.")

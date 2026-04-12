@@ -4,11 +4,13 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "../../../../lib/supabase";
+import { calculateWompiFeeForChargeAmount } from "../../../../lib/wompiPricing";
 
 type TopupRow = {
   id: string;
   reference: string;
   amount: number;
+  amount_in_cents: number;
   status: string | null;
   wompi_transaction_id: string | null;
   wompi_status: string | null;
@@ -49,7 +51,7 @@ function WalletTopupResultContent() {
         } = await supabase.auth.getSession();
 
         if (!session?.access_token) {
-          router.push("/login");
+          router.push("/");
           return;
         }
 
@@ -157,6 +159,11 @@ function WalletTopupResultContent() {
       ? "border-red-400/20 bg-red-400/10 text-red-300"
       : "border-amber-400/20 bg-amber-400/10 text-amber-300";
 
+  const totalPaid = Number(topup?.amount_in_cents || 0) / 100;
+  const creditedAmount = Number(topup?.amount || 0);
+  const estimatedFee = topup ? Math.max(0, totalPaid - creditedAmount) : 0;
+  const wompiEstimatedFee = totalPaid > 0 ? calculateWompiFeeForChargeAmount(totalPaid) : 0;
+
   return (
     <main className="min-h-screen bg-transparent px-6 py-10 text-white">
       <section className="mx-auto max-w-3xl">
@@ -203,12 +210,35 @@ function WalletTopupResultContent() {
               </p>
             </div>
 
+            <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-5">
+              <p className="text-xs uppercase tracking-[0.18em] text-emerald-300/70">
+                Saldo acreditado
+              </p>
+              <p className="mt-2 text-2xl font-black text-emerald-300">
+                {formatMoney(creditedAmount)}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
             <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
               <p className="text-xs uppercase tracking-[0.18em] text-white/35">
-                Monto
+                Total pagado en checkout
               </p>
               <p className="mt-2 text-xl font-black text-white">
-                {formatMoney(topup?.amount)}
+                {formatMoney(totalPaid)}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+              <p className="text-xs uppercase tracking-[0.18em] text-white/35">
+                Costo trasladado
+              </p>
+              <p className="mt-2 text-xl font-black text-white">
+                {formatMoney(estimatedFee)}
+              </p>
+              <p className="mt-2 text-xs text-white/45">
+                Comisión estimada Wompi sobre el pago: {formatMoney(wompiEstimatedFee)}
               </p>
             </div>
           </div>
@@ -221,13 +251,12 @@ function WalletTopupResultContent() {
               Volver a mi billetera
             </Link>
 
-            <button
-              type="button"
-              onClick={() => window.location.reload()}
+            <Link
+              href="/recargas-automaticas"
               className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-white/80 transition hover:bg-white/10"
             >
-              Actualizar estado
-            </button>
+              Volver a recargas automáticas
+            </Link>
           </div>
 
           {loading && (

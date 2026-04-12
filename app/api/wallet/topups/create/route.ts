@@ -6,6 +6,11 @@ import {
   getWompiCheckoutBaseUrl,
   getWompiPublicKey,
 } from "../../../../../lib/wompi";
+import {
+  calculateTopupCustomerPaysFee,
+  calculateTopupFeeDiscountedFromBalance,
+  type PricingMode,
+} from "../../../../../lib/wompiPricing";
 
 export const runtime = "nodejs";
 
@@ -96,13 +101,37 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     const amount = Number(body?.amount || 0);
+    const pricingMode: PricingMode =
+      body?.pricingMode === "fee_discounted_from_balance"
+        ? "fee_discounted_from_balance"
+        : "customer_pays_fee";
 
     if (!Number.isFinite(amount) || amount < 1000) {
       return jsonError("El monto mínimo de recarga es $ 1.000 COP.");
     }
 
     const normalizedAmount = Math.round(amount);
-    const amountInCents = normalizedAmount * 100;
+
+    let creditedAmount = 0;
+    let payableAmount = 0;
+
+    if (pricingMode === "fee_discounted_from_balance") {
+      const pricingSummary = calculateTopupFeeDiscountedFromBalance(normalizedAmount);
+      creditedAmount = pricingSummary.netCreditAmount;
+      payableAmount = pricingSummary.paidAmount;
+    } else {
+      const pricingSummary = calculateTopupCustomerPaysFee(normalizedAmount);
+      creditedAmount = pricingSummary.targetCreditAmount;
+      payableAmount = pricingSummary.totalToPay;
+    }
+
+    if (creditedAmount < 1000) {
+      return jsonError(
+        "El saldo neto a acreditar sería muy bajo. Sube el monto para continuar."
+      );
+    }
+
+    const amountInCents = payableAmount * 100;
     const currency = "COP";
     const reference = generateTopupReference(user.id);
 
@@ -151,7 +180,7 @@ export async function POST(request: NextRequest) {
     const { error: insertError } = await supabaseAdmin.from("wallet_topups").insert({
       user_id: user.id,
       reference,
-      amount: normalizedAmount,
+      amount: creditedAmount,
       amount_in_cents: amountInCents,
       currency,
       provider: "WOMPI",
@@ -171,9 +200,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       ok: true,
       reference,
-      amount: normalizedAmount,
+      amount: creditedAmount,
       amount_in_cents: amountInCents,
       currency,
+      payable_amount: payableAmount,
+      processing_fee: Math.max(0, payableAmount - creditedAmount),
+      pricing_mode: pricingMode,
       checkout_url: checkoutUrl,
     });
   } catch (error) {
