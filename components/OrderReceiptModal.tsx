@@ -22,9 +22,10 @@ export type ReceiptOrder = {
       license_text: string;
     }>;
   }>;
+  customer_email?: string;
+  customer_full_name?: string;
 };
 
-// Modal contenedor que muestra el comprobante de compra cuando existe un pedido seleccionado.
 export default function OrderReceiptModal({
   order,
   onClose,
@@ -34,10 +35,11 @@ export default function OrderReceiptModal({
 }) {
   if (!order) return null;
 
-  return <OrderReceiptModalContent key={order.id} order={order} onClose={onClose} />;
+  return (
+    <OrderReceiptModalContent key={order.id} order={order} onClose={onClose} />
+  );
 }
 
-// Contenido visual e interactivo del comprobante con productos, licencias y acciones de copiado.
 function OrderReceiptModalContent({
   order,
   onClose,
@@ -52,7 +54,6 @@ function OrderReceiptModalContent({
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
-    // Cierra el modal o limpia estados cuando el usuario presiona Escape.
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
@@ -65,12 +66,10 @@ function OrderReceiptModalContent({
     };
   }, [onClose]);
 
-  // Formatea un valor numérico como dinero para mostrarlo en la interfaz.
   const formatMoney = (value: number) => {
     return `$ ${Number(value || 0).toLocaleString("es-CO")}`;
   };
 
-  // Convierte una fecha técnica en un texto legible para la interfaz.
   const formatDate = (date: string) => {
     try {
       return new Date(date).toLocaleDateString("es-CO", {
@@ -83,15 +82,12 @@ function OrderReceiptModalContent({
     }
   };
 
-  // Formatea el número de pedido con longitud fija para mostrarlo mejor.
   const formatOrderNumber = (value: number | null) => {
     if (!value) return "-----";
     return String(value).padStart(5, "0");
   };
 
-  // Convierte un estado interno en una etiqueta legible para el usuario.
   const getStatusLabel = (status: string) => {
-    // Normaliza d para facilitar comparaciones.
     const normalized = (status || "").toLowerCase();
 
     if (normalized === "completed") return "Entregado";
@@ -103,9 +99,7 @@ function OrderReceiptModalContent({
     return status || "Completado";
   };
 
-  // Devuelve las clases visuales adecuadas según el estado mostrado.
   const getStatusClasses = (status: string) => {
-    // Normaliza d para facilitar comparaciones.
     const normalized = (status || "").toLowerCase();
 
     if (normalized === "completed" || normalized === "paid") {
@@ -127,18 +121,18 @@ function OrderReceiptModalContent({
     return "border border-white/10 bg-white/5 text-white/80";
   };
 
-  // Construye el texto consolidado que se copiará al portapapeles.
   const buildLicenseCopyText = (
     productName: string,
     variantName: string | null,
     licenseText: string
   ) => {
-    const title = variantName ? `${productName} - ${variantName}` : productName;
+    const title = variantName
+      ? `${productName} - ${variantName}`
+      : productName;
 
     return `${title}\n\n${licenseText}`;
   };
 
-  // Copia una licencia individual al portapapeles.
   const copyLicense = async (
     productName: string,
     variantName: string | null,
@@ -162,7 +156,6 @@ function OrderReceiptModalContent({
     }
   };
 
-  // Copia en bloque todas las licencias visibles del comprobante.
   const copyAllLicenses = async () => {
     try {
       const blocks = order.items.flatMap((item) =>
@@ -213,11 +206,11 @@ function OrderReceiptModalContent({
           </button>
         </div>
 
-        <div className="max-h-[65vh] space-y-4 overflow-y-auto p-4 md:p-5">
+        <div className="max-h-[65vh] space-y-4 overflow-y-auto p-4 text-white md:p-5">
           <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
               <p className="text-[10px] text-white/40">Pedido</p>
-              <p className="mt-2 text-sm font-bold">
+              <p className="mt-2 text-sm font-bold text-white">
                 {formatOrderNumber(order.order_number)}
               </p>
             </div>
@@ -235,7 +228,9 @@ function OrderReceiptModalContent({
 
             <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
               <p className="text-[10px] text-white/40">Fecha</p>
-              <p className="mt-2 text-xs">{formatDate(order.created_at)}</p>
+              <p className="mt-2 text-xs text-white/85">
+                {formatDate(order.created_at)}
+              </p>
             </div>
 
             <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
@@ -247,7 +242,7 @@ function OrderReceiptModalContent({
           </section>
 
           <section className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
-            <h4 className="text-base font-bold">Servicios</h4>
+            <h4 className="text-base font-bold text-white">Servicios</h4>
 
             <div className="mt-3 space-y-3">
               {order.items.map((item) => (
@@ -257,7 +252,7 @@ function OrderReceiptModalContent({
                 >
                   <div className="flex flex-col gap-2 sm:flex-row sm:justify-between">
                     <div>
-                      <p className="text-sm font-bold">
+                      <p className="text-sm font-bold text-white">
                         {item.product_name}
                         {item.variant_name ? ` - ${item.variant_name}` : ""}
                       </p>
@@ -266,7 +261,7 @@ function OrderReceiptModalContent({
                       </p>
                     </div>
 
-                    <div className="text-xs sm:text-right">
+                    <div className="text-xs text-white/75 sm:text-right">
                       <p>Cant: {item.quantity}</p>
                       <p className="font-bold text-emerald-300">
                         {formatMoney(item.price * item.quantity)}
@@ -280,13 +275,13 @@ function OrderReceiptModalContent({
 
           <section className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <h4 className="text-base font-bold">Licencias</h4>
+              <h4 className="text-base font-bold text-white">Licencias</h4>
 
               {order.items.some((item) => item.licenses.length > 0) && (
                 <button
                   type="button"
                   onClick={copyAllLicenses}
-                  className="rounded bg-emerald-600 px-3 py-2 text-xs hover:bg-emerald-500"
+                  className="rounded bg-emerald-600 px-3 py-2 text-xs text-black hover:bg-emerald-500"
                 >
                   {copiedAllLicenses ? "Copiado todo" : "Copiar todo"}
                 </button>
@@ -303,12 +298,12 @@ function OrderReceiptModalContent({
                       key={license.id}
                       className="rounded-xl border border-white/10 bg-black/20 p-3"
                     >
-                      <p className="mb-2 text-xs font-bold">
+                      <p className="mb-2 text-xs font-bold text-white">
                         {item.product_name}
                         {item.variant_name ? ` - ${item.variant_name}` : ""}
                       </p>
 
-                      <div className="break-all rounded bg-black/60 p-2 text-xs">
+                      <div className="break-all rounded bg-black/60 p-2 text-xs text-white">
                         {license.license_text}
                       </div>
 
@@ -322,7 +317,7 @@ function OrderReceiptModalContent({
                               license.id
                             )
                           }
-                          className="rounded bg-blue-600 px-3 py-1 text-xs hover:bg-blue-500"
+                          className="rounded bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-500"
                         >
                           {copiedLicenseId === license.id ? "Copiado" : "Copiar"}
                         </button>
@@ -333,6 +328,32 @@ function OrderReceiptModalContent({
               </div>
             )}
           </section>
+
+          {(order.customer_email || order.customer_full_name) && (
+            <section className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+              <h4 className="text-base font-bold text-white">Cliente</h4>
+
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                  <p className="text-xs uppercase tracking-[0.16em] text-white/45">
+                    Correo
+                  </p>
+                  <p className="mt-2 break-all text-sm font-bold text-white">
+                    {order.customer_email || "Sin correo"}
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                  <p className="text-xs uppercase tracking-[0.16em] text-white/45">
+                    Nombre
+                  </p>
+                  <p className="mt-2 text-sm font-bold text-white">
+                    {order.customer_full_name || "Sin nombre"}
+                  </p>
+                </div>
+              </div>
+            </section>
+          )}
         </div>
       </div>
     </div>
