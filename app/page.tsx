@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { useCart } from "../context/CartContext";
 import Footer from "../components/Footer";
@@ -75,7 +75,6 @@ type ReceiptLicenseRow = {
 const PRODUCTS_PER_PAGE = 12;
 const SEARCH_DEBOUNCE_MS = 350;
 
-// Página principal de la tienda con productos, variantes, carrito y comprobante reciente.
 export default function HomePage() {
   const { addToCart } = useCart();
 
@@ -101,177 +100,43 @@ export default function HomePage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalProducts, setTotalProducts] = useState(0);
 
-  const fetchRole = useCallback(async () => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+  const catalogRequestIdRef = useRef(0);
+  const categoryRequestIdRef = useRef(0);
 
-    if (!user) {
-      setIsAdmin(false);
-      return;
+  const isAbortLikeError = (error: unknown) => {
+    if (!error) return false;
+
+    if (error instanceof DOMException && error.name === "AbortError") {
+      return true;
     }
 
-    const { data } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-
-    setIsAdmin(data?.role === "admin");
-  }, []);
-
-  const fetchCategories = useCallback(async () => {
-    const { data, error } = await supabase
-      .from("products")
-      .select("category")
-      .eq("is_active", true);
-
-    if (error) {
-      return;
-    }
-
-    const counts = new Map<string, number>();
-
-    ((data as { category: string | null }[]) || []).forEach((item) => {
-      const category = (item.category || "").trim();
-      if (!category) return;
-      counts.set(category, (counts.get(category) || 0) + 1);
-    });
-
-    const ordered = Array.from(counts.entries())
-      .sort((a, b) => a[0].localeCompare(b[0], "es", { sensitivity: "base" }))
-      .map(([name, count]) => ({ name, count }));
-
-    setCategories([
-      {
-        name: "Todas",
-        count: ((data as { category: string | null }[]) || []).length,
-      },
-      ...ordered,
-    ]);
-  }, []);
-
-  const fetchProductsPage = useCallback(async () => {
-    setLoading(true);
-    setMessage("");
-
-    const from = (currentPage - 1) * PRODUCTS_PER_PAGE;
-    const to = from + PRODUCTS_PER_PAGE - 1;
-
-    let query = supabase
-      .from("products")
-      .select("*", { count: "exact" })
-      .eq("is_active", true)
-      .order("name", { ascending: true });
-
-    if (selectedCategory !== "Todas") {
-      query = query.eq("category", selectedCategory);
-    }
-
-    if (debouncedSearch) {
-      const term = debouncedSearch.replace(/[%]/g, "").trim();
-      query = query.or(
-        `name.ilike.%${term}%,category.ilike.%${term}%,description.ilike.%${term}%`
+    if (error instanceof Error) {
+      const text = `${error.name} ${error.message}`.toLowerCase();
+      return (
+        text.includes("aborterror") ||
+        text.includes("aborted") ||
+        text.includes("lock request is aborted")
       );
     }
 
-    const { data, error, count } = await query.range(from, to);
+    if (typeof error === "object" && error !== null) {
+      const message =
+        "message" in error && typeof error.message === "string"
+          ? error.message.toLowerCase()
+          : "";
 
-    if (error) {
-      setMessage("Error cargando productos: " + error.message);
-      setProducts([]);
-      setVariantsMap({});
-      setSelectedVariants({});
-      setTotalProducts(0);
-      setLoading(false);
-      return;
+      return (
+        message.includes("aborterror") ||
+        message.includes("aborted") ||
+        message.includes("lock request is aborted")
+      );
     }
 
-    const nextTotalProducts = count || 0;
-    const nextTotalPages = Math.max(
-      1,
-      Math.ceil(nextTotalProducts / PRODUCTS_PER_PAGE)
-    );
+    return false;
+  };
 
-    setTotalProducts(nextTotalProducts);
-
-    if (currentPage > nextTotalPages) {
-      setLoading(false);
-      setCurrentPage(nextTotalPages);
-      return;
-    }
-
-    const safeProducts = (data as Product[]) || [];
-    setProducts(safeProducts);
-
-    const variableProducts = safeProducts.filter(
-      (product) => product.product_type === "variable"
-    );
-
-    if (variableProducts.length > 0) {
-      const productIds = variableProducts.map((product) => product.id);
-
-      const { data: variantsData, error: variantsError } = await supabase
-        .from("product_variants")
-        .select("*")
-        .in("product_id", productIds)
-        .eq("is_active", true)
-        .order("sort_order", { ascending: true })
-        .order("created_at", { ascending: true });
-
-      if (variantsError) {
-        setVariantsMap({});
-        setSelectedVariants({});
-        setLoading(false);
-        return;
-      }
-
-      const grouped: Record<string, ProductVariant[]> = {};
-      const nextSelected: Record<string, string> = {};
-
-      ((variantsData as ProductVariant[]) || []).forEach((variant) => {
-        if (!grouped[variant.product_id]) {
-          grouped[variant.product_id] = [];
-        }
-        grouped[variant.product_id].push(variant);
-      });
-
-      setSelectedVariants((prev) => {
-        Object.entries(grouped).forEach(([productId, variants]) => {
-          const previousSelection = prev[productId];
-          const stillExists = variants.some(
-            (variant) => variant.id === previousSelection
-          );
-
-          if (stillExists && previousSelection) {
-            nextSelected[productId] = previousSelection;
-          } else if (variants.length > 0) {
-            nextSelected[productId] = variants[0].id;
-          }
-        });
-
-        return nextSelected;
-      });
-
-      setVariantsMap(grouped);
-    } else {
-      setVariantsMap({});
-      setSelectedVariants({});
-    }
-
-    setLoading(false);
-  }, [currentPage, debouncedSearch, selectedCategory]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void fetchRole();
-      void fetchCategories();
-    }, 0);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [fetchCategories, fetchRole]);
+  const sleep = (ms: number) =>
+    new Promise((resolve) => window.setTimeout(resolve, ms));
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -281,17 +146,7 @@ export default function HomePage() {
     return () => window.clearTimeout(timeout);
   }, [search]);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void fetchProductsPage();
-    }, 0);
 
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [fetchProductsPage]);
-
-  // Formatea price para mostrarlo en la interfaz.
   const formatPrice = (value: number | string | null | undefined) => {
     const numericValue = Math.round(Number(value || 0));
     return numericValue.toLocaleString("es-CO");
@@ -300,7 +155,6 @@ export default function HomePage() {
   useEffect(() => {
     if (!quickViewProduct) return;
 
-    // Cierra el modal o limpia estados cuando el usuario presiona Escape.
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setQuickViewProduct(null);
@@ -318,7 +172,6 @@ export default function HomePage() {
   }, [quickViewProduct]);
 
   useEffect(() => {
-    // Guarda el comprobante reciente cuando una compra termina correctamente.
     const handleReceiptReady = (event: Event) => {
       const customEvent = event as CustomEvent<ReceiptOrder>;
 
@@ -344,7 +197,6 @@ export default function HomePage() {
 
     let cancelled = false;
 
-    // Intenta reconstruir el último comprobante del usuario para mostrarlo después de comprar.
     const loadRecentOrderReceipt = async () => {
       try {
         setReceiptMessage("");
@@ -494,24 +346,263 @@ export default function HomePage() {
     };
   }, []);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedCategory, debouncedSearch]);
+
+  const fetchRole = useCallback(async () => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      setIsAdmin(false);
+      return;
+    }
+
+    const { data } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+
+    setIsAdmin(data?.role === "admin");
+  }, []);
+
+  const fetchCategories = useCallback(async () => {
+    const requestId = ++categoryRequestIdRef.current;
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const { data, error } = await supabase
+          .from("products")
+          .select("category")
+          .eq("is_active", true);
+
+        if (requestId !== categoryRequestIdRef.current) {
+          return;
+        }
+
+        if (error) {
+          throw error;
+        }
+
+        const counts = new Map<string, number>();
+
+        ((data as { category: string | null }[]) || []).forEach((item) => {
+          const category = (item.category || "").trim();
+          if (!category) return;
+          counts.set(category, (counts.get(category) || 0) + 1);
+        });
+
+        const ordered = Array.from(counts.entries())
+          .sort((a, b) =>
+            a[0].localeCompare(b[0], "es", { sensitivity: "base" })
+          )
+          .map(([name, count]) => ({ name, count }));
+
+        setCategories([
+          {
+            name: "Todas",
+            count: ((data as { category: string | null }[]) || []).length,
+          },
+          ...ordered,
+        ]);
+
+        return;
+      } catch (error) {
+        if (requestId !== categoryRequestIdRef.current) {
+          return;
+        }
+
+        if (isAbortLikeError(error) && attempt === 0) {
+          await sleep(350);
+          continue;
+        }
+
+        return;
+      }
+    }
+  }, []);
+
+  const fetchProductsPage = useCallback(async () => {
+    const requestId = ++catalogRequestIdRef.current;
+
+    setLoading(true);
+    setMessage("");
+
+    const from = (currentPage - 1) * PRODUCTS_PER_PAGE;
+    const to = from + PRODUCTS_PER_PAGE - 1;
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        let query = supabase
+          .from("products")
+          .select("*", { count: "exact" })
+          .eq("is_active", true)
+          .order("name", { ascending: true });
+
+        if (selectedCategory !== "Todas") {
+          query = query.eq("category", selectedCategory);
+        }
+
+        if (debouncedSearch) {
+          const term = debouncedSearch.replace(/[%]/g, "").trim();
+          query = query.or(
+            `name.ilike.%${term}%,category.ilike.%${term}%,description.ilike.%${term}%`
+          );
+        }
+
+        const { data, error, count } = await query.range(from, to);
+
+        if (requestId !== catalogRequestIdRef.current) {
+          return;
+        }
+
+        if (error) {
+          throw error;
+        }
+
+        const safeProducts = (data as Product[]) || [];
+        setProducts(safeProducts);
+        setTotalProducts(count || 0);
+
+        const variableProducts = safeProducts.filter(
+          (product) => product.product_type === "variable"
+        );
+
+        if (variableProducts.length > 0) {
+          const productIds = variableProducts.map((product) => product.id);
+
+          const { data: variantsData, error: variantsError } = await supabase
+            .from("product_variants")
+            .select("*")
+            .in("product_id", productIds)
+            .eq("is_active", true)
+            .order("sort_order", { ascending: true })
+            .order("created_at", { ascending: true });
+
+          if (requestId !== catalogRequestIdRef.current) {
+            return;
+          }
+
+          if (variantsError) {
+            throw variantsError;
+          }
+
+          const grouped: Record<string, ProductVariant[]> = {};
+          const nextSelected: Record<string, string> = {};
+
+          ((variantsData as ProductVariant[]) || []).forEach((variant) => {
+            if (!grouped[variant.product_id]) {
+              grouped[variant.product_id] = [];
+            }
+            grouped[variant.product_id].push(variant);
+          });
+
+          setSelectedVariants((prev) => {
+            Object.entries(grouped).forEach(([productId, variants]) => {
+              const previousSelection = prev[productId];
+              const stillExists = variants.some(
+                (variant) => variant.id === previousSelection
+              );
+
+              if (stillExists && previousSelection) {
+                nextSelected[productId] = previousSelection;
+              } else if (variants.length > 0) {
+                nextSelected[productId] = variants[0].id;
+              }
+            });
+
+            return nextSelected;
+          });
+
+          setVariantsMap(grouped);
+        } else {
+          setVariantsMap({});
+          setSelectedVariants({});
+        }
+
+        setLoading(false);
+        return;
+      } catch (error) {
+        if (requestId !== catalogRequestIdRef.current) {
+          return;
+        }
+
+        if (isAbortLikeError(error) && attempt === 0) {
+          await sleep(400);
+          continue;
+        }
+
+        setMessage(
+          `Error cargando productos: ${
+            error instanceof Error ? error.message : "Error desconocido"
+          }`
+        );
+        setProducts([]);
+        setVariantsMap({});
+        setSelectedVariants({});
+        setTotalProducts(0);
+        setLoading(false);
+        return;
+      }
+    }
+  }, [currentPage, debouncedSearch, selectedCategory]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const run = async () => {
+      if (!mounted) return;
+      await fetchRole();
+      if (!mounted) return;
+      await fetchCategories();
+    };
+
+    void run();
+
+    return () => {
+      mounted = false;
+    };
+  }, [fetchCategories, fetchRole]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const run = async () => {
+      if (!mounted) return;
+      await fetchProductsPage();
+    };
+
+    void run();
+
+    return () => {
+      mounted = false;
+    };
+  }, [fetchProductsPage]);
+
   const totalPages = useMemo(() => {
     return Math.max(1, Math.ceil(totalProducts / PRODUCTS_PER_PAGE));
   }, [totalProducts]);
-
-  const effectiveCurrentPage = Math.min(currentPage, totalPages);
 
   const visibleRange = useMemo(() => {
     if (totalProducts === 0) {
       return { start: 0, end: 0 };
     }
 
-    const start = (effectiveCurrentPage - 1) * PRODUCTS_PER_PAGE + 1;
-    const end = Math.min(effectiveCurrentPage * PRODUCTS_PER_PAGE, totalProducts);
+    const start = (currentPage - 1) * PRODUCTS_PER_PAGE + 1;
+    const end = Math.min(currentPage * PRODUCTS_PER_PAGE, totalProducts);
 
     return { start, end };
-  }, [effectiveCurrentPage, totalProducts]);
+  }, [totalProducts, currentPage]);
 
-  // Devuelve la variante actualmente seleccionada para un producto.
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
   const getSelectedVariant = (productId: string) => {
     const variants = variantsMap[productId] || [];
     const selectedVariantId = selectedVariants[productId];
@@ -520,7 +611,6 @@ export default function HomePage() {
     );
   };
 
-  // Calcula el precio que debe mostrarse según el producto y la variante elegida.
   const getVisiblePrice = (product: Product) => {
     if (product.product_type === "variable") {
       const selectedVariant = getSelectedVariant(product.id);
@@ -529,7 +619,6 @@ export default function HomePage() {
     return Number(product.price);
   };
 
-  // Calcula el stock visible combinando producto base y variante cuando aplica.
   const getVisibleStock = (product: Product) => {
     if (product.product_type === "variable") {
       const selectedVariant = getSelectedVariant(product.id);
@@ -545,7 +634,6 @@ export default function HomePage() {
     return Number(product.stock);
   };
 
-  // Actualiza la variante seleccionada por producto en la vista principal.
   const handleVariantChange = (
     e: React.ChangeEvent<HTMLSelectElement>,
     productId: string
@@ -558,7 +646,6 @@ export default function HomePage() {
     }));
   };
 
-  // Agrega un producto o variante al carrito validando stock y datos visibles.
   const handleAddToCart = (
     e: React.MouseEvent<HTMLButtonElement>,
     product: Product
@@ -604,12 +691,10 @@ export default function HomePage() {
     });
   };
 
-  // Abre la vista rápida del producto seleccionado.
   const handleOpenQuickView = (product: Product) => {
     setQuickViewProduct(product);
   };
 
-  // Cierra la vista rápida y limpia estados relacionados.
   const handleCloseQuickView = () => {
     setQuickViewProduct(null);
   };
@@ -627,7 +712,6 @@ export default function HomePage() {
     ? getVisibleStock(quickViewProduct)
     : 0;
 
-  // Renderiza la tarjeta visual de un producto reutilizando la misma lógica de precios y stock.
   const renderProductCard = (product: Product) => {
     const selectedVariant =
       product.product_type === "variable"
@@ -943,10 +1027,7 @@ export default function HomePage() {
                           type="text"
                           placeholder="Buscar productos..."
                           value={search}
-                          onChange={(e) => {
-                            setSearch(e.target.value);
-                            setCurrentPage(1);
-                          }}
+                          onChange={(e) => setSearch(e.target.value)}
                           className="w-full bg-transparent text-sm text-white outline-none placeholder:text-white/35 md:text-base"
                         />
                       </div>
@@ -992,8 +1073,10 @@ export default function HomePage() {
                     <div className="mt-8 flex flex-col items-center justify-between gap-4 rounded-[24px] border border-white/10 bg-white/[0.03] p-4 backdrop-blur-md sm:flex-row">
                       <button
                         type="button"
-                        onClick={() => setCurrentPage(Math.max(effectiveCurrentPage - 1, 1))}
-                        disabled={effectiveCurrentPage === 1}
+                        onClick={() =>
+                          setCurrentPage((prev) => Math.max(prev - 1, 1))
+                        }
+                        disabled={currentPage === 1}
                         className="inline-flex h-11 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] px-5 text-sm font-bold text-white transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         Anterior
@@ -1009,7 +1092,7 @@ export default function HomePage() {
                             type="button"
                             onClick={() => setCurrentPage(page)}
                             className={
-                              effectiveCurrentPage === page
+                              currentPage === page
                                 ? "flex h-11 min-w-[44px] items-center justify-center rounded-2xl bg-white px-4 text-sm font-black text-black"
                                 : "flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] px-4 text-sm font-bold text-white transition hover:bg-white/[0.08]"
                             }
@@ -1022,11 +1105,11 @@ export default function HomePage() {
                       <button
                         type="button"
                         onClick={() =>
-                          setCurrentPage(
-                            Math.min(effectiveCurrentPage + 1, totalPages)
+                          setCurrentPage((prev) =>
+                            Math.min(prev + 1, totalPages)
                           )
                         }
-                        disabled={effectiveCurrentPage === totalPages}
+                        disabled={currentPage === totalPages}
                         className="inline-flex h-11 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] px-5 text-sm font-bold text-white transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         Siguiente
