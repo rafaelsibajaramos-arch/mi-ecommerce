@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
@@ -12,6 +11,52 @@ import OrderReceiptModal, {
 } from "../components/OrderReceiptModal";
 
 type ProductType = "simple" | "variable" | "composite";
+
+type ProductImageProps = {
+  src: string | null;
+  alt: string;
+  className?: string;
+  fallbackClassName?: string;
+  fallbackTitle?: string;
+  fallbackSubtitle?: string;
+};
+
+function ProductImage({
+  src,
+  alt,
+  className = "h-full w-full object-contain",
+  fallbackClassName = "flex h-full w-full items-center justify-center bg-white/[0.02]",
+  fallbackTitle = "Producto digital",
+  fallbackSubtitle = "Sin imagen disponible",
+}: ProductImageProps) {
+  const [failed, setFailed] = useState(false);
+  const imageSrc = src?.trim();
+
+  if (!imageSrc || failed) {
+    return (
+      <div className={fallbackClassName}>
+        <div className="text-center">
+          <p className="text-xs font-bold text-white/80 sm:text-sm">
+            {fallbackTitle}
+          </p>
+          <p className="mt-1 text-[10px] text-white/35 sm:text-xs">
+            {fallbackSubtitle}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={imageSrc}
+      alt={alt}
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className={className}
+    />
+  );
+}
 
 type Product = {
   id: string;
@@ -729,26 +774,12 @@ export default function HomePage() {
       >
         <div className="p-2 pb-0 sm:p-3 sm:pb-0">
           <div className="relative aspect-square w-full overflow-hidden rounded-[14px] bg-gradient-to-b from-white/[0.05] to-white/[0.02] sm:rounded-[18px]">
-            {product.image_url ? (
-              <Image
-                src={product.image_url}
-                alt={product.name}
-                fill
-                sizes="(max-width: 639px) 50vw, (max-width: 1279px) 33vw, 25vw"
-                className="object-contain p-2 transition duration-500 group-hover:scale-[1.04] sm:p-3"
-              />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center bg-white/[0.02]">
-                <div className="text-center">
-                  <p className="text-xs font-bold text-white/80 sm:text-sm">
-                    Producto digital
-                  </p>
-                  <p className="mt-1 text-[10px] text-white/35 sm:text-xs">
-                    Sin imagen
-                  </p>
-                </div>
-              </div>
-            )}
+            <ProductImage
+              src={product.image_url}
+              alt={product.name}
+              className="h-full w-full object-contain p-2 transition duration-500 group-hover:scale-[1.04] sm:p-3"
+              fallbackSubtitle="Sin imagen"
+            />
 
             <div className="absolute left-2 top-2 z-10 sm:left-3 sm:top-3">
               <span
@@ -1149,29 +1180,14 @@ export default function HomePage() {
                 <div className="grid md:grid-cols-2">
                   <div className="p-3 sm:p-4 md:p-5">
                     <div className="overflow-hidden rounded-[20px] border border-white/10 bg-white/[0.03]">
-                      {quickViewProduct.image_url ? (
-                        <div className="relative h-[176px] w-full sm:h-[224px] md:h-[365px]">
-                          <Image
-                            src={quickViewProduct.image_url}
-                            alt={quickViewProduct.name}
-                            fill
-                            sizes="(max-width: 768px) 100vw, 50vw"
-                            className="object-contain"
-                            priority
-                          />
-                        </div>
-                      ) : (
-                        <div className="flex h-[176px] items-center justify-center bg-white/[0.02] sm:h-[224px] md:h-[365px]">
-                          <div className="text-center">
-                            <p className="text-base font-bold text-white/80">
-                              Producto digital
-                            </p>
-                            <p className="mt-1 text-sm text-white/35">
-                              Sin imagen disponible
-                            </p>
-                          </div>
-                        </div>
-                      )}
+                      <div className="h-[176px] w-full sm:h-[224px] md:h-[365px]">
+                        <ProductImage
+                          src={quickViewProduct.image_url}
+                          alt={quickViewProduct.name}
+                          className="h-full w-full object-contain"
+                          fallbackClassName="flex h-full items-center justify-center bg-white/[0.02]"
+                        />
+                      </div>
                     </div>
                   </div>
 
