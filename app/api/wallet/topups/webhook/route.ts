@@ -1,9 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseAdmin } from "../../../../../lib/supabaseAdmin";
-import { creditWalletTopup, getWalletTopupByReference, upsertTopupTransactionState } from "../../../../../lib/walletTopups";
+import {
+  creditWalletTopup,
+  getWalletTopupByReference,
+  upsertTopupTransactionState,
+} from "../../../../../lib/walletTopups";
 import { verifyWompiEventChecksum } from "../../../../../lib/wompi";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+function jsonOk(data: Record<string, unknown> = {}) {
+  return NextResponse.json({ ok: true, ...data });
+}
+
+function jsonError(message: string, status = 500) {
+  return NextResponse.json({ ok: false, error: message }, { status });
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -17,17 +30,17 @@ export async function POST(request: NextRequest) {
     });
 
     if (!isValidChecksum) {
-      return NextResponse.json({ ok: false, error: "Checksum inválido." }, { status: 401 });
+      return jsonError("Checksum inválido.", 401);
     }
 
     if (event?.event !== "transaction.updated") {
-      return NextResponse.json({ ok: true, ignored: true });
+      return jsonOk({ ignored: true, reason: "Evento no relevante." });
     }
 
     const transaction = event?.data?.transaction;
 
     if (!transaction?.reference || !transaction?.id) {
-      return NextResponse.json({ ok: true, ignored: true });
+      return jsonOk({ ignored: true, reason: "Transacción incompleta." });
     }
 
     const topup = await getWalletTopupByReference(
@@ -36,7 +49,7 @@ export async function POST(request: NextRequest) {
     );
 
     if (!topup) {
-      return NextResponse.json({ ok: true, ignored: true });
+      return jsonOk({ ignored: true, reason: "Recarga no encontrada." });
     }
 
     const syncedTopup = await upsertTopupTransactionState({
@@ -46,8 +59,8 @@ export async function POST(request: NextRequest) {
         id: String(transaction.id),
         reference: String(transaction.reference),
         status: String(transaction.status || "PENDING"),
-        amount_in_cents: Number(transaction.amount_in_cents || topup.amount_in_cents || 0),
-        currency: String(transaction.currency || topup.currency || "COP"),
+        amount_in_cents: Number(transaction.amount_in_cents || 0),
+        currency: String(transaction.currency || "COP"),
         payment_method_type: transaction.payment_method_type
           ? String(transaction.payment_method_type)
           : null,
@@ -61,15 +74,10 @@ export async function POST(request: NextRequest) {
       await creditWalletTopup(supabaseAdmin, syncedTopup.id);
     }
 
-    return NextResponse.json({ ok: true });
+    return jsonOk();
   } catch (error) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          error instanceof Error ? error.message : "Ocurrió un error inesperado.",
-      },
-      { status: 500 }
+    return jsonError(
+      error instanceof Error ? error.message : "Ocurrió un error inesperado."
     );
   }
 }

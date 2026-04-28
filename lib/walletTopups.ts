@@ -21,8 +21,31 @@ export type WalletTopupRow = {
   updated_at?: string | null;
 };
 
+const SELECT_TOPUP =
+  "id, user_id, reference, amount, amount_in_cents, currency, provider, status, wompi_transaction_id, wompi_status, wompi_payment_method_type, error_message, approved_at, rejected_at, credited_at, created_at, updated_at";
+
 export function normalizeTopupStatus(status: string | null | undefined) {
   return String(status || "PENDING").trim().toUpperCase();
+}
+
+export function assertWompiTransactionMatchesTopup({
+  topup,
+  transaction,
+}: {
+  topup: WalletTopupRow;
+  transaction: WompiTransactionSummary;
+}) {
+  if (transaction.reference !== topup.reference) {
+    throw new Error("La referencia de Wompi no coincide con la recarga.");
+  }
+
+  if (Number(transaction.amount_in_cents) !== Number(topup.amount_in_cents)) {
+    throw new Error("El valor pagado en Wompi no coincide con la recarga.");
+  }
+
+  if (String(transaction.currency).toUpperCase() !== String(topup.currency).toUpperCase()) {
+    throw new Error("La moneda de Wompi no coincide con la recarga.");
+  }
 }
 
 export async function getWalletTopupByReference(
@@ -31,15 +54,26 @@ export async function getWalletTopupByReference(
 ) {
   const { data, error } = await supabaseAdmin
     .from("wallet_topups")
-    .select(
-      "id, user_id, reference, amount, amount_in_cents, currency, provider, status, wompi_transaction_id, wompi_status, wompi_payment_method_type, error_message, approved_at, rejected_at, credited_at, created_at, updated_at"
-    )
+    .select(SELECT_TOPUP)
     .eq("reference", reference)
     .maybeSingle();
 
-  if (error) {
-    throw new Error(error.message);
-  }
+  if (error) throw new Error(error.message);
+
+  return (data as WalletTopupRow | null) || null;
+}
+
+export async function getWalletTopupById(
+  supabaseAdmin: SupabaseClient,
+  topupId: string
+) {
+  const { data, error } = await supabaseAdmin
+    .from("wallet_topups")
+    .select(SELECT_TOPUP)
+    .eq("id", topupId)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
 
   return (data as WalletTopupRow | null) || null;
 }
@@ -53,6 +87,8 @@ export async function upsertTopupTransactionState({
   topup: WalletTopupRow;
   transaction: WompiTransactionSummary;
 }) {
+  assertWompiTransactionMatchesTopup({ topup, transaction });
+
   const normalizedStatus = normalizeTopupStatus(transaction.status);
   const now = new Date().toISOString();
 
@@ -67,13 +103,10 @@ export async function upsertTopupTransactionState({
 
   if (normalizedStatus === "APPROVED") {
     patch.approved_at = topup.approved_at || now;
+    patch.rejected_at = null;
   }
 
-  if (
-    normalizedStatus === "DECLINED" ||
-    normalizedStatus === "VOIDED" ||
-    normalizedStatus === "ERROR"
-  ) {
+  if (["DECLINED", "VOIDED", "ERROR"].includes(normalizedStatus)) {
     patch.rejected_at = topup.rejected_at || now;
   }
 
@@ -81,16 +114,48 @@ export async function upsertTopupTransactionState({
     .from("wallet_topups")
     .update(patch)
     .eq("id", topup.id)
-    .select(
-      "id, user_id, reference, amount, amount_in_cents, currency, provider, status, wompi_transaction_id, wompi_status, wompi_payment_method_type, error_message, approved_at, rejected_at, credited_at, created_at, updated_at"
-    )
+    .select(SELECT_TOPUP)
     .single();
 
-  if (error) {
-    throw new Error(error.message);
-  }
+  if (error) throw new Error(error.message);
 
   return data as WalletTopupRow;
+}
+
+async function ensureWalletTransactionForTopup(
+  supabaseAdmin: SupabaseClient,
+  topup: WalletTopupRow
+) {
+  if (!topup?.id || !topup.user_id || !topup.reference) return;
+
+  const referenceText = `%${topup.reference}%`;
+
+  const { data: existingRows, error: findError } = await supabaseAdmin
+    .from("wallet_transactions")
+    .select("id")
+    .eq("user_id", topup.user_id)
+    .eq("type", "credit")
+    .eq("amount", Number(topup.amount || 0))
+    .or(`description.ilike.${referenceText},note.ilike.${referenceText}`)
+    .limit(1);
+
+  if (findError) throw new Error(findError.message);
+
+  if (existingRows && existingRows.length > 0) return;
+
+  const label = `Recarga automática Wompi (${topup.reference})`;
+
+  const { error: insertError } = await supabaseAdmin
+    .from("wallet_transactions")
+    .insert({
+      user_id: topup.user_id,
+      type: "credit",
+      amount: Number(topup.amount || 0),
+      note: label,
+      description: label,
+    });
+
+  if (insertError) throw new Error(insertError.message);
 }
 
 export async function creditWalletTopup(
@@ -101,7 +166,11 @@ export async function creditWalletTopup(
     p_topup_id: topupId,
   });
 
-  if (error) {
-    throw new Error(error.message);
+  if (error) throw new Error(error.message);
+
+  const creditedTopup = await getWalletTopupById(supabaseAdmin, topupId);
+
+  if (creditedTopup && normalizeTopupStatus(creditedTopup.status) === "APPROVED") {
+    await ensureWalletTransactionForTopup(supabaseAdmin, creditedTopup);
   }
 }

@@ -27,6 +27,23 @@ type TransactionRow = {
   description?: string | null;
 };
 
+type WalletTopupRow = {
+  id: string;
+  user_id: string | null;
+  reference: string | null;
+  amount: number | null;
+  amount_in_cents: number | null;
+  currency: string | null;
+  provider: string | null;
+  status: string | null;
+  wompi_transaction_id: string | null;
+  wompi_status: string | null;
+  wompi_payment_method_type: string | null;
+  approved_at: string | null;
+  credited_at: string | null;
+  created_at: string | null;
+};
+
 type FormattedTransaction = {
   id: string;
   user_id: string | null;
@@ -37,6 +54,10 @@ type FormattedTransaction = {
   created_at: string;
   note?: string | null;
   description?: string | null;
+  source: "manual" | "wompi" | "wallet";
+  reference?: string | null;
+  wompi_transaction_id?: string | null;
+  payment_method_type?: string | null;
 };
 
 type ClientWalletRow = {
@@ -189,6 +210,7 @@ export default function AdminWalletPage() {
   const [searchEmail, setSearchEmail] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [showOnlyWompiRecharges, setShowOnlyWompiRecharges] = useState(false);
 
   const [transactionSearchEmail, setTransactionSearchEmail] = useState("");
   const [transactionStartDate, setTransactionStartDate] = useState("");
@@ -217,21 +239,36 @@ export default function AdminWalletPage() {
   const loadTransactions = useCallback(async () => {
     setLoadingHistory(true);
 
-    const { data: transactionsData, error: transactionsError } = await supabase
-      .from("wallet_transactions")
-      .select("id, user_id, type, amount, created_at, note, description")
-      .order("created_at", { ascending: false });
+    const [transactionsResult, topupsResult] = await Promise.all([
+      supabase
+        .from("wallet_transactions")
+        .select("id, user_id, type, amount, created_at, note, description")
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("wallet_topups")
+        .select(
+          "id, user_id, reference, amount, amount_in_cents, currency, provider, status, wompi_transaction_id, wompi_status, wompi_payment_method_type, approved_at, credited_at, created_at"
+        )
+        .eq("status", "APPROVED")
+        .order("created_at", { ascending: false }),
+    ]);
 
-    if (transactionsError) {
+    if (transactionsResult.error || topupsResult.error) {
       setAllTransactions([]);
       setLoadingHistory(false);
       return;
     }
 
-    const rawTransactions = (transactionsData as TransactionRow[]) || [];
+    const rawTransactions =
+      (transactionsResult.data as TransactionRow[] | null) || [];
+    const rawTopups = (topupsResult.data as WalletTopupRow[] | null) || [];
 
     const userIds = Array.from(
-      new Set(rawTransactions.map((item) => item.user_id).filter(Boolean))
+      new Set(
+        [...rawTransactions, ...rawTopups]
+          .map((item) => item.user_id)
+          .filter(Boolean)
+      )
     ) as string[];
 
     let profilesData: ProfileRow[] = [];
@@ -249,10 +286,17 @@ export default function AdminWalletPage() {
       profileMap.set(profile.id, profile);
     });
 
-    const formatted = rawTransactions.map((transaction) => {
+    const formattedWalletTransactions = rawTransactions.map((transaction) => {
       const profile = transaction.user_id
         ? profileMap.get(transaction.user_id)
         : null;
+      const noteText = transaction.note || "";
+      const descriptionText = transaction.description || "";
+      const source = `${noteText} ${descriptionText}`
+        .toLowerCase()
+        .includes("wompi")
+        ? "wompi"
+        : "manual";
 
       return {
         id: transaction.id,
@@ -264,7 +308,51 @@ export default function AdminWalletPage() {
         created_at: transaction.created_at || "",
         note: transaction.note || null,
         description: transaction.description || null,
-      };
+        source,
+      } satisfies FormattedTransaction;
+    });
+
+    const formattedWompiTopups = rawTopups.map((topup) => {
+      const profile = topup.user_id ? profileMap.get(topup.user_id) : null;
+
+      return {
+        id: `wompi-${topup.id}`,
+        user_id: topup.user_id,
+        email: profile?.email || "Sin correo",
+        full_name: profile?.full_name || null,
+        type: "recarga_wompi",
+        amount: Number(topup.amount || 0),
+        created_at: topup.credited_at || topup.approved_at || topup.created_at || "",
+        note: "Recarga automática Wompi",
+        description: topup.reference
+          ? `Recarga automática Wompi (${topup.reference})`
+          : "Recarga automática Wompi",
+        source: "wompi",
+        reference: topup.reference,
+        wompi_transaction_id: topup.wompi_transaction_id,
+        payment_method_type: topup.wompi_payment_method_type,
+      } satisfies FormattedTransaction;
+    });
+
+    const wompiReferences = new Set(
+      formattedWompiTopups.map((topup) => topup.reference).filter(Boolean)
+    );
+
+    const formatted = [
+      ...formattedWalletTransactions.filter((transaction) => {
+        if (!transaction.description && !transaction.note) return true;
+
+        const text = `${transaction.description || ""} ${transaction.note || ""}`;
+        return !Array.from(wompiReferences).some((reference) =>
+          text.includes(String(reference))
+        );
+      }),
+      ...formattedWompiTopups,
+    ].sort((a, b) => {
+      return (
+        new Date(b.created_at || 0).getTime() -
+        new Date(a.created_at || 0).getTime()
+      );
     });
 
     setAllTransactions(formatted);
@@ -404,9 +492,18 @@ export default function AdminWalletPage() {
       const startMatch = !startDate || (txDate && txDate >= startDate);
       const endMatch = !endDate || (txDate && txDate <= endDate);
 
-      return emailMatch && startMatch && endMatch;
+      const wompiMatch =
+        !showOnlyWompiRecharges || transaction.source === "wompi";
+
+      return emailMatch && startMatch && endMatch && wompiMatch;
     });
-  }, [rechargeTransactions, searchEmail, startDate, endDate]);
+  }, [
+    rechargeTransactions,
+    searchEmail,
+    startDate,
+    endDate,
+    showOnlyWompiRecharges,
+  ]);
 
   const hasTransactionSearch = transactionSearchEmail.trim().length > 0;
 
@@ -630,6 +727,14 @@ export default function AdminWalletPage() {
       setBanner({
         kind: "error",
         text: "No se pudo identificar el usuario de esta recarga.",
+      });
+      return;
+    }
+
+    if (transaction.source === "wompi") {
+      setBanner({
+        kind: "error",
+        text: "Las recargas Wompi quedan como registro de pago automático. Para descontar saldo, usa el formulario de débito manual.",
       });
       return;
     }
@@ -1008,17 +1113,34 @@ export default function AdminWalletPage() {
               Historial de recargas
             </h3>
             <p className="mt-2 text-sm text-slate-500">
-              Aquí solo se muestran recargas registradas manualmente.
+              Aquí se muestran recargas manuales y recargas automáticas aprobadas por Wompi.
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={loadTransactions}
-            className="inline-flex items-center justify-center rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-          >
-            Recargar historial
-          </button>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <button
+              type="button"
+              onClick={() => {
+                setShowOnlyWompiRecharges((current) => !current);
+                setRechargePage(1);
+              }}
+              className={`inline-flex items-center justify-center rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
+                showOnlyWompiRecharges
+                  ? "border-slate-900 bg-slate-900 text-white"
+                  : "border-slate-200 text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              Recargas Wompi
+            </button>
+
+            <button
+              type="button"
+              onClick={loadTransactions}
+              className="inline-flex items-center justify-center rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
+              Recargar historial
+            </button>
+          </div>
         </div>
 
         <div className="mt-6 grid gap-4 md:grid-cols-3">
@@ -1103,6 +1225,11 @@ export default function AdminWalletPage() {
                             {transaction.full_name}
                           </p>
                         )}
+                        {transaction.source === "wompi" && (
+                          <p className="mt-2 inline-flex rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-blue-700">
+                            Wompi
+                          </p>
+                        )}
                       </div>
 
                       <div>
@@ -1124,16 +1251,22 @@ export default function AdminWalletPage() {
                       </div>
 
                       <div className="flex justify-start md:justify-end">
-                        <button
-                          type="button"
-                          onClick={() => handleReverseRecharge(transaction)}
-                          disabled={revertingId === transaction.id}
-                          className="inline-flex items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-60"
-                        >
-                          {revertingId === transaction.id
-                            ? "Debitando..."
-                            : "Debitar"}
-                        </button>
+                        {transaction.source === "wompi" ? (
+                          <span className="inline-flex items-center justify-center rounded-2xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700">
+                            Automática
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleReverseRecharge(transaction)}
+                            disabled={revertingId === transaction.id}
+                            className="inline-flex items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-60"
+                          >
+                            {revertingId === transaction.id
+                              ? "Debitando..."
+                              : "Debitar"}
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
