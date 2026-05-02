@@ -1192,21 +1192,21 @@ export default function HomePage() {
       <Footer />
       <WhatsAppButton />
 
-      {quickViewItem && (
+           {quickViewItem && (
         <div
-          className="fixed inset-0 z-[100] bg-black/70 p-2 backdrop-blur-sm sm:p-4"
+          className="fixed inset-0 z-[100] bg-black/70 p-2 backdrop-blur-sm sm:p-3 md:p-4"
           onClick={handleCloseQuickView}
         >
           <div className="flex h-full min-h-0 items-center justify-center">
             <div
-              className="relative flex max-h-[calc(100dvh-1rem)] w-full max-w-[64rem] flex-col overflow-hidden rounded-[20px] border border-white/10 bg-[#0b0f1a] shadow-2xl sm:rounded-[24px]"
+              className="relative flex max-h-[calc(100dvh-1rem)] w-full max-w-[42rem] flex-col overflow-y-auto rounded-[20px] border border-white/10 bg-[#0b0f1a] shadow-2xl md:max-w-[56rem] lg:max-w-[58rem] xl:max-w-[60rem] sm:rounded-[24px]"
               onClick={(e) => e.stopPropagation()}
             >
               {isAdmin && (
                 <Link
                   href={`/admin/products/${quickViewItem.product.id}`}
                   onClick={(e) => e.stopPropagation()}
-                  className="absolute right-14 top-2 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-black/35 text-white/80 transition hover:bg-white hover:text-black sm:right-16 sm:top-3 sm:h-10 sm:w-10"
+                  className="absolute right-14 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-black/45 text-white/80 transition hover:bg-white hover:text-black sm:right-16 sm:h-10 sm:w-10"
                   aria-label={`Editar ${quickViewItem.product.name}`}
                   title="Editar producto"
                 >
@@ -1228,61 +1228,62 @@ export default function HomePage() {
               <button
                 type="button"
                 onClick={handleCloseQuickView}
-                className="absolute right-2 top-2 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-black/35 text-lg text-white/80 transition hover:bg-white/10 hover:text-white sm:right-3 sm:top-3 sm:h-10 sm:w-10"
+                className="absolute right-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-black/45 text-lg text-white/80 transition hover:bg-white/10 hover:text-white sm:h-10 sm:w-10"
                 aria-label="Cerrar vista rápida"
               >
                 ×
               </button>
 
-              <div className="grid min-h-0 gap-0 md:grid-cols-[0.92fr_1.08fr]">
-                <div className="p-2 sm:p-3 md:p-4">
-                  <div className="overflow-hidden rounded-[16px] border border-white/10 bg-white/[0.03] sm:rounded-[20px]">
-                    <div className="h-[118px] w-full sm:h-[150px] md:h-[360px] lg:h-[380px]">
+              <div className="grid min-h-0 gap-0 md:grid-cols-[0.9fr_1.1fr]">
+                <div className="p-3 pb-0 md:p-4">
+                  <div className="overflow-hidden rounded-[18px] border border-white/10 bg-white/[0.03] sm:rounded-[20px]">
+                    <div className="h-[230px] w-full sm:h-[260px] md:h-[310px] lg:h-[330px]">
                       <ProductImage
                         src={quickViewItem.displayImageUrl}
                         alt={quickViewItem.displayName}
-                        className="h-full w-full object-contain p-1 sm:p-2"
+                        className="h-full w-full object-contain p-3 sm:p-4"
                         fallbackClassName="flex h-full items-center justify-center bg-white/[0.02]"
                       />
                     </div>
                   </div>
                 </div>
 
-                <div className="flex min-h-0 flex-col p-3 pt-0 sm:p-4 sm:pt-0 md:p-5">
-                  <div className="border-b border-white/10 pb-2 pr-20 sm:pb-3">
-                    <h2 className="max-h-[52px] overflow-hidden text-lg font-black uppercase leading-[26px] text-white sm:max-h-[60px] sm:text-2xl sm:leading-[30px] md:max-h-[76px] md:text-[2rem] md:leading-[38px]">
+                <div className="flex min-h-0 flex-col p-3 sm:p-4 md:p-4 lg:p-5">
+                  <div className="border-b border-white/10 pb-3 pr-20">
+                    <h2 className="max-h-[68px] overflow-hidden text-[1.55rem] font-black uppercase leading-[34px] text-white sm:text-[1.8rem] sm:leading-[38px] md:max-h-[72px] md:text-[1.85rem] md:leading-[36px] lg:text-[2rem] lg:leading-[38px]">
                       {quickViewItem.displayName}
                     </h2>
 
-                    <div className="mt-2 flex flex-wrap items-center gap-2 sm:mt-3">
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
                       <span
                         className={
                           quickViewStock > 0
-                            ? "inline-flex rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[11px] font-bold text-emerald-300 sm:text-xs"
-                            : "inline-flex rounded-full border border-red-400/20 bg-red-400/10 px-2.5 py-1 text-[11px] font-bold text-red-300 sm:text-xs"
+                            ? "inline-flex rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-bold text-emerald-300"
+                            : "inline-flex rounded-full border border-red-400/20 bg-red-400/10 px-3 py-1 text-xs font-bold text-red-300"
                         }
                       >
                         {quickViewStock > 0 ? "Disponible" : "Agotado"}
                       </span>
 
                       {isAdmin && (
-                        <span className="inline-flex rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-semibold text-white/50 sm:text-xs">
+                        <span className="inline-flex rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/50">
                           Stock: {quickViewStock}
                         </span>
                       )}
                     </div>
                   </div>
 
-                  <div className="min-h-0 space-y-2 py-2 sm:space-y-3 sm:py-3">
-                    <p className="text-3xl font-black leading-none text-white sm:text-4xl md:text-5xl">
+                  <div className="space-y-3 py-3 md:space-y-3 md:py-3">
+                    <p className="text-[2.6rem] font-black leading-none text-white sm:text-5xl md:text-[2.9rem] lg:text-5xl">
                       ${formatPrice(quickViewPrice)}
                     </p>
 
-                    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 md:p-3 lg:p-4">
                       <p className="text-[10px] uppercase tracking-[0.18em] text-white/35">
                         Descripción
                       </p>
-                      <p className="mt-2 max-h-[88px] overflow-hidden text-xs leading-5 text-white/65 sm:max-h-[105px] sm:text-sm sm:leading-6 md:text-[15px]">
+
+                      <p className="mt-2 text-sm leading-6 text-white/65 md:max-h-[112px] md:overflow-hidden md:text-sm md:leading-6 lg:max-h-[132px]">
                         {quickViewItem.displayDescription?.trim()
                           ? quickViewItem.displayDescription
                           : "Este producto no tiene descripción disponible por el momento."}
@@ -1290,11 +1291,11 @@ export default function HomePage() {
                     </div>
                   </div>
 
-                  <div className="mt-auto border-t border-white/10 pt-2 sm:pt-3">
+                  <div className="mt-auto border-t border-white/10 pt-3">
                     <button
                       type="button"
                       onClick={handleCloseQuickView}
-                      className="inline-flex h-10 w-full items-center justify-center rounded-2xl border border-white/10 bg-white/[0.05] px-5 text-sm font-bold text-white transition hover:bg-white/[0.09] sm:w-auto"
+                      className="inline-flex h-11 w-full items-center justify-center rounded-2xl border border-white/10 bg-white/[0.05] px-5 text-sm font-bold text-white transition hover:bg-white/[0.09] sm:w-auto"
                     >
                       Cerrar
                     </button>
