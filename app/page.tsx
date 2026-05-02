@@ -80,8 +80,20 @@ type ProductVariant = {
   description: string | null;
   price: number;
   stock: number;
+  image_url?: string | null;
   is_active: boolean;
   sort_order: number;
+};
+
+type CatalogItem = {
+  product: Product;
+  variant: ProductVariant | null;
+  catalogId: string;
+  displayName: string;
+  displayDescription: string | null;
+  displayPrice: number;
+  displayStock: number;
+  displayImageUrl: string | null;
 };
 
 type CategoryItem = {
@@ -123,13 +135,7 @@ const SEARCH_DEBOUNCE_MS = 350;
 export default function HomePage() {
   const { addToCart } = useCart();
 
-  const [products, setProducts] = useState<Product[]>([]);
-  const [variantsMap, setVariantsMap] = useState<
-    Record<string, ProductVariant[]>
-  >({});
-  const [selectedVariants, setSelectedVariants] = useState<
-    Record<string, string>
-  >({});
+  const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [categories, setCategories] = useState<CategoryItem[]>([
     { name: "Todas", count: 0 },
   ]);
@@ -140,13 +146,14 @@ export default function HomePage() {
   const [message, setMessage] = useState("");
   const [receiptMessage, setReceiptMessage] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
-  const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null);
+  const [quickViewItem, setQuickViewItem] = useState<CatalogItem | null>(null);
   const [receiptOrder, setReceiptOrder] = useState<ReceiptOrder | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalProducts, setTotalProducts] = useState(0);
 
   const catalogRequestIdRef = useRef(0);
   const categoryRequestIdRef = useRef(0);
+  const roleRequestIdRef = useRef(0);
 
   const isAbortLikeError = (error: unknown) => {
     if (!error) return false;
@@ -191,18 +198,17 @@ export default function HomePage() {
     return () => window.clearTimeout(timeout);
   }, [search]);
 
-
   const formatPrice = (value: number | string | null | undefined) => {
     const numericValue = Math.round(Number(value || 0));
     return numericValue.toLocaleString("es-CO");
   };
 
   useEffect(() => {
-    if (!quickViewProduct) return;
+    if (!quickViewItem) return;
 
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setQuickViewProduct(null);
+        setQuickViewItem(null);
       }
     };
 
@@ -214,7 +220,7 @@ export default function HomePage() {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", handleEscape);
     };
-  }, [quickViewProduct]);
+  }, [quickViewItem]);
 
   useEffect(() => {
     const handleReceiptReady = (event: Event) => {
@@ -223,7 +229,7 @@ export default function HomePage() {
       if (!customEvent.detail) return;
 
       setReceiptMessage("");
-      setQuickViewProduct(null);
+      setQuickViewItem(null);
       setReceiptOrder(customEvent.detail);
     };
 
@@ -372,7 +378,7 @@ export default function HomePage() {
         };
 
         if (!cancelled) {
-          setQuickViewProduct(null);
+          setQuickViewItem(null);
           setReceiptOrder(builtOrder);
         }
       } catch {
@@ -396,23 +402,122 @@ export default function HomePage() {
   }, [selectedCategory, debouncedSearch]);
 
   const fetchRole = useCallback(async () => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const requestId = ++roleRequestIdRef.current;
 
-    if (!user) {
-      setIsAdmin(false);
-      return;
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      let currentUser = session?.user || null;
+
+      if (!currentUser) {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+
+        currentUser = user || null;
+      }
+
+      if (requestId !== roleRequestIdRef.current) {
+        return;
+      }
+
+      if (!currentUser) {
+        setIsAdmin(false);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", currentUser.id)
+        .maybeSingle();
+
+      if (requestId !== roleRequestIdRef.current) {
+        return;
+      }
+
+      if (error) {
+        setIsAdmin(false);
+        return;
+      }
+
+      setIsAdmin(data?.role === "admin");
+    } catch {
+      if (requestId === roleRequestIdRef.current) {
+        setIsAdmin(false);
+      }
     }
-
-    const { data } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-
-    setIsAdmin(data?.role === "admin");
   }, []);
+
+  const getVariantDisplayStock = (
+    product: Product,
+    variant: ProductVariant | null
+  ) => {
+    if (!variant) return Number(product.stock || 0);
+
+    const variantStock = Number(variant.stock || 0);
+    const generalStock =
+      product.fallback_to_general_licenses === false
+        ? 0
+        : Number(product.stock || 0);
+
+    return variantStock + generalStock;
+  };
+
+  const buildCatalogItems = useCallback(
+    (
+      productRows: Product[],
+      groupedVariants: Record<string, ProductVariant[]>
+    ): CatalogItem[] => {
+      return productRows.flatMap<CatalogItem>((product): CatalogItem[] => {
+        if (product.product_type !== "variable") {
+          return [
+            {
+              product,
+              variant: null,
+              catalogId: product.id,
+              displayName: product.name,
+              displayDescription: product.description,
+              displayPrice: Number(product.price || 0),
+              displayStock: Number(product.stock || 0),
+              displayImageUrl: product.image_url,
+            },
+          ];
+        }
+
+        const productVariants = groupedVariants[product.id] || [];
+
+        if (productVariants.length === 0) {
+          return [
+            {
+              product,
+              variant: null,
+              catalogId: product.id,
+              displayName: product.name,
+              displayDescription: product.description,
+              displayPrice: Number(product.price || 0),
+              displayStock: Number(product.stock || 0),
+              displayImageUrl: product.image_url,
+            },
+          ];
+        }
+
+        return productVariants.map((variant) => ({
+          product,
+          variant,
+          catalogId: `${product.id}-${variant.id}`,
+          displayName: `${product.name} - ${variant.name}`,
+          displayDescription: variant.description || product.description,
+          displayPrice: Number(variant.price || 0),
+          displayStock: getVariantDisplayStock(product, variant),
+          displayImageUrl: variant.image_url || product.image_url,
+        }));
+      });
+    },
+    []
+  );
 
   const fetchCategories = useCallback(async () => {
     const requestId = ++categoryRequestIdRef.current;
@@ -421,7 +526,7 @@ export default function HomePage() {
       try {
         const { data, error } = await supabase
           .from("products")
-          .select("category")
+          .select("id, category, product_type")
           .eq("is_active", true);
 
         if (requestId !== categoryRequestIdRef.current) {
@@ -432,12 +537,59 @@ export default function HomePage() {
           throw error;
         }
 
-        const counts = new Map<string, number>();
+        const productRows =
+          ((data as {
+            id: string;
+            category: string | null;
+            product_type?: ProductType;
+          }[]) || []);
 
-        ((data as { category: string | null }[]) || []).forEach((item) => {
+        const variableProductIds = productRows
+          .filter((product) => product.product_type === "variable")
+          .map((product) => product.id);
+
+        const variantCounts = new Map<string, number>();
+
+        if (variableProductIds.length > 0) {
+          const { data: variantsData, error: variantsError } = await supabase
+            .from("product_variants")
+            .select("id, product_id")
+            .in("product_id", variableProductIds)
+            .eq("is_active", true);
+
+          if (requestId !== categoryRequestIdRef.current) {
+            return;
+          }
+
+          if (variantsError) {
+            throw variantsError;
+          }
+
+          ((variantsData as { product_id: string }[]) || []).forEach(
+            (variant) => {
+              variantCounts.set(
+                variant.product_id,
+                (variantCounts.get(variant.product_id) || 0) + 1
+              );
+            }
+          );
+        }
+
+        const counts = new Map<string, number>();
+        let totalVisibleItems = 0;
+
+        productRows.forEach((item) => {
+          const visibleCount =
+            item.product_type === "variable"
+              ? Math.max(variantCounts.get(item.id) || 0, 1)
+              : 1;
+
+          totalVisibleItems += visibleCount;
+
           const category = (item.category || "").trim();
           if (!category) return;
-          counts.set(category, (counts.get(category) || 0) + 1);
+
+          counts.set(category, (counts.get(category) || 0) + visibleCount);
         });
 
         const ordered = Array.from(counts.entries())
@@ -449,7 +601,7 @@ export default function HomePage() {
         setCategories([
           {
             name: "Todas",
-            count: ((data as { category: string | null }[]) || []).length,
+            count: totalVisibleItems,
           },
           ...ordered,
         ]);
@@ -476,14 +628,11 @@ export default function HomePage() {
     setLoading(true);
     setMessage("");
 
-    const from = (currentPage - 1) * PRODUCTS_PER_PAGE;
-    const to = from + PRODUCTS_PER_PAGE - 1;
-
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         let query = supabase
           .from("products")
-          .select("*", { count: "exact" })
+          .select("*")
           .eq("is_active", true)
           .order("name", { ascending: true });
 
@@ -498,7 +647,7 @@ export default function HomePage() {
           );
         }
 
-        const { data, error, count } = await query.range(from, to);
+        const { data, error } = await query;
 
         if (requestId !== catalogRequestIdRef.current) {
           return;
@@ -509,12 +658,11 @@ export default function HomePage() {
         }
 
         const safeProducts = (data as Product[]) || [];
-        setProducts(safeProducts);
-        setTotalProducts(count || 0);
-
         const variableProducts = safeProducts.filter(
           (product) => product.product_type === "variable"
         );
+
+        const groupedVariants: Record<string, ProductVariant[]> = {};
 
         if (variableProducts.length > 0) {
           const productIds = variableProducts.map((product) => product.id);
@@ -535,39 +683,20 @@ export default function HomePage() {
             throw variantsError;
           }
 
-          const grouped: Record<string, ProductVariant[]> = {};
-          const nextSelected: Record<string, string> = {};
-
           ((variantsData as ProductVariant[]) || []).forEach((variant) => {
-            if (!grouped[variant.product_id]) {
-              grouped[variant.product_id] = [];
+            if (!groupedVariants[variant.product_id]) {
+              groupedVariants[variant.product_id] = [];
             }
-            grouped[variant.product_id].push(variant);
+            groupedVariants[variant.product_id].push(variant);
           });
-
-          setSelectedVariants((prev) => {
-            Object.entries(grouped).forEach(([productId, variants]) => {
-              const previousSelection = prev[productId];
-              const stillExists = variants.some(
-                (variant) => variant.id === previousSelection
-              );
-
-              if (stillExists && previousSelection) {
-                nextSelected[productId] = previousSelection;
-              } else if (variants.length > 0) {
-                nextSelected[productId] = variants[0].id;
-              }
-            });
-
-            return nextSelected;
-          });
-
-          setVariantsMap(grouped);
-        } else {
-          setVariantsMap({});
-          setSelectedVariants({});
         }
 
+        const expandedItems = buildCatalogItems(safeProducts, groupedVariants);
+        const from = (currentPage - 1) * PRODUCTS_PER_PAGE;
+        const to = from + PRODUCTS_PER_PAGE;
+
+        setCatalogItems(expandedItems.slice(from, to));
+        setTotalProducts(expandedItems.length);
         setLoading(false);
         return;
       } catch (error) {
@@ -585,15 +714,13 @@ export default function HomePage() {
             error instanceof Error ? error.message : "Error desconocido"
           }`
         );
-        setProducts([]);
-        setVariantsMap({});
-        setSelectedVariants({});
+        setCatalogItems([]);
         setTotalProducts(0);
         setLoading(false);
         return;
       }
     }
-  }, [currentPage, debouncedSearch, selectedCategory]);
+  }, [buildCatalogItems, currentPage, debouncedSearch, selectedCategory]);
 
   useEffect(() => {
     let mounted = true;
@@ -601,14 +728,37 @@ export default function HomePage() {
     const run = async () => {
       if (!mounted) return;
       await fetchRole();
+
       if (!mounted) return;
       await fetchCategories();
     };
 
     void run();
 
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      roleRequestIdRef.current += 1;
+
+      if (!mounted) {
+        return;
+      }
+
+      if (!session?.user) {
+        setIsAdmin(false);
+        return;
+      }
+
+      window.setTimeout(() => {
+        if (mounted) {
+          void fetchRole();
+        }
+      }, 0);
+    });
+
     return () => {
       mounted = false;
+      subscription.unsubscribe();
     };
   }, [fetchCategories, fetchRole]);
 
@@ -648,135 +798,48 @@ export default function HomePage() {
     }
   }, [currentPage, totalPages]);
 
-  const getSelectedVariant = (productId: string) => {
-    const variants = variantsMap[productId] || [];
-    const selectedVariantId = selectedVariants[productId];
-    return (
-      variants.find((variant) => variant.id === selectedVariantId) || null
-    );
-  };
-
-  const getVisiblePrice = (product: Product) => {
-    if (product.product_type === "variable") {
-      const selectedVariant = getSelectedVariant(product.id);
-      return Number(selectedVariant?.price ?? product.price);
-    }
-    return Number(product.price);
-  };
-
-  const getVisibleStock = (product: Product) => {
-    if (product.product_type === "variable") {
-      const selectedVariant = getSelectedVariant(product.id);
-      const variantStock = Number(selectedVariant?.stock ?? 0);
-      const generalStock =
-        product.fallback_to_general_licenses === false
-          ? 0
-          : Number(product.stock ?? 0);
-
-      return variantStock + generalStock;
-    }
-
-    return Number(product.stock);
-  };
-
-  const handleVariantChange = (
-    e: React.ChangeEvent<HTMLSelectElement>,
-    productId: string
-  ) => {
-    e.stopPropagation();
-
-    setSelectedVariants((prev) => ({
-      ...prev,
-      [productId]: e.target.value,
-    }));
-  };
-
   const handleAddToCart = (
     e: React.MouseEvent<HTMLButtonElement>,
-    product: Product
+    item: CatalogItem
   ) => {
     e.stopPropagation();
 
-    if (product.product_type === "variable") {
-      const selectedVariant = getSelectedVariant(product.id);
-
-      const variantStock = Number(selectedVariant?.stock ?? 0);
-      const generalStock =
-        product.fallback_to_general_licenses === false
-          ? 0
-          : Number(product.stock ?? 0);
-
-      const availableStock = variantStock + generalStock;
-
-      if (!selectedVariant || availableStock <= 0) return;
-
-      addToCart({
-        id: product.id,
-        name: `${product.name} - ${selectedVariant.name}`,
-        price: Number(selectedVariant.price),
-        image: product.image_url || "",
-        description: selectedVariant.description || product.description || "",
-        variantId: selectedVariant.id,
-        variantName: selectedVariant.name,
-      });
-
-      return;
-    }
-
-    if (Number(product.stock) <= 0) return;
+    if (item.displayStock <= 0) return;
 
     addToCart({
-      id: product.id,
-      name: product.name,
-      price: Number(product.price),
-      image: product.image_url || "",
-      description: product.description || "",
-      variantId: null,
-      variantName: null,
+      id: item.product.id,
+      name: item.product.name,
+      price: item.displayPrice,
+      image: item.displayImageUrl || "",
+      description: item.displayDescription || "",
+      variantId: item.variant?.id || null,
+      variantName: item.variant?.name || null,
     });
   };
 
-  const handleOpenQuickView = (product: Product) => {
-    setQuickViewProduct(product);
+  const handleOpenQuickView = (item: CatalogItem) => {
+    setQuickViewItem(item);
   };
 
   const handleCloseQuickView = () => {
-    setQuickViewProduct(null);
+    setQuickViewItem(null);
   };
 
-  const quickViewSelectedVariant =
-    quickViewProduct?.product_type === "variable"
-      ? getSelectedVariant(quickViewProduct.id)
-      : null;
+  const quickViewPrice = quickViewItem?.displayPrice || 0;
+  const quickViewStock = quickViewItem?.displayStock || 0;
 
-  const quickViewPrice = quickViewProduct
-    ? getVisiblePrice(quickViewProduct)
-    : 0;
-
-  const quickViewStock = quickViewProduct
-    ? getVisibleStock(quickViewProduct)
-    : 0;
-
-  const renderProductCard = (product: Product) => {
-    const selectedVariant =
-      product.product_type === "variable"
-        ? getSelectedVariant(product.id)
-        : null;
-
-    const visiblePrice = getVisiblePrice(product);
-    const visibleStock = getVisibleStock(product);
-
+  const renderProductCard = (item: CatalogItem) => {
     return (
       <article
-        key={product.id}
-        onClick={() => handleOpenQuickView(product)}
+        key={item.catalogId}
+        onClick={() => handleOpenQuickView(item)}
         className="group flex h-full cursor-pointer flex-col overflow-hidden rounded-[18px] border border-white/10 bg-white/[0.04] backdrop-blur-md transition duration-300 hover:-translate-y-1 hover:border-blue-400/30 hover:shadow-[0_20px_80px_rgba(59,130,246,0.12)] sm:rounded-[22px]"
       >
         <div className="p-2 pb-0 sm:p-3 sm:pb-0">
           <div className="relative aspect-square w-full overflow-hidden rounded-[14px] bg-gradient-to-b from-white/[0.05] to-white/[0.02] sm:rounded-[18px]">
             <ProductImage
-              src={product.image_url}
-              alt={product.name}
+              src={item.displayImageUrl}
+              alt={item.displayName}
               className="h-full w-full object-contain p-2 transition duration-500 group-hover:scale-[1.04] sm:p-3"
               fallbackSubtitle="Sin imagen"
             />
@@ -784,20 +847,20 @@ export default function HomePage() {
             <div className="absolute left-2 top-2 z-10 sm:left-3 sm:top-3">
               <span
                 className={
-                  visibleStock > 0
+                  item.displayStock > 0
                     ? "inline-flex rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2 py-0.5 text-[9px] font-bold text-emerald-300 sm:px-2.5 sm:py-1 sm:text-[10px]"
                     : "inline-flex rounded-full border border-red-400/20 bg-red-400/10 px-2 py-0.5 text-[9px] font-bold text-red-300 sm:px-2.5 sm:py-1 sm:text-[10px]"
                 }
               >
-                {visibleStock > 0 ? "Disponible" : "Agotado"}
+                {item.displayStock > 0 ? "Disponible" : "Agotado"}
               </span>
             </div>
 
             {isAdmin && (
               <Link
-                href={`/admin/products/${product.id}`}
+                href={`/admin/products/${item.product.id}`}
                 onClick={(e) => e.stopPropagation()}
-                aria-label={`Editar ${product.name}`}
+                aria-label={`Editar ${item.product.name}`}
                 className="absolute right-2 top-2 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-black/45 text-white/85 shadow-[0_10px_24px_rgba(0,0,0,0.35)] transition hover:scale-105 hover:bg-white hover:text-black sm:right-3 sm:top-3 sm:h-10 sm:w-10"
                 title="Editar producto"
               >
@@ -818,57 +881,29 @@ export default function HomePage() {
           </div>
         </div>
 
-        <div className="flex flex-1 flex-col p-2.5 sm:p-4">
-          <div className="min-h-[48px] sm:min-h-[58px]">
-            <p className="text-[8px] uppercase tracking-[0.12em] text-blue-400/80 sm:text-[10px] sm:tracking-[0.18em]">
-              {(product.category || "Producto digital").toUpperCase()}
-            </p>
-
-            <h3 className="mt-1 h-[34px] overflow-hidden text-[11px] font-extrabold uppercase leading-4 text-white sm:mt-2 sm:h-auto sm:text-[13px] sm:leading-5 md:text-[15px] md:leading-6">
-              {product.name}
+        <div className="flex flex-1 flex-col p-2 sm:p-3">
+          <div className="min-h-[38px] sm:min-h-[46px]">
+            <h3 className="h-[34px] overflow-hidden text-[11px] font-extrabold uppercase leading-4 text-white sm:h-[40px] sm:text-[13px] sm:leading-[20px] md:h-[44px] md:text-[14px] md:leading-[22px]">
+              {item.displayName}
             </h3>
           </div>
 
-          {product.product_type === "variable" && selectedVariant && (
-            <div className="mt-2 sm:mt-3" onClick={(e) => e.stopPropagation()}>
-              <select
-                value={selectedVariants[product.id] || ""}
-                onChange={(e) => handleVariantChange(e, product.id)}
-                className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-2.5 py-2 text-[11px] font-semibold text-white outline-none sm:px-3 sm:text-sm"
-              >
-                {(variantsMap[product.id] || []).map((variant) => (
-                  <option
-                    key={variant.id}
-                    value={variant.id}
-                    className="bg-[#0d0d0d] text-white"
-                  >
-                    {variant.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          <div className="mt-auto border-t border-white/10 pt-2.5 sm:pt-4">
-            <p className="text-[8px] uppercase tracking-[0.12em] text-white/30 sm:text-[10px] sm:tracking-[0.18em]">
-              Precio
-            </p>
-
-            <p className="mt-1 text-lg font-black text-white sm:text-xl md:text-2xl">
-              ${formatPrice(visiblePrice)}
+          <div className="mt-auto border-t border-white/10 pt-2 sm:pt-3">
+            <p className="text-lg font-black text-white sm:text-xl md:text-[22px]">
+              ${formatPrice(item.displayPrice)}
             </p>
 
             {isAdmin && (
               <p className="mt-1 text-[10px] font-semibold text-white/45 sm:text-xs">
-                Stock: {visibleStock}
+                Stock: {item.displayStock}
               </p>
             )}
 
             <button
               type="button"
-              onClick={(e) => handleAddToCart(e, product)}
-              disabled={visibleStock <= 0}
-              className="mt-2.5 inline-flex h-9 w-full items-center justify-center rounded-2xl bg-white px-2 text-[11px] font-bold text-black transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 sm:mt-4 sm:h-11 sm:px-3 sm:text-sm"
+              onClick={(e) => handleAddToCart(e, item)}
+              disabled={item.displayStock <= 0}
+              className="mt-2 inline-flex h-[34px] w-full items-center justify-center rounded-2xl bg-white px-2 text-[11px] font-bold text-black transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 sm:mt-3 sm:h-10 sm:px-3 sm:text-sm"
             >
               Añadir al carrito
             </button>
@@ -1088,7 +1123,7 @@ export default function HomePage() {
                     Cargando productos...
                   </p>
                 </div>
-              ) : products.length === 0 ? (
+              ) : catalogItems.length === 0 ? (
                 <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-10 text-center backdrop-blur-md">
                   <p className="text-lg font-semibold text-white">
                     No encontramos productos con ese filtro
@@ -1097,7 +1132,7 @@ export default function HomePage() {
               ) : (
                 <>
                   <div className="grid grid-cols-2 gap-2 md:grid-cols-3 md:gap-3 xl:grid-cols-4 xl:gap-4">
-                    {products.map((product) => renderProductCard(product))}
+                    {catalogItems.map((item) => renderProductCard(item))}
                   </div>
 
                   {totalProducts > PRODUCTS_PER_PAGE && (
@@ -1157,102 +1192,112 @@ export default function HomePage() {
       <Footer />
       <WhatsAppButton />
 
-      {quickViewProduct && (
+      {quickViewItem && (
         <div
-          className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm"
+          className="fixed inset-0 z-[100] bg-black/70 p-2 backdrop-blur-sm sm:p-4"
           onClick={handleCloseQuickView}
         >
-          <div className="flex min-h-full items-start justify-center px-3 pb-3 pt-24 sm:px-4 sm:pt-28 md:items-center md:py-6">
+          <div className="flex h-full min-h-0 items-center justify-center">
             <div
-              className="relative w-full max-w-[57.6rem] overflow-hidden rounded-[24px] border border-white/10 bg-[#0b0f1a] shadow-2xl md:max-h-[75vh]"
+              className="relative flex max-h-[calc(100dvh-1rem)] w-full max-w-[64rem] flex-col overflow-hidden rounded-[20px] border border-white/10 bg-[#0b0f1a] shadow-2xl sm:rounded-[24px]"
               onClick={(e) => e.stopPropagation()}
             >
+              {isAdmin && (
+                <Link
+                  href={`/admin/products/${quickViewItem.product.id}`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="absolute right-14 top-2 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-black/35 text-white/80 transition hover:bg-white hover:text-black sm:right-16 sm:top-3 sm:h-10 sm:w-10"
+                  aria-label={`Editar ${quickViewItem.product.name}`}
+                  title="Editar producto"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    className="h-4 w-4 sm:h-5 sm:w-5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" />
+                  </svg>
+                </Link>
+              )}
+
               <button
                 type="button"
                 onClick={handleCloseQuickView}
-                className="absolute right-3 top-3 z-20 flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-black/30 text-xl text-white/75 transition hover:bg-white/10 hover:text-white"
+                className="absolute right-2 top-2 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-black/35 text-lg text-white/80 transition hover:bg-white/10 hover:text-white sm:right-3 sm:top-3 sm:h-10 sm:w-10"
                 aria-label="Cerrar vista rápida"
               >
                 ×
               </button>
 
-              <div className="max-h-[calc(100vh-10rem)] overflow-y-auto md:max-h-[75vh]">
-                <div className="grid md:grid-cols-2">
-                  <div className="p-3 sm:p-4 md:p-5">
-                    <div className="overflow-hidden rounded-[20px] border border-white/10 bg-white/[0.03]">
-                      <div className="h-[176px] w-full sm:h-[224px] md:h-[365px]">
-                        <ProductImage
-                          src={quickViewProduct.image_url}
-                          alt={quickViewProduct.name}
-                          className="h-full w-full object-contain"
-                          fallbackClassName="flex h-full items-center justify-center bg-white/[0.02]"
-                        />
-                      </div>
+              <div className="grid min-h-0 gap-0 md:grid-cols-[0.92fr_1.08fr]">
+                <div className="p-2 sm:p-3 md:p-4">
+                  <div className="overflow-hidden rounded-[16px] border border-white/10 bg-white/[0.03] sm:rounded-[20px]">
+                    <div className="h-[118px] w-full sm:h-[150px] md:h-[360px] lg:h-[380px]">
+                      <ProductImage
+                        src={quickViewItem.displayImageUrl}
+                        alt={quickViewItem.displayName}
+                        className="h-full w-full object-contain p-1 sm:p-2"
+                        fallbackClassName="flex h-full items-center justify-center bg-white/[0.02]"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex min-h-0 flex-col p-3 pt-0 sm:p-4 sm:pt-0 md:p-5">
+                  <div className="border-b border-white/10 pb-2 pr-20 sm:pb-3">
+                    <h2 className="max-h-[52px] overflow-hidden text-lg font-black uppercase leading-[26px] text-white sm:max-h-[60px] sm:text-2xl sm:leading-[30px] md:max-h-[76px] md:text-[2rem] md:leading-[38px]">
+                      {quickViewItem.displayName}
+                    </h2>
+
+                    <div className="mt-2 flex flex-wrap items-center gap-2 sm:mt-3">
+                      <span
+                        className={
+                          quickViewStock > 0
+                            ? "inline-flex rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[11px] font-bold text-emerald-300 sm:text-xs"
+                            : "inline-flex rounded-full border border-red-400/20 bg-red-400/10 px-2.5 py-1 text-[11px] font-bold text-red-300 sm:text-xs"
+                        }
+                      >
+                        {quickViewStock > 0 ? "Disponible" : "Agotado"}
+                      </span>
+
+                      {isAdmin && (
+                        <span className="inline-flex rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-semibold text-white/50 sm:text-xs">
+                          Stock: {quickViewStock}
+                        </span>
+                      )}
                     </div>
                   </div>
 
-                  <div className="flex flex-col p-4 sm:p-5 md:p-6">
-                    <div className="border-b border-white/10 pb-4">
-                      <h2 className="text-[2rem] font-black uppercase leading-tight text-white sm:text-[2.4rem] md:text-[3.1rem]">
-                        {quickViewProduct.name}
-                      </h2>
+                  <div className="min-h-0 space-y-2 py-2 sm:space-y-3 sm:py-3">
+                    <p className="text-3xl font-black leading-none text-white sm:text-4xl md:text-5xl">
+                      ${formatPrice(quickViewPrice)}
+                    </p>
 
-                      <div className="mt-4">
-                        <span
-                          className={
-                            quickViewStock > 0
-                              ? "inline-flex rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-bold text-emerald-300"
-                              : "inline-flex rounded-full border border-red-400/20 bg-red-400/10 px-3 py-1 text-xs font-bold text-red-300"
-                          }
-                        >
-                          {quickViewStock > 0 ? "Disponible" : "Agotado"}
-                        </span>
-                      </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+                      <p className="text-[10px] uppercase tracking-[0.18em] text-white/35">
+                        Descripción
+                      </p>
+                      <p className="mt-2 max-h-[88px] overflow-hidden text-xs leading-5 text-white/65 sm:max-h-[105px] sm:text-sm sm:leading-6 md:text-[15px]">
+                        {quickViewItem.displayDescription?.trim()
+                          ? quickViewItem.displayDescription
+                          : "Este producto no tiene descripción disponible por el momento."}
+                      </p>
                     </div>
+                  </div>
 
-                    <div className="space-y-4 py-4">
-                      <div>
-                        <p className="text-[11px] uppercase tracking-[0.18em] text-white/35">
-                          Precio
-                        </p>
-                        <p className="mt-2 text-4xl font-black text-white sm:text-5xl md:text-6xl">
-                          ${formatPrice(quickViewPrice)}
-                        </p>
-                      </div>
-
-                      {quickViewProduct.product_type === "variable" &&
-                        quickViewSelectedVariant && (
-                          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                            <p className="text-[11px] uppercase tracking-[0.18em] text-white/35">
-                              Variante
-                            </p>
-                            <p className="mt-2 text-lg font-bold text-white">
-                              {quickViewSelectedVariant.name}
-                            </p>
-                          </div>
-                        )}
-
-                      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                        <p className="text-[11px] uppercase tracking-[0.18em] text-white/35">
-                          Descripción
-                        </p>
-                        <p className="mt-3 text-sm leading-6 text-white/65 md:text-[15px]">
-                          {quickViewProduct.description?.trim()
-                            ? quickViewProduct.description
-                            : "Este producto no tiene descripción disponible por el momento."}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="mt-auto border-t border-white/10 pt-4">
-                      <button
-                        type="button"
-                        onClick={handleCloseQuickView}
-                        className="inline-flex h-11 w-full items-center justify-center rounded-2xl border border-white/10 bg-white/[0.05] px-6 text-sm font-bold text-white transition hover:bg-white/[0.09] sm:w-auto"
-                      >
-                        Cerrar
-                      </button>
-                    </div>
+                  <div className="mt-auto border-t border-white/10 pt-2 sm:pt-3">
+                    <button
+                      type="button"
+                      onClick={handleCloseQuickView}
+                      className="inline-flex h-10 w-full items-center justify-center rounded-2xl border border-white/10 bg-white/[0.05] px-5 text-sm font-bold text-white transition hover:bg-white/[0.09] sm:w-auto"
+                    >
+                      Cerrar
+                    </button>
                   </div>
                 </div>
               </div>

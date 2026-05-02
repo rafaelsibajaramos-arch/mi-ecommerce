@@ -26,12 +26,11 @@ export default function DashboardSidebar() {
           <Link href="/account" className="block hover:text-blue-400">
             Dashboard
           </Link>
+
           <Link href="/account/orders" className="block hover:text-blue-400">
             Mis pedidos
           </Link>
-          <Link href="/account/licenses" className="block hover:text-blue-400">
-            Mis licencias
-          </Link>
+
           <Link href="/account/wallet" className="block hover:text-blue-400">
             Mi saldo
           </Link>
@@ -49,15 +48,19 @@ export default function DashboardSidebar() {
           <Link href="/admin" className="block hover:text-blue-400">
             Panel admin
           </Link>
+
           <Link href="/admin/products" className="block hover:text-blue-400">
             Productos
           </Link>
+
           <Link href="/admin/licenses" className="block hover:text-blue-400">
             Licencias
           </Link>
+
           <Link href="/admin/users" className="block hover:text-blue-400">
             Usuarios
           </Link>
+
           <Link href="/admin/wallet" className="block hover:text-blue-400">
             Wallet
           </Link>

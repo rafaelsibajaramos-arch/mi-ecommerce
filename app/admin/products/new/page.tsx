@@ -4,6 +4,17 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../../../lib/supabase";
 
+function slugify(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-");
+}
+
 export default function NewProductPage() {
   const router = useRouter();
 
@@ -88,6 +99,7 @@ export default function NewProductPage() {
       const { error } = await supabase.from("products").insert([
         {
           name: cleanName,
+          slug: slugify(cleanName),
           description: description.trim() || null,
           price: numericPrice,
           stock: numericStock,

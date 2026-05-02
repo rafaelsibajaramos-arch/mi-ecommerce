@@ -14,6 +14,8 @@ type VariantRow = {
   description: string;
   price: string;
   stock: string;
+  image_url: string;
+  imageFile: File | null;
   is_active: boolean;
   sort_order: number;
   priorityLicensesInput: string;
@@ -58,6 +60,7 @@ type ProductVariantDbRow = {
   description: string | null;
   price: number | null;
   stock: number | null;
+  image_url: string | null;
   is_active: boolean | null;
   sort_order: number | null;
 };
@@ -70,7 +73,6 @@ type ProductComponentDbRow = {
   sort_order: number | null;
 };
 
-// Extrae un mensaje legible desde un error desconocido y usa un texto por defecto cuando hace falta.
 function getErrorMessage(error: unknown, fallback: string) {
   if (
     error &&
@@ -84,12 +86,10 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
-// Genera un identificador temporal para elementos aún no guardados en la base de datos.
 function makeTempId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-// Convierte un texto libre en un slug limpio y apto para URLs.
 function slugify(value: string) {
   return value
     .normalize("NFD")
@@ -101,7 +101,10 @@ function slugify(value: string) {
     .replace(/-+/g, "-");
 }
 
-// Limpia un bloque de texto y devuelve solo las líneas útiles, sin vacíos.
+function makeVariantSlug(productName: string, variantName: string) {
+  return slugify(productName + " " + variantName);
+}
+
 function normalizeLines(text: string) {
   return text
     .split("\n")
@@ -109,7 +112,6 @@ function normalizeLines(text: string) {
     .filter(Boolean);
 }
 
-// Cuenta repeticiones por valor para sincronizar licencias sin duplicar ni perder registros.
 function buildCountMap(lines: string[]) {
   const map = new Map<string, number>();
 
@@ -133,7 +135,6 @@ const fileInputClass =
 const checkboxClass =
   "h-5 w-5 rounded border-slate-300 accent-slate-900 cursor-pointer";
 
-// Tarjeta reutilizable del editor de productos que puede expandirse o colapsarse.
 function SectionCard({
   title,
   subtitle,
@@ -173,7 +174,6 @@ function SectionCard({
   );
 }
 
-// Pantalla administrativa para editar productos simples, variables o compuestos.
 export default function EditProductPage() {
   const params = useParams();
   const id = params.id as string;
@@ -227,7 +227,6 @@ export default function EditProductPage() {
     return grouped;
   }, [allVariants]);
 
-  // Carga la información principal del producto que se está editando.
   const fetchProduct = async () => {
     const { data, error } = await supabase
       .from("products")
@@ -253,7 +252,6 @@ export default function EditProductPage() {
     setCurrentImageUrl(data.image_url || "");
   };
 
-  // Carga las variantes asociadas al producto actual.
   const fetchVariants = async () => {
     const { data, error } = await supabase
       .from("product_variants")
@@ -276,6 +274,8 @@ export default function EditProductPage() {
         description: item.description || "",
         price: String(item.price ?? ""),
         stock: String(item.stock ?? 0),
+        image_url: item.image_url || "",
+        imageFile: null,
         is_active: Boolean(item.is_active),
         sort_order: item.sort_order ?? index,
         priorityLicensesInput: "",
@@ -283,7 +283,6 @@ export default function EditProductPage() {
     );
   };
 
-  // Carga los componentes de un producto compuesto o combo.
   const fetchComponents = async () => {
     const { data, error } = await supabase
       .from("product_components")
@@ -309,7 +308,6 @@ export default function EditProductPage() {
     );
   };
 
-  // Carga productos y variantes auxiliares para poblar selectores del editor.
   const fetchCatalogData = async () => {
     const [{ data: productsData }, { data: variantsData }] = await Promise.all([
       supabase
@@ -327,7 +325,6 @@ export default function EditProductPage() {
     setAllVariants((variantsData as ProductVariantOption[]) || []);
   };
 
-  // Carga las licencias disponibles y las reparte entre generales y prioritarias.
   const fetchLicenses = async () => {
     const { data, error } = await supabase
       .from("product_licenses")
@@ -368,7 +365,6 @@ export default function EditProductPage() {
     );
   };
 
-  // Ejecuta la carga inicial de todos los datos necesarios para la pantalla.
   const loadAll = async () => {
     setLoading(true);
     setMessage("");
@@ -404,7 +400,6 @@ export default function EditProductPage() {
     };
   }, [previewUrl]);
 
-  // Agrega una nueva variante vacía al estado local del formulario.
   const addVariant = () => {
     setVariants((prev) => [
       ...prev,
@@ -415,6 +410,8 @@ export default function EditProductPage() {
         description: "",
         price: "",
         stock: "0",
+        image_url: "",
+        imageFile: null,
         is_active: true,
         sort_order: prev.length,
         priorityLicensesInput: "",
@@ -422,7 +419,6 @@ export default function EditProductPage() {
     ]);
   };
 
-  // Actualiza un campo concreto de una variante dentro del estado local.
   const updateVariant = (
     tempId: string,
     field: keyof VariantRow,
@@ -434,6 +430,10 @@ export default function EditProductPage() {
 
         const updated = { ...item, [field]: value };
 
+        if (field === "name") {
+          updated.slug = makeVariantSlug(name, String(value));
+        }
+
         if (field === "priorityLicensesInput") {
           updated.stock = String(normalizeLines(String(value)).length);
         }
@@ -443,7 +443,14 @@ export default function EditProductPage() {
     );
   };
 
-  // Elimina una variante del estado y registra su borrado si ya existía en base de datos.
+  const updateVariantImageFile = (tempId: string, file: File | null) => {
+    setVariants((prev) =>
+      prev.map((item) =>
+        item.tempId === tempId ? { ...item, imageFile: file } : item
+      )
+    );
+  };
+
   const removeVariant = (tempId: string) => {
     setVariants((prev) => {
       const found = prev.find((item) => item.tempId === tempId);
@@ -454,7 +461,6 @@ export default function EditProductPage() {
     });
   };
 
-  // Agrega un nuevo componente al combo dentro del formulario.
   const addComponent = () => {
     setComponents((prev) => [
       ...prev,
@@ -468,7 +474,6 @@ export default function EditProductPage() {
     ]);
   };
 
-  // Actualiza un campo específico de un componente del combo.
   const updateComponent = (
     tempId: string,
     field: keyof ComponentRow,
@@ -481,12 +486,10 @@ export default function EditProductPage() {
     );
   };
 
-  // Quita un componente del combo del estado local.
   const removeComponent = (tempId: string) => {
     setComponents((prev) => prev.filter((item) => item.tempId !== tempId));
   };
 
-  // Sincroniza en la base de datos las licencias disponibles con las líneas ingresadas en el formulario.
   const syncAvailableLicenses = async ({
     productId,
     variantId,
@@ -582,14 +585,13 @@ export default function EditProductPage() {
     }
   };
 
-  // Valida el formulario y guarda producto, variantes, componentes e inventario de licencias.
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     setMessage("");
 
     const cleanName = name.trim();
-    const cleanSlug = slug.trim() || slugify(cleanName);
+    const cleanSlug = slugify(cleanName);
     const cleanCategory = category.trim();
     const numericPrice = Number(price || 0);
     const generalLines = normalizeLines(generalLicensesInput);
@@ -738,13 +740,49 @@ export default function EditProductPage() {
         const item = variants[index];
         const priorityLines = normalizeLines(item.priorityLicensesInput);
 
+        let finalVariantImageUrl = item.image_url.trim() || null;
+
+        if (item.imageFile) {
+          const fileExt =
+            item.imageFile.name.split(".").pop()?.toLowerCase() || "jpg";
+          const fileName = `${Date.now()}-${Math.random()
+            .toString(36)
+            .slice(2)}.${fileExt}`;
+          const filePath = `variants/${fileName}`;
+
+          const { error: uploadVariantImageError } = await supabase.storage
+            .from("product-images")
+            .upload(filePath, item.imageFile, {
+              cacheControl: "31536000",
+              upsert: false,
+              contentType: item.imageFile.type || undefined,
+            });
+
+          if (uploadVariantImageError) {
+            setMessage(
+              `Error subiendo imagen de variante "${
+                item.name || "sin nombre"
+              }": ${uploadVariantImageError.message}`
+            );
+            setSaving(false);
+            return;
+          }
+
+          const { data: variantImageData } = supabase.storage
+            .from("product-images")
+            .getPublicUrl(filePath);
+
+          finalVariantImageUrl = variantImageData.publicUrl;
+        }
+
         const payload = {
           product_id: id,
           name: item.name.trim(),
-          slug: item.slug.trim() || slugify(item.name),
+          slug: makeVariantSlug(cleanName, item.name),
           description: item.description.trim() || null,
           price: Number(item.price || 0),
           stock: priorityLines.length,
+          image_url: finalVariantImageUrl,
           is_active: item.is_active,
           sort_order: index,
         };
@@ -922,8 +960,17 @@ export default function EditProductPage() {
                   type="text"
                   value={name}
                   onChange={(e) => {
-                    setName(e.target.value);
-                    if (!slug.trim()) setSlug(slugify(e.target.value));
+                    const nextName = e.target.value;
+                    setName(nextName);
+                    setSlug(slugify(nextName));
+                    setVariants((prev) =>
+                      prev.map((variant) => ({
+                        ...variant,
+                        slug: variant.name.trim()
+                          ? makeVariantSlug(nextName, variant.name)
+                          : "",
+                      }))
+                    );
                   }}
                   placeholder="Nombre del producto"
                   className={inputSoftClass}
@@ -932,15 +979,18 @@ export default function EditProductPage() {
 
               <div>
                 <label className="mb-2 block text-sm font-semibold text-slate-700">
-                  Slug
+                  URL automática
                 </label>
                 <input
                   type="text"
                   value={slug}
-                  onChange={(e) => setSlug(slugify(e.target.value))}
+                  readOnly
                   placeholder="spotify-premium"
                   className={inputSoftClass}
                 />
+                <p className="mt-2 text-sm text-slate-500">
+                  Se genera automáticamente según el nombre del producto.
+                </p>
               </div>
 
               <div>
@@ -1151,19 +1201,56 @@ export default function EditProductPage() {
                           className={inputClass}
                         />
 
-                        <input
-                          type="text"
-                          placeholder="Slug variante"
-                          value={item.slug}
-                          onChange={(e) =>
-                            updateVariant(
-                              item.tempId,
-                              "slug",
-                              slugify(e.target.value)
-                            )
-                          }
-                          className={inputClass}
-                        />
+                        <div>
+                          <label className="mb-2 block text-sm font-semibold text-slate-700">
+                            URL automática de la variante
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="spotify-premium-1-mes"
+                            value={item.slug}
+                            readOnly
+                            className={inputClass}
+                          />
+                        </div>
+
+                        <div>
+                          <label className="mb-2 block text-sm font-semibold text-slate-700">
+                            Imagen de la variante
+                          </label>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) =>
+                              updateVariantImageFile(
+                                item.tempId,
+                                e.target.files?.[0] || null
+                              )
+                            }
+                            className={fileInputClass}
+                          />
+
+                          {item.imageFile ? (
+                            <p className="mt-2 text-sm text-slate-500">
+                              Imagen seleccionada: {item.imageFile.name}
+                            </p>
+                          ) : item.image_url ? (
+                            <div className="mt-3 flex items-center gap-3">
+                              <img
+                                src={item.image_url}
+                                alt={item.name || "Imagen de variante"}
+                                className="h-20 w-20 rounded-xl border border-slate-200 object-cover"
+                              />
+                              <p className="text-sm text-slate-500">
+                                Imagen actual de la variante. Puedes reemplazarla subiendo un nuevo archivo.
+                              </p>
+                            </div>
+                          ) : (
+                            <p className="mt-2 text-sm text-slate-500">
+                              Si no subes imagen, la variante usará la imagen principal del producto.
+                            </p>
+                          )}
+                        </div>
 
                         <textarea
                           rows={3}
