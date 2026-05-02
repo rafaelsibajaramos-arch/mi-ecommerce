@@ -1241,13 +1241,13 @@ export default function HomePage() {
               >
                 <div className="grid gap-0 md:grid-cols-[0.9fr_1.02fr]">
                   <div className="p-3 pb-2 sm:p-4 sm:pb-3 md:p-4">
-                    <div className="overflow-hidden rounded-[18px] border border-white/10 bg-white/[0.03]">
-                      <div className="h-[150px] w-full sm:h-[200px] md:h-[255px] lg:h-[285px]">
+                    <div className="rounded-[18px] border border-white/10 bg-white/[0.03]">
+                      <div className="flex h-[170px] w-full items-center justify-center overflow-hidden sm:h-[210px] md:h-[255px] lg:h-[280px]">
                         <ProductImage
                           src={quickViewItem.displayImageUrl}
                           alt={quickViewItem.displayName}
-                          className="h-full w-full object-contain p-2 sm:p-3 md:p-4"
-                          fallbackClassName="flex h-full items-center justify-center bg-white/[0.02]"
+                          className="block max-h-[86%] max-w-[86%] object-contain"
+                          fallbackClassName="flex h-full w-full items-center justify-center bg-white/[0.02]"
                         />
                       </div>
                     </div>
