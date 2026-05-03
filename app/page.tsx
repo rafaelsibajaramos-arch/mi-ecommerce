@@ -131,6 +131,7 @@ type ReceiptLicenseRow = {
 
 const PRODUCTS_PER_PAGE = 12;
 const SEARCH_DEBOUNCE_MS = 350;
+const ADMIN_CACHE_KEY = "streamingmayor_is_admin";
 
 export default function HomePage() {
   const { addToCart } = useCart();
@@ -154,6 +155,18 @@ export default function HomePage() {
   const catalogRequestIdRef = useRef(0);
   const categoryRequestIdRef = useRef(0);
   const roleRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    try {
+      const cachedAdmin = window.localStorage.getItem(ADMIN_CACHE_KEY);
+
+      if (cachedAdmin === "true") {
+        setIsAdmin(true);
+      }
+    } catch {
+      // Ignora errores de localStorage.
+    }
+  }, []);
 
   const isAbortLikeError = (error: unknown) => {
     if (!error) return false;
@@ -271,7 +284,7 @@ export default function HomePage() {
         if (orderError || !orderData) {
           if (!cancelled) {
             setReceiptMessage(
-              "La compra fue exitosa, pero no se pudo abrir automáticamente el comprobante.",
+              "La compra fue exitosa, pero no se pudo abrir automáticamente el comprobante."
             );
           }
           return;
@@ -280,14 +293,14 @@ export default function HomePage() {
         const { data: itemsData, error: itemsError } = await supabase
           .from("order_items")
           .select(
-            "id, order_id, product_id, quantity, unit_price, product_name, variant_name",
+            "id, order_id, product_id, quantity, unit_price, product_name, variant_name"
           )
           .eq("order_id", orderData.id);
 
         if (itemsError) {
           if (!cancelled) {
             setReceiptMessage(
-              "La compra fue exitosa, pero no se pudo cargar el detalle del comprobante.",
+              "La compra fue exitosa, pero no se pudo cargar el detalle del comprobante."
             );
           }
           return;
@@ -295,7 +308,7 @@ export default function HomePage() {
 
         const rawItems = (itemsData as ReceiptOrderItemRow[]) || [];
         const productIds = Array.from(
-          new Set(rawItems.map((item) => item.product_id).filter(Boolean)),
+          new Set(rawItems.map((item) => item.product_id).filter(Boolean))
         );
 
         const productsMap = new Map<string, ReceiptProductRow>();
@@ -309,7 +322,7 @@ export default function HomePage() {
           if (productsError) {
             if (!cancelled) {
               setReceiptMessage(
-                "La compra fue exitosa, pero no se pudo cargar la información de los productos del comprobante.",
+                "La compra fue exitosa, pero no se pudo cargar la información de los productos del comprobante."
               );
             }
             return;
@@ -323,7 +336,7 @@ export default function HomePage() {
         const { data: licensesData, error: licensesError } = await supabase
           .from("product_licenses")
           .select(
-            "id, product_id, variant_id, license_text, status, assigned_order_id, assigned_order_item_id, assigned_user_id",
+            "id, product_id, variant_id, license_text, status, assigned_order_id, assigned_order_item_id, assigned_user_id"
           )
           .eq("assigned_order_id", orderData.id)
           .eq("assigned_user_id", user.id)
@@ -332,7 +345,7 @@ export default function HomePage() {
         if (licensesError) {
           if (!cancelled) {
             setReceiptMessage(
-              "La compra fue exitosa, pero no se pudieron cargar las licencias del comprobante.",
+              "La compra fue exitosa, pero no se pudieron cargar las licencias del comprobante."
             );
           }
           return;
@@ -384,7 +397,7 @@ export default function HomePage() {
       } catch {
         if (!cancelled) {
           setReceiptMessage(
-            "La compra fue exitosa, pero ocurrió un error abriendo el comprobante.",
+            "La compra fue exitosa, pero ocurrió un error abriendo el comprobante."
           );
         }
       }
@@ -405,18 +418,28 @@ export default function HomePage() {
     const requestId = ++roleRequestIdRef.current;
 
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      let currentUser = null;
 
-      let currentUser = session?.user || null;
-
-      if (!currentUser) {
+      for (let attempt = 0; attempt < 4; attempt += 1) {
         const {
-          data: { user },
-        } = await supabase.auth.getUser();
+          data: { session },
+        } = await supabase.auth.getSession();
 
-        currentUser = user || null;
+        currentUser = session?.user || null;
+
+        if (!currentUser) {
+          const {
+            data: { user },
+          } = await supabase.auth.getUser();
+
+          currentUser = user || null;
+        }
+
+        if (currentUser) {
+          break;
+        }
+
+        await sleep(250);
       }
 
       if (requestId !== roleRequestIdRef.current) {
@@ -425,6 +448,13 @@ export default function HomePage() {
 
       if (!currentUser) {
         setIsAdmin(false);
+
+        try {
+          window.localStorage.removeItem(ADMIN_CACHE_KEY);
+        } catch {
+          // Ignora errores de localStorage.
+        }
+
         return;
       }
 
@@ -439,21 +469,29 @@ export default function HomePage() {
       }
 
       if (error) {
-        setIsAdmin(false);
         return;
       }
 
-      setIsAdmin(data?.role === "admin");
-    } catch {
-      if (requestId === roleRequestIdRef.current) {
-        setIsAdmin(false);
+      const nextIsAdmin = data?.role === "admin";
+
+      setIsAdmin(nextIsAdmin);
+
+      try {
+        window.localStorage.setItem(
+          ADMIN_CACHE_KEY,
+          nextIsAdmin ? "true" : "false"
+        );
+      } catch {
+        // Ignora errores de localStorage.
       }
+    } catch {
+      // Si hay error temporal de red/Supabase, conserva el estado cacheado.
     }
   }, []);
 
   const getVariantDisplayStock = (
     product: Product,
-    variant: ProductVariant | null,
+    variant: ProductVariant | null
   ) => {
     if (!variant) return Number(product.stock || 0);
 
@@ -469,7 +507,7 @@ export default function HomePage() {
   const buildCatalogItems = useCallback(
     (
       productRows: Product[],
-      groupedVariants: Record<string, ProductVariant[]>,
+      groupedVariants: Record<string, ProductVariant[]>
     ): CatalogItem[] => {
       return productRows.flatMap<CatalogItem>((product): CatalogItem[] => {
         if (product.product_type !== "variable") {
@@ -516,7 +554,7 @@ export default function HomePage() {
         }));
       });
     },
-    [],
+    []
   );
 
   const fetchCategories = useCallback(async () => {
@@ -538,11 +576,11 @@ export default function HomePage() {
         }
 
         const productRows =
-          (data as {
+          ((data as {
             id: string;
             category: string | null;
             product_type?: ProductType;
-          }[]) || [];
+          }[]) || []);
 
         const variableProductIds = productRows
           .filter((product) => product.product_type === "variable")
@@ -569,9 +607,9 @@ export default function HomePage() {
             (variant) => {
               variantCounts.set(
                 variant.product_id,
-                (variantCounts.get(variant.product_id) || 0) + 1,
+                (variantCounts.get(variant.product_id) || 0) + 1
               );
-            },
+            }
           );
         }
 
@@ -594,7 +632,7 @@ export default function HomePage() {
 
         const ordered = Array.from(counts.entries())
           .sort((a, b) =>
-            a[0].localeCompare(b[0], "es", { sensitivity: "base" }),
+            a[0].localeCompare(b[0], "es", { sensitivity: "base" })
           )
           .map(([name, count]) => ({ name, count }));
 
@@ -643,7 +681,7 @@ export default function HomePage() {
         if (debouncedSearch) {
           const term = debouncedSearch.replace(/[%]/g, "").trim();
           query = query.or(
-            `name.ilike.%${term}%,category.ilike.%${term}%,description.ilike.%${term}%`,
+            `name.ilike.%${term}%,category.ilike.%${term}%,description.ilike.%${term}%`
           );
         }
 
@@ -659,7 +697,7 @@ export default function HomePage() {
 
         const safeProducts = (data as Product[]) || [];
         const variableProducts = safeProducts.filter(
-          (product) => product.product_type === "variable",
+          (product) => product.product_type === "variable"
         );
 
         const groupedVariants: Record<string, ProductVariant[]> = {};
@@ -712,7 +750,7 @@ export default function HomePage() {
         setMessage(
           `Error cargando productos: ${
             error instanceof Error ? error.message : "Error desconocido"
-          }`,
+          }`
         );
         setCatalogItems([]);
         setTotalProducts(0);
@@ -724,13 +762,22 @@ export default function HomePage() {
 
   useEffect(() => {
     let mounted = true;
+    let retryTimeout: number | null = null;
 
     const run = async () => {
       if (!mounted) return;
+
       await fetchRole();
 
       if (!mounted) return;
+
       await fetchCategories();
+
+      retryTimeout = window.setTimeout(() => {
+        if (mounted) {
+          void fetchRole();
+        }
+      }, 1200);
     };
 
     void run();
@@ -738,14 +785,19 @@ export default function HomePage() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      roleRequestIdRef.current += 1;
-
       if (!mounted) {
         return;
       }
 
       if (!session?.user) {
         setIsAdmin(false);
+
+        try {
+          window.localStorage.removeItem(ADMIN_CACHE_KEY);
+        } catch {
+          // Ignora errores de localStorage.
+        }
+
         return;
       }
 
@@ -754,10 +806,21 @@ export default function HomePage() {
           void fetchRole();
         }
       }, 0);
+
+      window.setTimeout(() => {
+        if (mounted) {
+          void fetchRole();
+        }
+      }, 900);
     });
 
     return () => {
       mounted = false;
+
+      if (retryTimeout) {
+        window.clearTimeout(retryTimeout);
+      }
+
       subscription.unsubscribe();
     };
   }, [fetchCategories, fetchRole]);
@@ -800,7 +863,7 @@ export default function HomePage() {
 
   const handleAddToCart = (
     e: React.MouseEvent<HTMLButtonElement>,
-    item: CatalogItem,
+    item: CatalogItem
   ) => {
     e.stopPropagation();
 
@@ -1151,7 +1214,7 @@ export default function HomePage() {
                       <div className="flex flex-wrap items-center justify-center gap-2">
                         {Array.from(
                           { length: totalPages },
-                          (_, index) => index + 1,
+                          (_, index) => index + 1
                         ).map((page) => (
                           <button
                             key={page}
@@ -1172,7 +1235,7 @@ export default function HomePage() {
                         type="button"
                         onClick={() =>
                           setCurrentPage((prev) =>
-                            Math.min(prev + 1, totalPages),
+                            Math.min(prev + 1, totalPages)
                           )
                         }
                         disabled={currentPage === totalPages}

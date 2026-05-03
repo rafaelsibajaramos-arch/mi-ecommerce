@@ -13,6 +13,9 @@ type Profile = {
   role: string | null;
 };
 
+const PROFILE_CACHE_KEY = "streamingmayor_profile_cache";
+const ADMIN_CACHE_KEY = "streamingmayor_is_admin";
+
 export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean }) {
   const [open, setOpen] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -20,12 +23,42 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
   const router = useRouter();
 
   useEffect(() => {
-    loadProfile();
+    try {
+      const cachedProfile = window.localStorage.getItem(PROFILE_CACHE_KEY);
+
+      if (cachedProfile) {
+        const parsedProfile = JSON.parse(cachedProfile) as Profile;
+        setProfile(parsedProfile);
+      }
+    } catch {
+      // Ignora errores de localStorage.
+    }
+
+    void loadProfile();
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(() => {
-      loadProfile();
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session?.user) {
+        setProfile(null);
+
+        try {
+          window.localStorage.removeItem(PROFILE_CACHE_KEY);
+          window.localStorage.removeItem(ADMIN_CACHE_KEY);
+        } catch {
+          // Ignora errores de localStorage.
+        }
+
+        return;
+      }
+
+      window.setTimeout(() => {
+        void loadProfile();
+      }, 0);
+
+      window.setTimeout(() => {
+        void loadProfile();
+      }, 900);
     });
 
     return () => {
@@ -50,28 +83,89 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
   }, []);
 
   const loadProfile = async () => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    try {
+      let currentUser = null;
 
-    if (!user) {
-      setProfile(null);
-      return;
-    }
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
 
-    const { data } = await supabase
-      .from("profiles")
-      .select("id, full_name, email, balance, role")
-      .eq("id", user.id)
-      .single();
+        currentUser = session?.user || null;
 
-    if (data) {
-      setProfile(data);
+        if (!currentUser) {
+          const {
+            data: { user },
+          } = await supabase.auth.getUser();
+
+          currentUser = user || null;
+        }
+
+        if (currentUser) {
+          break;
+        }
+
+        await new Promise((resolve) => window.setTimeout(resolve, 250));
+      }
+
+      if (!currentUser) {
+        setProfile(null);
+
+        try {
+          window.localStorage.removeItem(PROFILE_CACHE_KEY);
+          window.localStorage.removeItem(ADMIN_CACHE_KEY);
+        } catch {
+          // Ignora errores de localStorage.
+        }
+
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, full_name, email, balance, role")
+        .eq("id", currentUser.id)
+        .maybeSingle();
+
+      if (error || !data) {
+        return;
+      }
+
+      const nextProfile = data as Profile;
+
+      setProfile(nextProfile);
+
+      try {
+        window.localStorage.setItem(
+          PROFILE_CACHE_KEY,
+          JSON.stringify(nextProfile)
+        );
+
+        window.localStorage.setItem(
+          ADMIN_CACHE_KEY,
+          nextProfile.role === "admin" ? "true" : "false"
+        );
+      } catch {
+        // Ignora errores de localStorage.
+      }
+    } catch {
+      // Si hay error temporal, deja el perfil cacheado visible.
     }
   };
 
   const logout = async () => {
+    try {
+      window.localStorage.removeItem(PROFILE_CACHE_KEY);
+      window.localStorage.removeItem(ADMIN_CACHE_KEY);
+    } catch {
+      // Ignora errores de localStorage.
+    }
+
     await supabase.auth.signOut();
+
+    setProfile(null);
+    setOpen(false);
+
     router.replace("/");
     router.refresh();
   };
@@ -89,6 +183,7 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
 
   const fullName = profile.full_name || "Usuario";
   const email = profile.email || "Sin correo";
+  const canSeeAdmin = isAdmin || profile.role === "admin";
 
   const itemClass =
     "flex items-center gap-3 rounded-2xl px-3 py-2 text-[13px] font-medium text-white/85 transition hover:bg-white/[0.05] hover:text-white min-[390px]:py-2.5 min-[390px]:text-[14px] md:gap-2.5 md:px-3 md:py-2 md:text-[14px] xl:py-2";
@@ -188,7 +283,7 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
                 <span>Inicio</span>
               </Link>
 
-              {isAdmin && (
+              {canSeeAdmin && (
                 <Link
                   href="/admin/products"
                   onClick={() => setOpen(false)}
