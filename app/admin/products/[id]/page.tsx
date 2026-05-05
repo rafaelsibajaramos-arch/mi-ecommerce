@@ -18,7 +18,10 @@ type VariantRow = {
   imageFile: File | null;
   is_active: boolean;
   sort_order: number;
-  priorityLicensesInput: string;
+  priorityLicenseRows: LicenseEditorRow[];
+  newPriorityLicensesInput: string;
+  accessDurationMonths: string;
+  defaultLicenseBillingMonths: string;
 };
 
 type ComponentRow = {
@@ -51,6 +54,18 @@ type ProductLicenseRow = {
   license_text: string;
   status: "available" | "assigned" | "disabled";
   is_priority: boolean;
+  billing_duration_days: number | null;
+  billing_duration_months: number | null;
+  requires_rotation_alert: boolean | null;
+  license_mode: "individual" | "shared" | null;
+  max_active_users: number | null;
+};
+
+type LicenseEditorRow = {
+  id?: string;
+  tempId: string;
+  licenseText: string;
+  billingDurationDays: string;
 };
 
 type ProductVariantDbRow = {
@@ -63,6 +78,8 @@ type ProductVariantDbRow = {
   image_url: string | null;
   is_active: boolean | null;
   sort_order: number | null;
+  access_duration_months: number | null;
+  default_license_billing_months: number | null;
 };
 
 type ProductComponentDbRow = {
@@ -112,15 +129,119 @@ function normalizeLines(text: string) {
     .filter(Boolean);
 }
 
-function buildCountMap(lines: string[]) {
-  const map = new Map<string, number>();
+function rowsToLicenseText(rows: LicenseEditorRow[]) {
+  return rows.map((row) => row.licenseText).join("\n");
+}
 
-  for (const line of lines) {
-    const key = line.trim();
-    map.set(key, (map.get(key) || 0) + 1);
+function buildLicenseRowsFromText(
+  text: string,
+  currentRows: LicenseEditorRow[]
+): LicenseEditorRow[] {
+  const lines = normalizeLines(text);
+  const usedIndexes = new Set<number>();
+
+  return lines.map((line, index) => {
+    const sameIndexRow = currentRows[index];
+
+    if (sameIndexRow && sameIndexRow.licenseText === line && !usedIndexes.has(index)) {
+      usedIndexes.add(index);
+      return sameIndexRow;
+    }
+
+    const matchingIndex = currentRows.findIndex(
+      (row, rowIndex) =>
+        !usedIndexes.has(rowIndex) && row.licenseText.trim() === line
+    );
+
+    if (matchingIndex >= 0) {
+      usedIndexes.add(matchingIndex);
+      return currentRows[matchingIndex];
+    }
+
+    return {
+      tempId: makeTempId(),
+      licenseText: line,
+      billingDurationDays: String(DEFAULT_BILLING_DAYS),
+    };
+  });
+}
+
+const DEFAULT_BILLING_DAYS = 30;
+
+function addMonths(date: Date, months: number) {
+  const result = new Date(date.getTime());
+  const originalDay = result.getDate();
+
+  result.setMonth(result.getMonth() + months);
+
+  if (result.getDate() !== originalDay) {
+    result.setDate(0);
   }
 
-  return map;
+  return result;
+}
+
+function addDays(date: Date, days: number) {
+  const result = new Date(date.getTime());
+  result.setDate(result.getDate() + days);
+  return result;
+}
+
+function inferAccessDurationMonths(value: string) {
+  const normalized = value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  const monthMatch = normalized.match(/(\d+(?:[.,]\d+)?)\s*(mes|meses|m)\b/);
+  if (monthMatch) {
+    const months = Number(monthMatch[1].replace(",", "."));
+    if (Number.isFinite(months) && months > 0) return Math.ceil(months);
+  }
+
+  const dayMatch = normalized.match(/(\d+(?:[.,]\d+)?)\s*(dia|dias|d)\b/);
+  if (dayMatch) {
+    const days = Number(dayMatch[1].replace(",", "."));
+    if (Number.isFinite(days) && days > 0) return Math.max(1, Math.ceil(days / 30));
+  }
+
+  return 1;
+}
+
+function normalizeBillingDurationDays(value: string | number | null | undefined) {
+  if (value === null || value === undefined || value === "") return DEFAULT_BILLING_DAYS;
+
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue) || numericValue <= 0) {
+    return DEFAULT_BILLING_DAYS;
+  }
+
+  return Math.floor(numericValue);
+}
+
+function resolveLicenseBillingDays(row: ProductLicenseRow) {
+  return normalizeBillingDurationDays(
+    row.billing_duration_days ||
+      (row.billing_duration_months ? row.billing_duration_months * 30 : null)
+  );
+}
+
+function mapLicenseRowToEditor(row: ProductLicenseRow): LicenseEditorRow {
+  return {
+    id: row.id,
+    tempId: row.id || makeTempId(),
+    licenseText: row.license_text || "",
+    billingDurationDays: String(resolveLicenseBillingDays(row)),
+  };
+}
+
+function isInvalidBillingDays(value: string) {
+  if (!value.trim()) return false;
+
+  const numericValue = Number(value);
+
+  return !Number.isFinite(numericValue) || numericValue <= 0;
 }
 
 const inputClass =
@@ -174,6 +295,132 @@ function SectionCard({
   );
 }
 
+
+function LicenseRowsEditor({
+  title,
+  subtitle,
+  rows,
+  licensesText,
+  onLicensesTextChange,
+  onSyncLicensesFromText,
+  onRemoveLicense,
+  onBillingDaysChange,
+  inputClassName,
+  textareaClassName,
+}: {
+  title: string;
+  subtitle?: string;
+  rows: LicenseEditorRow[];
+  licensesText: string;
+  onLicensesTextChange: (value: string) => void;
+  onSyncLicensesFromText: () => void;
+  onRemoveLicense: (tempId: string) => void;
+  onBillingDaysChange: (tempId: string, value: string) => void;
+  inputClassName: string;
+  textareaClassName: string;
+}) {
+  return (
+    <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4">
+      <div>
+        <h3 className="text-sm font-bold text-slate-900">{title}</h3>
+        {subtitle ? <p className="mt-1 text-sm text-slate-500">{subtitle}</p> : null}
+      </div>
+
+      <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-3">
+        <label className="mb-2 block text-sm font-semibold text-slate-700">
+          Módulo de licencias
+        </label>
+        <textarea
+          rows={6}
+          value={licensesText}
+          onChange={(event) => onLicensesTextChange(event.target.value)}
+          placeholder={`correo@gmail.com clave123 perfil1\ncorreo2@gmail.com clave456 perfil2`}
+          className={`${textareaClassName} font-mono text-sm`}
+        />
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-slate-500">
+            Pega, borra o reordena una licencia por línea. Luego presiona actualizar listado para que abajo queden separadas con su duración.
+          </p>
+          <button
+            type="button"
+            onClick={onSyncLicensesFromText}
+            className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white transition hover:bg-slate-700"
+          >
+            Actualizar listado
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <p className="text-sm font-semibold text-slate-700">
+            Licencias guardadas/separadas
+          </p>
+          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
+            {rows.length} licencia(s)
+          </span>
+        </div>
+
+        {rows.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">
+            Todavía no hay licencias en este módulo. Escribe las licencias arriba y presiona actualizar listado.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {rows.map((row, index) => (
+              <div
+                key={row.tempId}
+                className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-[1fr_170px_44px] md:items-end"
+              >
+                <div>
+                  <label className="mb-1 block text-xs font-bold uppercase tracking-[0.12em] text-slate-400">
+                    Licencia #{index + 1}
+                  </label>
+                  <input
+                    type="text"
+                    value={row.licenseText}
+                    readOnly
+                    className={`${inputClassName} bg-white font-mono text-sm`}
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-bold uppercase tracking-[0.12em] text-slate-400">
+                    Facturación días
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={row.billingDurationDays}
+                    onChange={(event) =>
+                      onBillingDaysChange(row.tempId, event.target.value)
+                    }
+                    placeholder="30"
+                    className={inputClassName}
+                  />
+                  <p className="mt-1 text-[11px] font-medium text-slate-500">
+                    Vacío = 30 días.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  title="Eliminar licencia"
+                  aria-label={`Eliminar licencia ${index + 1}`}
+                  onClick={() => onRemoveLicense(row.tempId)}
+                  className="flex h-11 w-11 items-center justify-center rounded-xl border border-red-200 bg-white text-xl font-black leading-none text-red-600 transition hover:bg-red-50"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function EditProductPage() {
   const params = useParams();
   const id = params.id as string;
@@ -189,11 +436,13 @@ export default function EditProductPage() {
 
   const [avoidRepeatLicense, setAvoidRepeatLicense] = useState(false);
   const [usePriorityLicenses, setUsePriorityLicenses] = useState(true);
+  const [enableLicenseAlerts, setEnableLicenseAlerts] = useState(false);
 
   const [currentImageUrl, setCurrentImageUrl] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
 
-  const [generalLicensesInput, setGeneralLicensesInput] = useState("");
+  const [generalLicenseRows, setGeneralLicenseRows] = useState<LicenseEditorRow[]>([]);
+  const [newGeneralLicensesInput, setNewGeneralLicensesInput] = useState("");
   const [variants, setVariants] = useState<VariantRow[]>([]);
   const [deletedVariantIds, setDeletedVariantIds] = useState<string[]>([]);
   const [components, setComponents] = useState<ComponentRow[]>([]);
@@ -249,6 +498,7 @@ export default function EditProductPage() {
     setProductType((data.product_type || "simple") as ProductType);
     setAvoidRepeatLicense(Boolean(data.avoid_repeat_license));
     setUsePriorityLicenses(Boolean(data.use_priority_licenses));
+    setEnableLicenseAlerts(Boolean(data.enable_license_alerts));
     setCurrentImageUrl(data.image_url || "");
   };
 
@@ -278,7 +528,14 @@ export default function EditProductPage() {
         imageFile: null,
         is_active: Boolean(item.is_active),
         sort_order: item.sort_order ?? index,
-        priorityLicensesInput: "",
+        priorityLicenseRows: [],
+        newPriorityLicensesInput: "",
+        accessDurationMonths: item.access_duration_months
+          ? String(item.access_duration_months)
+          : "",
+        defaultLicenseBillingMonths: item.default_license_billing_months
+          ? String(item.default_license_billing_months)
+          : "",
       }))
     );
   };
@@ -328,7 +585,7 @@ export default function EditProductPage() {
   const fetchLicenses = async () => {
     const { data, error } = await supabase
       .from("product_licenses")
-      .select("id, product_id, variant_id, license_text, status, is_priority")
+      .select("id, product_id, variant_id, license_text, status, is_priority, billing_duration_days, billing_duration_months, requires_rotation_alert, license_mode, max_active_users")
       .eq("product_id", id)
       .eq("status", "available")
       .order("created_at", { ascending: true });
@@ -340,26 +597,28 @@ export default function EditProductPage() {
 
     const rows = (data as ProductLicenseRow[]) || [];
 
-    const generalLines = rows
+    const generalRows = rows
       .filter((row) => !row.variant_id && !row.is_priority)
-      .map((row) => row.license_text);
+      .map(mapLicenseRowToEditor);
 
-    setGeneralLicensesInput(generalLines.join("\n"));
+    setGeneralLicenseRows(generalRows);
+    setNewGeneralLicensesInput(rowsToLicenseText(generalRows));
 
     setVariants((prev) =>
       prev.map((variant) => {
         if (!variant.id) return variant;
 
-        const priorityLines = rows
+        const priorityRows = rows
           .filter(
             (row) => row.variant_id === variant.id && row.is_priority === true
           )
-          .map((row) => row.license_text);
+          .map(mapLicenseRowToEditor);
 
         return {
           ...variant,
-          priorityLicensesInput: priorityLines.join("\n"),
-          stock: String(priorityLines.length),
+          priorityLicenseRows: priorityRows,
+          newPriorityLicensesInput: rowsToLicenseText(priorityRows),
+          stock: String(priorityRows.length),
         };
       })
     );
@@ -390,9 +649,8 @@ export default function EditProductPage() {
   }, [loading]);
 
   useEffect(() => {
-    const detected = String(normalizeLines(generalLicensesInput).length);
-    setStock(detected);
-  }, [generalLicensesInput]);
+    setStock(String(generalLicenseRows.length));
+  }, [generalLicenseRows.length]);
 
   useEffect(() => {
     return () => {
@@ -414,7 +672,10 @@ export default function EditProductPage() {
         imageFile: null,
         is_active: true,
         sort_order: prev.length,
-        priorityLicensesInput: "",
+        priorityLicenseRows: [],
+        newPriorityLicensesInput: "",
+        accessDurationMonths: "",
+        defaultLicenseBillingMonths: "",
       },
     ]);
   };
@@ -432,10 +693,6 @@ export default function EditProductPage() {
 
         if (field === "name") {
           updated.slug = makeVariantSlug(name, String(value));
-        }
-
-        if (field === "priorityLicensesInput") {
-          updated.stock = String(normalizeLines(String(value)).length);
         }
 
         return updated;
@@ -490,24 +747,115 @@ export default function EditProductPage() {
     setComponents((prev) => prev.filter((item) => item.tempId !== tempId));
   };
 
+  const syncGeneralLicensesFromText = () => {
+    const nextRows = buildLicenseRowsFromText(
+      newGeneralLicensesInput,
+      generalLicenseRows
+    );
+
+    setGeneralLicenseRows(nextRows);
+    setNewGeneralLicensesInput(rowsToLicenseText(nextRows));
+  };
+
+  const updateGeneralLicenseBillingDays = (tempId: string, value: string) => {
+    setGeneralLicenseRows((prev) =>
+      prev.map((item) =>
+        item.tempId === tempId ? { ...item, billingDurationDays: value } : item
+      )
+    );
+  };
+
+  const removeGeneralLicenseRow = (tempId: string) => {
+    setGeneralLicenseRows((prev) => {
+      const nextRows = prev.filter((item) => item.tempId !== tempId);
+      setNewGeneralLicensesInput(rowsToLicenseText(nextRows));
+      return nextRows;
+    });
+  };
+
+  const syncVariantLicensesFromText = (tempId: string) => {
+    setVariants((prev) =>
+      prev.map((item) => {
+        if (item.tempId !== tempId) return item;
+
+        const nextRows = buildLicenseRowsFromText(
+          item.newPriorityLicensesInput,
+          item.priorityLicenseRows
+        );
+
+        return {
+          ...item,
+          priorityLicenseRows: nextRows,
+          newPriorityLicensesInput: rowsToLicenseText(nextRows),
+          stock: String(nextRows.length),
+        };
+      })
+    );
+  };
+
+  const updateVariantLicenseBillingDays = (
+    variantTempId: string,
+    licenseTempId: string,
+    value: string
+  ) => {
+    setVariants((prev) =>
+      prev.map((variant) =>
+        variant.tempId === variantTempId
+          ? {
+              ...variant,
+              priorityLicenseRows: variant.priorityLicenseRows.map((license) =>
+                license.tempId === licenseTempId
+                  ? { ...license, billingDurationDays: value }
+                  : license
+              ),
+            }
+          : variant
+      )
+    );
+  };
+
+  const removeVariantLicenseRow = (variantTempId: string, licenseTempId: string) => {
+    setVariants((prev) =>
+      prev.map((variant) => {
+        if (variant.tempId !== variantTempId) return variant;
+
+        const nextRows = variant.priorityLicenseRows.filter(
+          (license) => license.tempId !== licenseTempId
+        );
+
+        return {
+          ...variant,
+          priorityLicenseRows: nextRows,
+          newPriorityLicensesInput: rowsToLicenseText(nextRows),
+          stock: String(nextRows.length),
+        };
+      })
+    );
+  };
+
   const syncAvailableLicenses = async ({
     productId,
     variantId,
-    lines,
+    rows,
     isPriority,
+    requiresRotationAlert,
+    licenseMode,
+    maxActiveUsers,
   }: {
     productId: string;
     variantId: string | null;
-    lines: string[];
+    rows: LicenseEditorRow[];
     isPriority: boolean;
+    requiresRotationAlert: boolean;
+    licenseMode: "individual" | "shared";
+    maxActiveUsers: number;
   }) => {
     let query = supabase
       .from("product_licenses")
-      .select("id, license_text")
+      .select("id")
       .eq("product_id", productId)
       .eq("status", "available")
-      .eq("is_priority", isPriority)
-      .order("created_at", { ascending: true });
+      .eq("is_priority", isPriority);
 
     if (variantId) {
       query = query.eq("variant_id", variantId);
@@ -521,63 +869,48 @@ export default function EditProductPage() {
       throw new Error(error.message);
     }
 
-    const existingRows = (data as { id: string; license_text: string }[]) || [];
-    const normalizedIncoming = lines.map((line) => line.trim()).filter(Boolean);
+    const existingRows = (data as { id: string }[]) || [];
+    const existingIds = existingRows.map((row) => row.id);
+    const normalizedRows = rows
+      .map((row) => ({
+        licenseText: row.licenseText.trim(),
+        billingDurationDays: normalizeBillingDurationDays(row.billingDurationDays),
+      }))
+      .filter((row) => row.licenseText);
+    const now = new Date();
 
-    const incomingCountMap = buildCountMap(normalizedIncoming);
-    const toDeleteIds: string[] = [];
-
-    for (const row of existingRows) {
-      const key = row.license_text.trim();
-      const count = incomingCountMap.get(key) || 0;
-
-      if (count > 0) {
-        incomingCountMap.set(key, count - 1);
-      } else {
-        toDeleteIds.push(row.id);
-      }
-    }
-
-    const existingCountMap = buildCountMap(
-      existingRows.map((row) => row.license_text.trim()).filter(Boolean)
-    );
-
-    const toInsert: string[] = [];
-
-    for (const line of normalizedIncoming) {
-      const key = line.trim();
-      const count = existingCountMap.get(key) || 0;
-
-      if (count > 0) {
-        existingCountMap.set(key, count - 1);
-      } else {
-        toInsert.push(key);
-      }
-    }
-
-    if (toDeleteIds.length > 0) {
+    if (existingIds.length > 0) {
       const { error: deleteError } = await supabase
         .from("product_licenses")
         .delete()
-        .in("id", toDeleteIds);
+        .in("id", existingIds);
 
       if (deleteError) {
         throw new Error(deleteError.message);
       }
     }
 
-    if (toInsert.length > 0) {
-      const payload = toInsert.map((license) => ({
-        product_id: productId,
-        variant_id: variantId,
-        license_text: license,
-        status: "available",
-        is_priority: isPriority,
-      }));
+    for (const [index, row] of normalizedRows.entries()) {
+      const createdAt = new Date(now.getTime() + index).toISOString();
+      const billingEndsAt = addDays(now, row.billingDurationDays).toISOString();
 
-      const { error: insertError } = await supabase
-        .from("product_licenses")
-        .insert(payload);
+      const { error: insertError } = await supabase.from("product_licenses").insert([
+        {
+          product_id: productId,
+          variant_id: variantId,
+          status: "available",
+          is_priority: isPriority,
+          license_text: row.licenseText,
+          billing_duration_days: row.billingDurationDays,
+          billing_duration_months: Math.max(1, Math.ceil(row.billingDurationDays / 30)),
+          billing_starts_at: now.toISOString(),
+          billing_ends_at: billingEndsAt,
+          requires_rotation_alert: requiresRotationAlert,
+          license_mode: licenseMode,
+          max_active_users: maxActiveUsers,
+          created_at: createdAt,
+        },
+      ]);
 
       if (insertError) {
         throw new Error(insertError.message);
@@ -594,13 +927,53 @@ export default function EditProductPage() {
     const cleanSlug = slugify(cleanName);
     const cleanCategory = category.trim();
     const numericPrice = Number(price || 0);
-    const generalLines = normalizeLines(generalLicensesInput);
-    const autoGeneralStock = generalLines.length;
+    const effectiveGeneralLicenseRows = buildLicenseRowsFromText(
+      newGeneralLicensesInput,
+      generalLicenseRows
+    );
+    const effectiveVariants = variants.map((variant) => {
+      const priorityLicenseRows = buildLicenseRowsFromText(
+        variant.newPriorityLicensesInput,
+        variant.priorityLicenseRows
+      );
+
+      return {
+        ...variant,
+        priorityLicenseRows,
+        newPriorityLicensesInput: rowsToLicenseText(priorityLicenseRows),
+        stock: String(priorityLicenseRows.length),
+      };
+    });
+    const autoGeneralStock = effectiveGeneralLicenseRows.length;
+    const inferredProductAccessDurationMonths = enableLicenseAlerts
+      ? inferAccessDurationMonths(`${cleanName} ${description}`)
+      : null;
 
     if (!cleanName) {
       setMessage("Completa el nombre del producto.");
       setSaving(false);
       return;
+    }
+
+
+    for (const row of effectiveGeneralLicenseRows) {
+      if (isInvalidBillingDays(row.billingDurationDays)) {
+        setMessage(`La facturación de la licencia "${row.licenseText}" no es válida.`);
+        setSaving(false);
+        return;
+      }
+    }
+
+    for (const variant of effectiveVariants) {
+      for (const row of variant.priorityLicenseRows) {
+        if (isInvalidBillingDays(row.billingDurationDays)) {
+          setMessage(
+            `La facturación de la licencia "${row.licenseText}" en la variante "${variant.name || "sin nombre"}" no es válida.`
+          );
+          setSaving(false);
+          return;
+        }
+      }
     }
 
     if (
@@ -613,13 +986,13 @@ export default function EditProductPage() {
     }
 
     if (productType === "variable") {
-      if (variants.length === 0) {
+      if (effectiveVariants.length === 0) {
         setMessage("Agrega al menos una variante.");
         setSaving(false);
         return;
       }
 
-      for (const item of variants) {
+      for (const item of effectiveVariants) {
         if (!item.name.trim()) {
           setMessage("Todas las variantes deben tener nombre.");
           setSaving(false);
@@ -710,6 +1083,12 @@ export default function EditProductPage() {
           avoid_repeat_license: avoidRepeatLicense,
           use_priority_licenses: usePriorityLicenses,
           fallback_to_general_licenses: true,
+          enable_license_alerts: enableLicenseAlerts,
+          access_duration_months: inferredProductAccessDurationMonths,
+          default_license_billing_months: null,
+          default_license_requires_rotation_alert: enableLicenseAlerts,
+          default_license_mode: "individual",
+          default_max_active_users: 1,
         })
         .eq("id", id);
 
@@ -738,7 +1117,7 @@ export default function EditProductPage() {
 
       for (let index = 0; index < variants.length; index++) {
         const item = variants[index];
-        const priorityLines = normalizeLines(item.priorityLicensesInput);
+        const priorityLicenseRows = item.priorityLicenseRows;
 
         let finalVariantImageUrl = item.image_url.trim() || null;
 
@@ -781,10 +1160,14 @@ export default function EditProductPage() {
           slug: makeVariantSlug(cleanName, item.name),
           description: item.description.trim() || null,
           price: Number(item.price || 0),
-          stock: priorityLines.length,
+          stock: priorityLicenseRows.length,
           image_url: finalVariantImageUrl,
           is_active: item.is_active,
           sort_order: index,
+          access_duration_months: enableLicenseAlerts
+            ? inferAccessDurationMonths(`${item.name} ${item.description}`)
+            : null,
+          default_license_billing_months: null,
         };
 
         if (item.id) {
@@ -859,21 +1242,27 @@ export default function EditProductPage() {
       await syncAvailableLicenses({
         productId: id,
         variantId: null,
-        lines: generalLines,
+        rows: effectiveGeneralLicenseRows,
         isPriority: false,
+        requiresRotationAlert: enableLicenseAlerts,
+        licenseMode: "individual",
+        maxActiveUsers: 1,
       });
 
-      for (const item of variants) {
+      for (const item of effectiveVariants) {
         const variantId = variantIdMapByTempId[item.tempId];
-        const priorityLines = normalizeLines(item.priorityLicensesInput);
+        const priorityLicenseRows = item.priorityLicenseRows;
 
         if (!variantId) continue;
 
         await syncAvailableLicenses({
           productId: id,
           variantId,
-          lines: priorityLines,
+          rows: priorityLicenseRows,
           isPriority: true,
+          requiresRotationAlert: enableLicenseAlerts,
+          licenseMode: "individual",
+          maxActiveUsers: 1,
         });
       }
 
@@ -1115,6 +1504,16 @@ export default function EditProductPage() {
                 <span>Usar primero licencias prioritarias</span>
               </label>
 
+              <label className="flex items-center gap-3 text-base font-medium text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={enableLicenseAlerts}
+                  onChange={(e) => setEnableLicenseAlerts(e.target.checked)}
+                  className={checkboxClass}
+                />
+                <span>Activar alertas de vencimiento para este producto</span>
+              </label>
+
               <div className="pt-2">
                 <label className="mb-2 block text-sm font-semibold text-slate-700">
                   Stock general
@@ -1122,26 +1521,26 @@ export default function EditProductPage() {
                 <input
                   type="number"
                   value={stock}
-                  onChange={(e) => setStock(e.target.value)}
+                  readOnly
                   className={inputSoftClass}
                 />
                 <p className="mt-2 text-sm text-slate-500">
-                  Licencias detectadas: {normalizeLines(generalLicensesInput).length}
+                  Licencias detectadas: {generalLicenseRows.length}
                 </p>
               </div>
 
-              <div className="pt-2">
-                <label className="mb-2 block text-sm font-semibold text-slate-700">
-                  Licencias generales (una por línea)
-                </label>
-                <textarea
-                  rows={8}
-                  value={generalLicensesInput}
-                  onChange={(e) => setGeneralLicensesInput(e.target.value)}
-                  placeholder={`correo@gmail.com clave123 perfil1\ncorreo2@gmail.com clave456 perfil2`}
-                  className={inputSoftClass}
-                />
-              </div>
+              <LicenseRowsEditor
+                title="Licencias generales"
+                subtitle="Cada licencia queda separada y con su propia facturación. Si dejas la facturación vacía, se guardará como 30 días."
+                rows={generalLicenseRows}
+                licensesText={newGeneralLicensesInput}
+                onLicensesTextChange={setNewGeneralLicensesInput}
+                onSyncLicensesFromText={syncGeneralLicensesFromText}
+                onRemoveLicense={removeGeneralLicenseRow}
+                onBillingDaysChange={updateGeneralLicenseBillingDays}
+                inputClassName={inputSoftClass}
+                textareaClassName={inputSoftClass}
+              />
             </div>
           </SectionCard>
 
@@ -1289,10 +1688,11 @@ export default function EditProductPage() {
                             />
                             <p className="mt-2 text-sm text-slate-500">
                               Licencias detectadas:{" "}
-                              {normalizeLines(item.priorityLicensesInput).length}
+                              {item.priorityLicenseRows.length}
                             </p>
                           </div>
                         </div>
+
 
                         <label className="flex items-center gap-3 text-base font-medium text-slate-700">
                           <input
@@ -1310,25 +1710,29 @@ export default function EditProductPage() {
                           <span>Variante activa</span>
                         </label>
 
-                        <div>
-                          <label className="mb-2 block text-sm font-semibold text-slate-700">
-                            Licencias prioritarias de esta variante (una por línea)
-                          </label>
+                        <LicenseRowsEditor
+                          title="Licencias prioritarias de esta variante"
+                          subtitle="Cada licencia queda separada y con su propio tiempo de facturación. Vacío = 30 días."
+                          rows={item.priorityLicenseRows}
+                          licensesText={item.newPriorityLicensesInput}
+                          onLicensesTextChange={(value) =>
+                            updateVariant(item.tempId, "newPriorityLicensesInput", value)
+                          }
+                          onSyncLicensesFromText={() => syncVariantLicensesFromText(item.tempId)}
+                          onRemoveLicense={(licenseTempId) =>
+                            removeVariantLicenseRow(item.tempId, licenseTempId)
+                          }
+                          onBillingDaysChange={(licenseTempId, value) =>
+                            updateVariantLicenseBillingDays(
+                              item.tempId,
+                              licenseTempId,
+                              value
+                            )
+                          }
+                          inputClassName={inputClass}
+                          textareaClassName={inputClass}
+                        />
 
-                          <textarea
-                            rows={5}
-                            value={item.priorityLicensesInput}
-                            onChange={(e) =>
-                              updateVariant(
-                                item.tempId,
-                                "priorityLicensesInput",
-                                e.target.value
-                              )
-                            }
-                            placeholder={`correo1@gmail.com clave123 perfil1\ncorreo2@gmail.com clave456 perfil2`}
-                            className={inputClass}
-                          />
-                        </div>
                       </div>
                     </div>
                   ))

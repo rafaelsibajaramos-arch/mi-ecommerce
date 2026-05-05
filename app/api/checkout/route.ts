@@ -25,6 +25,12 @@ type ProductRow = {
   avoid_repeat_license?: boolean;
   use_priority_licenses?: boolean;
   fallback_to_general_licenses?: boolean;
+  enable_license_alerts?: boolean;
+  access_duration_months?: number | null;
+  default_license_billing_months?: number | null;
+  default_license_requires_rotation_alert?: boolean;
+  default_license_mode?: "individual" | "shared";
+  default_max_active_users?: number | null;
 };
 
 type VariantRow = {
@@ -34,6 +40,8 @@ type VariantRow = {
   price: number;
   stock: number;
   is_active: boolean;
+  access_duration_months?: number | null;
+  default_license_billing_months?: number | null;
 };
 
 type ProfileRow = {
@@ -63,6 +71,12 @@ type LicenseRow = {
   license_text: string;
   status: string;
   is_priority?: boolean;
+  billing_duration_days?: number | null;
+  billing_duration_months?: number | null;
+  billing_ends_at?: string | null;
+  requires_rotation_alert?: boolean | null;
+  license_mode?: "individual" | "shared" | null;
+  max_active_users?: number | null;
 };
 
 type AssignedLicenseHistoryRow = {
@@ -77,6 +91,65 @@ const generateRandomOrderNumber = () => {
 
 // Normaliza el texto de una licencia para compararlo sin ruido.
 const normalizeLicenseText = (value: string) => value.trim();
+
+// Suma meses a una fecha conservando un comportamiento estable para fin de mes.
+function addMonths(date: Date, months: number) {
+  const result = new Date(date.getTime());
+  const originalDay = result.getDate();
+
+  result.setMonth(result.getMonth() + months);
+
+  if (result.getDate() !== originalDay) {
+    result.setDate(0);
+  }
+
+  return result;
+}
+
+function resolveBillingDurationDays(license: LicenseRow) {
+  const days = Number(license.billing_duration_days || 0);
+
+  if (days > 0) return days;
+
+  const months = Number(license.billing_duration_months || 0);
+
+  if (months > 0) return months * 30;
+
+  return 30;
+}
+
+// Calcula la duracion vendida al cliente segun variante o producto base.
+function resolveAccessDurationMonths({
+  product,
+  variant,
+}: {
+  product: ProductRow;
+  variant: VariantRow | null;
+}) {
+  return Number(
+    variant?.access_duration_months || product.access_duration_months || 0
+  );
+}
+
+// Determina si la compra debe crear una alerta futura de rotacion.
+function shouldCreateRotationAlert({
+  product,
+  accessDurationMonths,
+  license,
+}: {
+  product: ProductRow;
+  accessDurationMonths: number;
+  license: LicenseRow;
+}) {
+  if (!product.enable_license_alerts) return false;
+  if (!accessDurationMonths || accessDurationMonths <= 0) return false;
+  if (license.requires_rotation_alert === false) return false;
+
+  const billingDurationDays = resolveBillingDurationDays(license);
+  const accessDurationDays = accessDurationMonths * 30;
+
+  return billingDurationDays > 0 && accessDurationDays < billingDurationDays;
+}
 
 // Crea una clave única por producto y variante para indexar datos del carrito.
 const buildItemKey = (productId: string, variantId?: string | null) =>
@@ -183,7 +256,7 @@ async function fetchAvailableLicensePool({
 }) {
   let query = supabaseAdmin
     .from("product_licenses")
-    .select("id, product_id, variant_id, license_text, status, is_priority")
+    .select("id, product_id, variant_id, license_text, status, is_priority, billing_duration_days, billing_duration_months, billing_ends_at, requires_rotation_alert, license_mode, max_active_users")
     .eq("product_id", productId)
     .eq("status", "available")
     .eq("is_priority", isPriority)
@@ -440,13 +513,13 @@ export async function POST(request: NextRequest) {
       supabaseAdmin
         .from("products")
         .select(
-          "id, name, description, category, price, stock, is_active, product_type, avoid_repeat_license, use_priority_licenses, fallback_to_general_licenses"
+          "id, name, description, category, price, stock, is_active, product_type, avoid_repeat_license, use_priority_licenses, fallback_to_general_licenses, enable_license_alerts, access_duration_months, default_license_billing_months, default_license_requires_rotation_alert, default_license_mode, default_max_active_users"
         )
         .in("id", productIds),
       variantIds.length
         ? supabaseAdmin
             .from("product_variants")
-            .select("id, product_id, name, price, stock, is_active")
+            .select("id, product_id, name, price, stock, is_active, access_duration_months, default_license_billing_months")
             .in("id", variantIds)
         : Promise.resolve({ data: [] as VariantRow[], error: null }),
     ]);
@@ -678,6 +751,8 @@ export async function POST(request: NextRequest) {
     let createdWalletTransactionId: string | null = null;
     let balanceDiscounted = false;
     const assignedLicenseIds: string[] = [];
+    const createdAccessIds: string[] = [];
+    const createdAlertIds: string[] = [];
     const updatedVariantStockIds = new Set<string>();
     const updatedProductStockIds = new Set<string>();
 
@@ -702,6 +777,14 @@ export async function POST(request: NextRequest) {
           .eq("id", productId);
       }
 
+      if (createdAlertIds.length > 0) {
+        await supabaseAdmin.from("license_alerts").delete().in("id", createdAlertIds);
+      }
+
+      if (createdAccessIds.length > 0) {
+        await supabaseAdmin.from("license_accesses").delete().in("id", createdAccessIds);
+      }
+
       if (assignedLicenseIds.length > 0) {
         await supabaseAdmin
           .from("product_licenses")
@@ -710,6 +793,7 @@ export async function POST(request: NextRequest) {
             assigned_order_id: null,
             assigned_order_item_id: null,
             assigned_user_id: null,
+            rotation_status: "normal",
           })
           .in("id", assignedLicenseIds);
       }
@@ -850,6 +934,93 @@ export async function POST(request: NextRequest) {
         }
 
         assignedLicenseIds.push(license.id);
+
+        const product = productsMap[item.id];
+        const variant = item.variantId ? variantsMap[item.variantId] : null;
+
+        if (!product) {
+          await rollbackPurchase();
+          return jsonError(`No se pudo preparar la alerta de "${item.name}".`);
+        }
+
+        const accessDurationMonths = resolveAccessDurationMonths({
+          product,
+          variant,
+        });
+
+        if (
+          shouldCreateRotationAlert({
+            product,
+            accessDurationMonths,
+            license,
+          })
+        ) {
+          const startsAt = new Date();
+          const expiresAt = addMonths(startsAt, accessDurationMonths);
+
+          const { data: accessData, error: accessError } = await supabaseAdmin
+            .from("license_accesses")
+            .insert([
+              {
+                license_id: license.id,
+                order_id: orderData.id,
+                order_item_id: matchingOrderItem.id,
+                user_id: checkoutProfile.id,
+                product_id: item.id,
+                variant_id: item.variantId || null,
+                starts_at: startsAt.toISOString(),
+                expires_at: expiresAt.toISOString(),
+                status: "active",
+                requires_rotation: true,
+              },
+            ])
+            .select("id")
+            .single();
+
+          if (accessError || !accessData) {
+            await rollbackPurchase();
+            return jsonError(
+              `No se pudo crear el vencimiento de "${item.name}".`
+            );
+          }
+
+          createdAccessIds.push(accessData.id);
+
+          const productLabel = variant?.name
+            ? `${product.name} - ${variant.name}`
+            : product.name;
+
+          const billingDurationDays = resolveBillingDurationDays(license);
+          const message = `Cambiar contraseña de ${productLabel}. El cliente compro ${accessDurationMonths} mes(es), pero la licencia esta facturada por ${billingDurationDays} dia(s).`;
+
+          const { data: alertData, error: alertError } = await supabaseAdmin
+            .from("license_alerts")
+            .insert([
+              {
+                license_id: license.id,
+                access_id: accessData.id,
+                order_id: orderData.id,
+                order_item_id: matchingOrderItem.id,
+                user_id: checkoutProfile.id,
+                product_id: item.id,
+                variant_id: item.variantId || null,
+                task_type: "rotate_password",
+                due_at: expiresAt.toISOString(),
+                status: "pending",
+                priority: "normal",
+                message,
+              },
+            ])
+            .select("id")
+            .single();
+
+          if (alertError || !alertData) {
+            await rollbackPurchase();
+            return jsonError(`No se pudo crear la alerta de "${item.name}".`);
+          }
+
+          createdAlertIds.push(alertData.id);
+        }
       }
     }
 

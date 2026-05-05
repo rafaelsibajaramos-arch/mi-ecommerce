@@ -10,6 +10,7 @@ const adminLinks = [
   { href: "/admin/products", label: "Productos" },
   { href: "/admin/users", label: "Usuarios" },
   { href: "/admin/wallet", label: "Wallet" },
+  { href: "/admin/license-alerts", label: "Alertas" },
 ];
 
 // Barra lateral del panel administrativo con navegación responsive y cierre de sesión.
@@ -18,6 +19,7 @@ export default function AdminSidebar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [openPathname, setOpenPathname] = useState<string | null>(null);
+  const [pendingAlertsCount, setPendingAlertsCount] = useState(0);
 
   const isMenuOpen = open && openPathname === pathname;
 
@@ -38,6 +40,63 @@ export default function AdminSidebar() {
     router.push("/login");
     router.refresh();
   };
+
+
+  useEffect(() => {
+    let mounted = true;
+
+    const fetchPendingAlerts = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        if (mounted) setPendingAlertsCount(0);
+        return;
+      }
+
+      try {
+        const response = await fetch("/api/admin/license-alerts/summary", {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        });
+
+        const result = await response.json().catch(() => null);
+
+        if (!mounted) return;
+
+        if (!response.ok) {
+          setPendingAlertsCount(0);
+          return;
+        }
+
+        setPendingAlertsCount(Number(result?.pendingDueCount || 0));
+      } catch {
+        if (mounted) setPendingAlertsCount(0);
+      }
+    };
+
+    void fetchPendingAlerts();
+
+    const interval = window.setInterval(() => {
+      void fetchPendingAlerts();
+    }, 60000);
+
+    const handleFocus = () => {
+      void fetchPendingAlerts();
+    };
+
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("license-alerts-updated", handleFocus);
+
+    return () => {
+      mounted = false;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("license-alerts-updated", handleFocus);
+    };
+  }, []);
 
   useEffect(() => {
     document.body.style.overflow = isMenuOpen ? "hidden" : "";
@@ -150,16 +209,27 @@ export default function AdminSidebar() {
           </p>
 
           <nav className="space-y-2">
-            {adminLinks.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={closeMenu}
-                className={navClass(item.href)}
-              >
-                {item.label}
-              </Link>
-            ))}
+            {adminLinks.map((item) => {
+              const showAlertDot =
+                item.href === "/admin/license-alerts" && pendingAlertsCount > 0;
+
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={closeMenu}
+                  className={`${navClass(item.href)} justify-between gap-3`}
+                >
+                  <span>{item.label}</span>
+                  {showAlertDot ? (
+                    <span
+                      className="h-3 w-3 rounded-full bg-red-500 shadow-[0_0_12px_rgba(239,68,68,0.95)]"
+                      aria-label={`${pendingAlertsCount} alerta(s) pendiente(s)`}
+                    />
+                  ) : null}
+                </Link>
+              );
+            })}
           </nav>
         </div>
 
@@ -187,11 +257,26 @@ export default function AdminSidebar() {
           </p>
 
           <nav className="space-y-2">
-            {adminLinks.map((item) => (
-              <Link key={item.href} href={item.href} className={navClass(item.href)}>
-                {item.label}
-              </Link>
-            ))}
+            {adminLinks.map((item) => {
+              const showAlertDot =
+                item.href === "/admin/license-alerts" && pendingAlertsCount > 0;
+
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`${navClass(item.href)} justify-between gap-3`}
+                >
+                  <span>{item.label}</span>
+                  {showAlertDot ? (
+                    <span
+                      className="h-3 w-3 rounded-full bg-red-500 shadow-[0_0_12px_rgba(239,68,68,0.95)]"
+                      aria-label={`${pendingAlertsCount} alerta(s) pendiente(s)`}
+                    />
+                  ) : null}
+                </Link>
+              );
+            })}
           </nav>
         </div>
 
