@@ -84,13 +84,50 @@ type AssignedLicenseHistoryRow = {
   license_text: string;
 };
 
+type AccessRow = {
+  id: string;
+  license_id: string;
+  order_id: string | null;
+  order_item_id: string | null;
+  user_id: string | null;
+  product_id: string | null;
+  variant_id: string | null;
+  starts_at: string;
+  expires_at: string;
+  status: string;
+};
+
+type AlertInsertInput = {
+  license: LicenseRow;
+  access: AccessRow;
+  productLabel: string;
+  customerEmail: string | null | undefined;
+  reason: "billing_shorter_than_license" | "shared_different_duration";
+};
+
 // Genera un número aleatorio base para intentar crear un pedido.
 const generateRandomOrderNumber = () => {
   return Math.floor(10000 + Math.random() * 90000);
 };
 
-// Normaliza el texto de una licencia para compararlo sin ruido.
-const normalizeLicenseText = (value: string) => value.trim();
+// Normaliza el texto de una licencia para comparar datos equivalentes sin depender de espacios o saltos de línea.
+const normalizeLicenseText = (value: string | null | undefined) =>
+  String(value || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => line.trim().replace(/[\t ]+/g, " "))
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+
+function getRotationAlertReasonText(
+  reason: "billing_shorter_than_license" | "shared_different_duration"
+) {
+  return reason === "shared_different_duration"
+    ? "Misma licencia vendida con duraciones diferentes."
+    : "El cliente compro menos tiempo que la facturacion real de la licencia.";
+}
 
 // Suma meses a una fecha conservando un comportamiento estable para fin de mes.
 function addMonths(date: Date, months: number) {
@@ -106,16 +143,44 @@ function addMonths(date: Date, months: number) {
   return result;
 }
 
-function resolveBillingDurationDays(license: LicenseRow) {
+function resolveExplicitBillingDurationDays(license: LicenseRow) {
   const days = Number(license.billing_duration_days || 0);
 
-  if (days > 0) return days;
+  if (Number.isFinite(days) && days > 0) return Math.floor(days);
 
   const months = Number(license.billing_duration_months || 0);
 
-  if (months > 0) return months * 30;
+  if (Number.isFinite(months) && months > 0) return Math.floor(months * 30);
 
-  return 30;
+  return null;
+}
+
+function resolveBillingRemainingDays(license: LicenseRow) {
+  if (!license.billing_ends_at) return null;
+
+  const diffMs = new Date(license.billing_ends_at).getTime() - Date.now();
+
+  if (!Number.isFinite(diffMs)) return null;
+
+  return Math.ceil(diffMs / 86400000);
+}
+
+function resolveAccessDurationDaysFromMonths(accessDurationMonths: number) {
+  if (!Number.isFinite(accessDurationMonths) || accessDurationMonths <= 0) {
+    return 0;
+  }
+
+  return Math.max(1, Math.round(accessDurationMonths * 30));
+}
+
+function resolveAccessDurationDays(access: Pick<AccessRow, "starts_at" | "expires_at">) {
+  const startsMs = new Date(access.starts_at).getTime();
+  const expiresMs = new Date(access.expires_at).getTime();
+  const diffMs = expiresMs - startsMs;
+
+  if (!Number.isFinite(diffMs) || diffMs <= 0) return 0;
+
+  return Math.ceil(diffMs / 86400000);
 }
 
 // Calcula la duracion vendida al cliente segun variante o producto base.
@@ -131,8 +196,8 @@ function resolveAccessDurationMonths({
   );
 }
 
-// Determina si la compra debe crear una alerta futura de rotacion.
-function shouldCreateRotationAlert({
+// Determina si hay que guardar el vencimiento de acceso de una licencia.
+function shouldTrackLicenseAccess({
   product,
   accessDurationMonths,
   license,
@@ -145,10 +210,257 @@ function shouldCreateRotationAlert({
   if (!accessDurationMonths || accessDurationMonths <= 0) return false;
   if (license.requires_rotation_alert === false) return false;
 
-  const billingDurationDays = resolveBillingDurationDays(license);
-  const accessDurationDays = accessDurationMonths * 30;
+  return true;
+}
 
-  return billingDurationDays > 0 && accessDurationDays < billingDurationDays;
+// Alerta tipo 1: la licencia fue facturada por mas dias que los vendidos al cliente.
+function shouldCreateBillingRotationAlert({
+  product,
+  accessDurationMonths,
+  license,
+}: {
+  product: ProductRow;
+  accessDurationMonths: number;
+  license: LicenseRow;
+}) {
+  if (!shouldTrackLicenseAccess({ product, accessDurationMonths, license })) {
+    return false;
+  }
+
+  const billingDurationDays = resolveExplicitBillingDurationDays(license);
+
+  if (!billingDurationDays) return false;
+
+  const soldDurationDays = resolveAccessDurationDaysFromMonths(accessDurationMonths);
+
+  return soldDurationDays > 0 && soldDurationDays < billingDurationDays;
+}
+
+function buildRotationAlertMessage({
+  license,
+  productLabel,
+  customerEmail,
+  reason,
+}: AlertInsertInput) {
+  const billingDurationDays = resolveExplicitBillingDurationDays(license);
+  const billingRemainingDays = resolveBillingRemainingDays(license);
+  const billingText = billingDurationDays
+    ? `Licencia facturada por ${billingDurationDays} dia(s). Dias restantes para ti: ${billingRemainingDays ?? "Sin fecha"}.`
+    : "Sin facturacion configurada en la licencia.";
+  const reasonText = getRotationAlertReasonText(reason);
+
+  return `Quitar/cambiar acceso de ${productLabel}. ${reasonText} ${billingText} Cliente: ${customerEmail || "Sin correo"}.`;
+}
+
+async function createRotationAlertIfMissing({
+  supabaseAdmin,
+  input,
+}: {
+  supabaseAdmin: SupabaseClient;
+  input: AlertInsertInput;
+}) {
+  const { data: existingAlert, error: existingAlertError } = await supabaseAdmin
+    .from("license_alerts")
+    .select("id")
+    .eq("access_id", input.access.id)
+    .ilike("message", `%${getRotationAlertReasonText(input.reason)}%`)
+    .limit(1)
+    .maybeSingle();
+
+  if (existingAlertError) {
+    throw new Error(existingAlertError.message);
+  }
+
+  if (existingAlert?.id) return null;
+
+  const { data: alertData, error: alertError } = await supabaseAdmin
+    .from("license_alerts")
+    .insert([
+      {
+        license_id: input.license.id,
+        access_id: input.access.id,
+        order_id: input.access.order_id,
+        order_item_id: input.access.order_item_id,
+        user_id: input.access.user_id,
+        product_id: input.access.product_id,
+        variant_id: input.access.variant_id,
+        task_type: "rotate_password",
+        due_at: input.access.expires_at,
+        status: "pending",
+        priority: "normal",
+        message: buildRotationAlertMessage(input),
+      },
+    ])
+    .select("id")
+    .single();
+
+  if (alertError || !alertData) {
+    throw new Error(alertError?.message || "No se pudo crear la alerta.");
+  }
+
+  return alertData.id as string;
+}
+
+async function ensureSharedDurationAlertsForLicenseText({
+  supabaseAdmin,
+  productId,
+  licenseText,
+}: {
+  supabaseAdmin: SupabaseClient;
+  productId: string;
+  licenseText: string;
+}) {
+  const normalizedLicenseText = normalizeLicenseText(licenseText);
+  if (!normalizedLicenseText) return [];
+
+  const { data: matchingLicensesData, error: matchingLicensesError } =
+    await supabaseAdmin
+      .from("product_licenses")
+      .select(
+        "id, product_id, variant_id, license_text, status, billing_duration_days, billing_duration_months, billing_ends_at, requires_rotation_alert"
+      )
+      .eq("product_id", productId);
+
+  if (matchingLicensesError) {
+    throw new Error(matchingLicensesError.message);
+  }
+
+  const matchingLicenses = ((matchingLicensesData as LicenseRow[]) || []).filter(
+    (item) => normalizeLicenseText(item.license_text) === normalizedLicenseText
+  );
+  const licenseIds = matchingLicenses.map((item) => item.id).filter(Boolean);
+
+  if (licenseIds.length < 2) return [];
+
+  const { data: activeAccessesData, error: activeAccessesError } =
+    await supabaseAdmin
+      .from("license_accesses")
+      .select(
+        "id, license_id, order_id, order_item_id, user_id, product_id, variant_id, starts_at, expires_at, status"
+      )
+      .in("license_id", licenseIds)
+      .eq("status", "active");
+
+  if (activeAccessesError) {
+    throw new Error(activeAccessesError.message);
+  }
+
+  const activeAccesses = (activeAccessesData as AccessRow[]) || [];
+
+  if (activeAccesses.length < 2) return [];
+
+  const validAccesses = activeAccesses.filter((access) => {
+    const durationDays = resolveAccessDurationDays(access);
+    const expiresMs = new Date(access.expires_at).getTime();
+
+    return durationDays > 0 && Number.isFinite(expiresMs);
+  });
+
+  const durationSet = new Set(validAccesses.map(resolveAccessDurationDays));
+
+  if (validAccesses.length < 2 || durationSet.size < 2) return [];
+
+  const maxExpiresMs = Math.max(
+    ...validAccesses.map((access) => new Date(access.expires_at).getTime())
+  );
+  const targetAccesses = validAccesses.filter(
+    (access) => new Date(access.expires_at).getTime() < maxExpiresMs
+  );
+
+  if (targetAccesses.length === 0) return [];
+
+  const targetAccessIds = targetAccesses.map((access) => access.id);
+  const { data: existingAlertsData, error: existingAlertsError } =
+    await supabaseAdmin
+      .from("license_alerts")
+      .select("id, access_id")
+      .in("access_id", targetAccessIds)
+      .ilike("message", `%${getRotationAlertReasonText("shared_different_duration")}%`);
+
+  if (existingAlertsError) {
+    throw new Error(existingAlertsError.message);
+  }
+
+  const existingAlertAccessIds = new Set(
+    ((existingAlertsData as { access_id: string | null }[]) || [])
+      .map((item) => item.access_id)
+      .filter(Boolean) as string[]
+  );
+
+  const productIds = Array.from(
+    new Set(targetAccesses.map((item) => item.product_id).filter(Boolean) as string[])
+  );
+  const variantIds = Array.from(
+    new Set(targetAccesses.map((item) => item.variant_id).filter(Boolean) as string[])
+  );
+  const userIds = Array.from(
+    new Set(targetAccesses.map((item) => item.user_id).filter(Boolean) as string[])
+  );
+
+  const [productsResult, variantsResult, profilesResult] = await Promise.all([
+    productIds.length
+      ? supabaseAdmin.from("products").select("id, name").in("id", productIds)
+      : Promise.resolve({ data: [] as ProductRow[], error: null }),
+    variantIds.length
+      ? supabaseAdmin.from("product_variants").select("id, name").in("id", variantIds)
+      : Promise.resolve({ data: [] as VariantRow[], error: null }),
+    userIds.length
+      ? supabaseAdmin.from("profiles").select("id, email").in("id", userIds)
+      : Promise.resolve({ data: [] as ProfileRow[], error: null }),
+  ]);
+
+  const firstLookupError = [
+    productsResult.error,
+    variantsResult.error,
+    profilesResult.error,
+  ].find(Boolean);
+
+  if (firstLookupError) {
+    throw new Error(firstLookupError.message);
+  }
+
+  const productsMap = new Map(
+    ((productsResult.data as ProductRow[]) || []).map((item) => [item.id, item])
+  );
+  const variantsMap = new Map(
+    ((variantsResult.data as VariantRow[]) || []).map((item) => [item.id, item])
+  );
+  const profilesMap = new Map(
+    ((profilesResult.data as ProfileRow[]) || []).map((item) => [item.id, item])
+  );
+  const licensesMap = new Map(matchingLicenses.map((item) => [item.id, item]));
+  const createdAlertIds: string[] = [];
+
+  for (const access of targetAccesses) {
+    if (existingAlertAccessIds.has(access.id)) continue;
+
+    const license = licensesMap.get(access.license_id);
+    if (!license || license.requires_rotation_alert === false) continue;
+
+    const product = access.product_id ? productsMap.get(access.product_id) : null;
+    const variant = access.variant_id ? variantsMap.get(access.variant_id) : null;
+    const profile = access.user_id ? profilesMap.get(access.user_id) : null;
+    const productLabel = variant?.name
+      ? `${product?.name || "Producto"} - ${variant.name}`
+      : product?.name || "Producto";
+
+    const createdAlertId = await createRotationAlertIfMissing({
+      supabaseAdmin,
+      input: {
+        license,
+        access,
+        productLabel,
+        customerEmail: profile?.email,
+        reason: "shared_different_duration",
+      },
+    });
+
+    if (createdAlertId) {
+      createdAlertIds.push(createdAlertId);
+    }
+  }
+
+  return createdAlertIds;
 }
 
 // Crea una clave única por producto y variante para indexar datos del carrito.
@@ -949,7 +1261,7 @@ export async function POST(request: NextRequest) {
         });
 
         if (
-          shouldCreateRotationAlert({
+          shouldTrackLicenseAccess({
             product,
             accessDurationMonths,
             license,
@@ -971,7 +1283,11 @@ export async function POST(request: NextRequest) {
                 starts_at: startsAt.toISOString(),
                 expires_at: expiresAt.toISOString(),
                 status: "active",
-                requires_rotation: true,
+                requires_rotation: shouldCreateBillingRotationAlert({
+                  product,
+                  accessDurationMonths,
+                  license,
+                }),
               },
             ])
             .select("id")
@@ -990,36 +1306,59 @@ export async function POST(request: NextRequest) {
             ? `${product.name} - ${variant.name}`
             : product.name;
 
-          const billingDurationDays = resolveBillingDurationDays(license);
-          const message = `Cambiar contraseña de ${productLabel}. El cliente compro ${accessDurationMonths} mes(es), pero la licencia esta facturada por ${billingDurationDays} dia(s).`;
+          const access: AccessRow = {
+            id: accessData.id,
+            license_id: license.id,
+            order_id: orderData.id,
+            order_item_id: matchingOrderItem.id,
+            user_id: checkoutProfile.id,
+            product_id: item.id,
+            variant_id: item.variantId || null,
+            starts_at: startsAt.toISOString(),
+            expires_at: expiresAt.toISOString(),
+            status: "active",
+          };
 
-          const { data: alertData, error: alertError } = await supabaseAdmin
-            .from("license_alerts")
-            .insert([
-              {
-                license_id: license.id,
-                access_id: accessData.id,
-                order_id: orderData.id,
-                order_item_id: matchingOrderItem.id,
-                user_id: checkoutProfile.id,
-                product_id: item.id,
-                variant_id: item.variantId || null,
-                task_type: "rotate_password",
-                due_at: expiresAt.toISOString(),
-                status: "pending",
-                priority: "normal",
-                message,
-              },
-            ])
-            .select("id")
-            .single();
+          if (
+            shouldCreateBillingRotationAlert({
+              product,
+              accessDurationMonths,
+              license,
+            })
+          ) {
+            try {
+              const alertId = await createRotationAlertIfMissing({
+                supabaseAdmin,
+                input: {
+                  license,
+                  access,
+                  productLabel,
+                  customerEmail: checkoutProfile.email,
+                  reason: "billing_shorter_than_license",
+                },
+              });
 
-          if (alertError || !alertData) {
-            await rollbackPurchase();
-            return jsonError(`No se pudo crear la alerta de "${item.name}".`);
+              if (alertId) createdAlertIds.push(alertId);
+            } catch {
+              await rollbackPurchase();
+              return jsonError(`No se pudo crear la alerta de "${item.name}".`);
+            }
           }
 
-          createdAlertIds.push(alertData.id);
+          try {
+            const sharedAlertIds = await ensureSharedDurationAlertsForLicenseText({
+              supabaseAdmin,
+              productId: item.id,
+              licenseText: license.license_text,
+            });
+
+            createdAlertIds.push(...sharedAlertIds);
+          } catch {
+            await rollbackPurchase();
+            return jsonError(
+              `No se pudieron revisar alertas compartidas de "${item.name}".`
+            );
+          }
         }
       }
     }

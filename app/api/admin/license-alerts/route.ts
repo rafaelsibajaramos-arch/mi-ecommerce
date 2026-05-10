@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { SupabaseClient, createClient } from "@supabase/supabase-js";
 import { createSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -50,6 +50,19 @@ type LicenseRow = {
   billing_duration_months: number | null;
   billing_ends_at: string | null;
   rotation_status: string | null;
+  requires_rotation_alert?: boolean | null;
+};
+
+type AssignedLicenseRow = LicenseRow & {
+  status?: string | null;
+  requires_rotation_alert?: boolean | null;
+  assigned_order_id?: string | null;
+  assigned_order_item_id?: string | null;
+  assigned_user_id?: string | null;
+};
+
+type BackfillOrderRow = OrderRow & {
+  created_at: string | null;
 };
 
 type AccessRow = {
@@ -133,14 +146,644 @@ function uniqueIds(values: Array<string | null | undefined>) {
   return Array.from(new Set(values.filter(Boolean) as string[]));
 }
 
+function chunkArray<T>(values: T[], size: number) {
+  const chunks: T[][] = [];
+
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+
+  return chunks;
+}
+
 function normalizeLicenseText(value: string | null | undefined) {
-  return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+  return String(value || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => line.trim().replace(/[\t ]+/g, " "))
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+function getRotationAlertReasonText(
+  reason: "billing_shorter_than_license" | "shared_different_duration"
+) {
+  return reason === "shared_different_duration"
+    ? "Misma licencia vendida con duraciones diferentes."
+    : "El cliente compro menos tiempo que la facturacion real de la licencia.";
 }
 
 function addDays(date: Date, days: number) {
   const result = new Date(date.getTime());
   result.setDate(result.getDate() + days);
   return result;
+}
+
+function addMonths(date: Date, months: number) {
+  const result = new Date(date.getTime());
+  const originalDay = result.getDate();
+
+  result.setMonth(result.getMonth() + months);
+
+  if (result.getDate() !== originalDay) {
+    result.setDate(0);
+  }
+
+  return result;
+}
+
+function resolveExplicitBillingDurationDays(license: Pick<LicenseRow, "billing_duration_days" | "billing_duration_months">) {
+  const days = Number(license.billing_duration_days || 0);
+
+  if (Number.isFinite(days) && days > 0) return Math.floor(days);
+
+  const months = Number(license.billing_duration_months || 0);
+
+  if (Number.isFinite(months) && months > 0) return Math.floor(months * 30);
+
+  return null;
+}
+
+function resolveBillingRemainingDays(value: string | null | undefined) {
+  if (!value) return null;
+
+  const diffMs = new Date(value).getTime() - Date.now();
+
+  if (!Number.isFinite(diffMs)) return null;
+
+  return Math.ceil(diffMs / 86400000);
+}
+
+function resolveAccessDurationDaysFromMonths(accessDurationMonths: number) {
+  if (!Number.isFinite(accessDurationMonths) || accessDurationMonths <= 0) {
+    return 0;
+  }
+
+  return Math.max(1, Math.round(accessDurationMonths * 30));
+}
+
+function resolveAccessDurationDays(access: Pick<AccessRow, "starts_at" | "expires_at">) {
+  const startsMs = new Date(access.starts_at).getTime();
+  const expiresMs = new Date(access.expires_at).getTime();
+  const diffMs = expiresMs - startsMs;
+
+  if (!Number.isFinite(diffMs) || diffMs <= 0) return 0;
+
+  return Math.ceil(diffMs / 86400000);
+}
+
+function resolveAccessDurationMonths({
+  product,
+  variant,
+}: {
+  product: ProductRow & { access_duration_months?: number | null };
+  variant: VariantRow | null;
+}) {
+  return Number(variant?.access_duration_months || product.access_duration_months || 0);
+}
+
+function canTrackLicenseAccess({
+  product,
+  variant,
+  license,
+}: {
+  product: ProductRow & { enable_license_alerts?: boolean; access_duration_months?: number | null };
+  variant: VariantRow | null;
+  license: LicenseRow | AssignedLicenseRow;
+}) {
+  if (!product.enable_license_alerts) return false;
+  if (license.requires_rotation_alert === false) return false;
+
+  const accessDurationMonths = resolveAccessDurationMonths({ product, variant });
+
+  return Number.isFinite(accessDurationMonths) && accessDurationMonths > 0;
+}
+
+function shouldCreateBillingRotationAlert({
+  product,
+  variant,
+  license,
+}: {
+  product: ProductRow & { enable_license_alerts?: boolean; access_duration_months?: number | null };
+  variant: VariantRow | null;
+  license: LicenseRow | AssignedLicenseRow;
+}) {
+  if (!canTrackLicenseAccess({ product, variant, license })) return false;
+
+  const billingDurationDays = resolveExplicitBillingDurationDays(license);
+
+  if (!billingDurationDays) return false;
+
+  const soldDurationDays = resolveAccessDurationDaysFromMonths(
+    resolveAccessDurationMonths({ product, variant })
+  );
+
+  return soldDurationDays > 0 && soldDurationDays < billingDurationDays;
+}
+
+function buildRotationAlertMessage({
+  license,
+  productLabel,
+  customerEmail,
+  reason,
+}: {
+  license: LicenseRow;
+  productLabel: string;
+  customerEmail: string | null | undefined;
+  reason: "billing_shorter_than_license" | "shared_different_duration";
+}) {
+  const billingDurationDays = resolveExplicitBillingDurationDays(license);
+  const billingRemainingDays = resolveBillingRemainingDays(license.billing_ends_at);
+  const billingText = billingDurationDays
+    ? `Licencia facturada por ${billingDurationDays} dia(s). Dias restantes para ti: ${billingRemainingDays ?? "Sin fecha"}.`
+    : "Sin facturacion configurada en la licencia.";
+  const reasonText = getRotationAlertReasonText(reason);
+
+  return `Quitar/cambiar acceso de ${productLabel}. ${reasonText} ${billingText} Cliente: ${customerEmail || "Sin correo"}.`;
+}
+
+async function createRotationAlertIfMissing({
+  supabaseAdmin,
+  license,
+  access,
+  productLabel,
+  customerEmail,
+  reason,
+}: {
+  supabaseAdmin: SupabaseClient;
+  license: LicenseRow;
+  access: AccessRow;
+  productLabel: string;
+  customerEmail: string | null | undefined;
+  reason: "billing_shorter_than_license" | "shared_different_duration";
+}) {
+  const { data: existingAlert, error: existingAlertError } = await supabaseAdmin
+    .from("license_alerts")
+    .select("id")
+    .eq("access_id", access.id)
+    .ilike("message", `%${getRotationAlertReasonText(reason)}%`)
+    .limit(1)
+    .maybeSingle();
+
+  if (existingAlertError) {
+    throw new Error(existingAlertError.message);
+  }
+
+  if (existingAlert?.id) return null;
+
+  const { data: createdAlert, error: createAlertError } = await supabaseAdmin
+    .from("license_alerts")
+    .insert([
+      {
+        license_id: license.id,
+        access_id: access.id,
+        order_id: access.order_id,
+        order_item_id: access.order_item_id,
+        user_id: access.user_id,
+        product_id: access.product_id,
+        variant_id: access.variant_id,
+        task_type: "rotate_password",
+        due_at: access.expires_at,
+        status: "pending",
+        priority: "normal",
+        message: buildRotationAlertMessage({
+          license,
+          productLabel,
+          customerEmail,
+          reason,
+        }),
+      },
+    ])
+    .select("id")
+    .single();
+
+  if (createAlertError || !createdAlert) {
+    throw new Error(createAlertError?.message || "No se pudo crear la alerta automatica.");
+  }
+
+  return createdAlert.id as string;
+}
+
+async function ensureSharedDurationAlertsForLicenseText({
+  supabaseAdmin,
+  productId,
+  licenseText,
+}: {
+  supabaseAdmin: SupabaseClient;
+  productId: string;
+  licenseText: string;
+}) {
+  const normalizedLicenseText = normalizeLicenseText(licenseText);
+  if (!normalizedLicenseText) return;
+
+  const { data: matchingLicensesData, error: matchingLicensesError } = await supabaseAdmin
+    .from("product_licenses")
+    .select("id, product_id, variant_id, license_text, billing_duration_days, billing_duration_months, billing_ends_at, rotation_status, requires_rotation_alert")
+    .eq("product_id", productId);
+
+  if (matchingLicensesError) {
+    throw new Error(`No se pudieron revisar licencias compartidas: ${matchingLicensesError.message}`);
+  }
+
+  const matchingLicenses = ((matchingLicensesData as LicenseRow[]) || []).filter(
+    (item) => normalizeLicenseText(item.license_text) === normalizedLicenseText
+  );
+  const licenseIds = uniqueIds(matchingLicenses.map((item) => item.id));
+  if (licenseIds.length < 2) return;
+
+  const { data: activeAccessesData, error: activeAccessesError } = await supabaseAdmin
+    .from("license_accesses")
+    .select("id, license_id, order_id, order_item_id, user_id, product_id, variant_id, starts_at, expires_at, status")
+    .in("license_id", licenseIds)
+    .eq("status", "active");
+
+  if (activeAccessesError) {
+    throw new Error(`No se pudieron revisar accesos compartidos: ${activeAccessesError.message}`);
+  }
+
+  const activeAccesses = ((activeAccessesData as AccessRow[]) || []).filter((access) => {
+    const durationDays = resolveAccessDurationDays(access);
+    const expiresMs = new Date(access.expires_at).getTime();
+    return durationDays > 0 && Number.isFinite(expiresMs);
+  });
+
+  const durationSet = new Set(activeAccesses.map(resolveAccessDurationDays));
+  if (activeAccesses.length < 2 || durationSet.size < 2) return;
+
+  const maxExpiresMs = Math.max(...activeAccesses.map((access) => new Date(access.expires_at).getTime()));
+  const targetAccesses = activeAccesses.filter((access) => new Date(access.expires_at).getTime() < maxExpiresMs);
+  if (targetAccesses.length === 0) return;
+
+  const targetAccessIds = targetAccesses.map((item) => item.id);
+  const { data: existingAlertsData, error: existingAlertsError } = await supabaseAdmin
+    .from("license_alerts")
+    .select("id, access_id")
+    .in("access_id", targetAccessIds)
+    .ilike("message", `%${getRotationAlertReasonText("shared_different_duration")}%`);
+
+  if (existingAlertsError) {
+    throw new Error(`No se pudieron revisar alertas compartidas existentes: ${existingAlertsError.message}`);
+  }
+
+  const existingAlertAccessIds = new Set(
+    ((existingAlertsData as { access_id: string | null }[]) || [])
+      .map((item) => item.access_id)
+      .filter(Boolean) as string[]
+  );
+
+  const productIds = uniqueIds(targetAccesses.map((item) => item.product_id));
+  const variantIds = uniqueIds(targetAccesses.map((item) => item.variant_id));
+  const userIds = uniqueIds(targetAccesses.map((item) => item.user_id));
+
+  const [productsResult, variantsResult, profilesResult] = await Promise.all([
+    productIds.length
+      ? supabaseAdmin.from("products").select("id, name").in("id", productIds)
+      : Promise.resolve({ data: [] as ProductRow[], error: null }),
+    variantIds.length
+      ? supabaseAdmin.from("product_variants").select("id, name, access_duration_months").in("id", variantIds)
+      : Promise.resolve({ data: [] as VariantRow[], error: null }),
+    userIds.length
+      ? supabaseAdmin.from("profiles").select("id, email, full_name").in("id", userIds)
+      : Promise.resolve({ data: [] as ProfileRow[], error: null }),
+  ]);
+
+  const firstLookupError = [productsResult.error, variantsResult.error, profilesResult.error].find(Boolean);
+  if (firstLookupError) {
+    throw new Error(`No se pudieron preparar datos de alerta compartida: ${firstLookupError.message}`);
+  }
+
+  const productsMap = new Map(((productsResult.data as ProductRow[]) || []).map((item) => [item.id, item]));
+  const variantsMap = new Map(((variantsResult.data as VariantRow[]) || []).map((item) => [item.id, item]));
+  const profilesMap = new Map(((profilesResult.data as ProfileRow[]) || []).map((item) => [item.id, item]));
+  const licensesMap = new Map(matchingLicenses.map((item) => [item.id, item]));
+
+  for (const access of targetAccesses) {
+    if (existingAlertAccessIds.has(access.id)) continue;
+
+    const license = licensesMap.get(access.license_id);
+    if (!license || license.requires_rotation_alert === false) continue;
+
+    const product = access.product_id ? productsMap.get(access.product_id) : null;
+    const variant = access.variant_id ? variantsMap.get(access.variant_id) : null;
+    const profile = access.user_id ? profilesMap.get(access.user_id) : null;
+    const productLabel = variant?.name
+      ? `${product?.name || "Producto"} - ${variant.name}`
+      : product?.name || "Producto";
+
+    await createRotationAlertIfMissing({
+      supabaseAdmin,
+      license,
+      access,
+      productLabel,
+      customerEmail: profile?.email,
+      reason: "shared_different_duration",
+    });
+  }
+}
+
+async function cleanupInvalidAutomaticAlerts(supabaseAdmin: SupabaseClient) {
+  const { data: alertsData, error: alertsError } = await supabaseAdmin
+    .from("license_alerts")
+    .select("id, license_id, access_id, task_type, status")
+    .eq("task_type", "rotate_password")
+    .eq("status", "pending")
+    .not("license_id", "is", null)
+    .not("access_id", "is", null)
+    .limit(100);
+
+  if (alertsError) {
+    throw new Error(`No se pudieron limpiar alertas automaticas: ${alertsError.message}`);
+  }
+
+  const alerts = (alertsData as Pick<LicenseAlertRow, "id" | "license_id" | "access_id" | "task_type" | "status">[]) || [];
+  if (alerts.length === 0) return;
+
+  const licenseIds = uniqueIds(alerts.map((item) => item.license_id));
+  const accessIds = uniqueIds(alerts.map((item) => item.access_id));
+
+  const [licensesResult, accessesResult] = await Promise.all([
+    supabaseAdmin
+      .from("product_licenses")
+      .select("id, product_id, variant_id, license_text, billing_duration_days, billing_duration_months, billing_ends_at, rotation_status, requires_rotation_alert")
+      .in("id", licenseIds),
+    supabaseAdmin
+      .from("license_accesses")
+      .select("id, license_id, order_id, order_item_id, user_id, product_id, variant_id, starts_at, expires_at, status")
+      .in("id", accessIds),
+  ]);
+
+  const firstError = [licensesResult.error, accessesResult.error].find(Boolean);
+  if (firstError) {
+    throw new Error(`No se pudieron validar alertas automaticas: ${firstError.message}`);
+  }
+
+  const licenses = (licensesResult.data as LicenseRow[]) || [];
+  const accesses = (accessesResult.data as AccessRow[]) || [];
+  const productIds = uniqueIds(licenses.map((item) => item.product_id));
+  const variantIds = uniqueIds(licenses.map((item) => item.variant_id));
+
+  const [productsResult, variantsResult] = await Promise.all([
+    productIds.length
+      ? supabaseAdmin.from("products").select("id, name, enable_license_alerts, access_duration_months").in("id", productIds)
+      : Promise.resolve({ data: [] as Array<ProductRow & { enable_license_alerts?: boolean; access_duration_months?: number | null }>, error: null }),
+    variantIds.length
+      ? supabaseAdmin.from("product_variants").select("id, name, access_duration_months").in("id", variantIds)
+      : Promise.resolve({ data: [] as VariantRow[], error: null }),
+  ]);
+
+  const secondError = [productsResult.error, variantsResult.error].find(Boolean);
+  if (secondError) {
+    throw new Error(`No se pudieron validar productos de alertas: ${secondError.message}`);
+  }
+
+  const productsMap = new Map(
+    ((productsResult.data as Array<ProductRow & { enable_license_alerts?: boolean; access_duration_months?: number | null }>) || []).map((item) => [item.id, item])
+  );
+  const variantsMap = new Map(((variantsResult.data as VariantRow[]) || []).map((item) => [item.id, item]));
+  const licensesMap = new Map(licenses.map((item) => [item.id, item]));
+  const accessesMap = new Map(accesses.map((item) => [item.id, item]));
+
+  const rawLicenseTexts = uniqueIds(licenses.map((item) => item.license_text));
+  const sharedAccessesByKey = new Map<string, AccessRow[]>();
+
+  if (rawLicenseTexts.length > 0) {
+    const { data: matchingLicensesData } = await supabaseAdmin
+      .from("product_licenses")
+      .select("id, product_id, license_text")
+      .in("license_text", rawLicenseTexts);
+
+    const matchingLicenses = (matchingLicensesData as Pick<LicenseRow, "id" | "product_id" | "license_text">[]) || [];
+    const matchingLicenseIds = uniqueIds(matchingLicenses.map((item) => item.id));
+    const matchingLicenseById = new Map(matchingLicenses.map((item) => [item.id, item]));
+
+    if (matchingLicenseIds.length > 0) {
+      const { data: sharedAccessesData } = await supabaseAdmin
+        .from("license_accesses")
+        .select("id, license_id, order_id, order_item_id, user_id, product_id, variant_id, starts_at, expires_at, status")
+        .in("license_id", matchingLicenseIds)
+        .eq("status", "active");
+
+      for (const access of ((sharedAccessesData as AccessRow[]) || [])) {
+        const license = matchingLicenseById.get(access.license_id);
+        const key = `${license?.product_id || access.product_id || ""}::${normalizeLicenseText(license?.license_text)}`;
+        if (!key.endsWith("::")) {
+          if (!sharedAccessesByKey.has(key)) sharedAccessesByKey.set(key, []);
+          sharedAccessesByKey.get(key)!.push(access);
+        }
+      }
+    }
+  }
+
+  const invalidAlertIds: string[] = [];
+
+  for (const alert of alerts) {
+    const license = alert.license_id ? licensesMap.get(alert.license_id) : null;
+    const access = alert.access_id ? accessesMap.get(alert.access_id) : null;
+
+    if (!license || !access || license.requires_rotation_alert === false) {
+      invalidAlertIds.push(alert.id);
+      continue;
+    }
+
+    const product = license.product_id ? productsMap.get(license.product_id) : null;
+    const variant = license.variant_id ? variantsMap.get(license.variant_id) ?? null : null;
+    const billingValid = product
+      ? shouldCreateBillingRotationAlert({ product, variant, license })
+      : false;
+    const sharedKey = `${license.product_id || access.product_id || ""}::${normalizeLicenseText(license.license_text)}`;
+    const sharedAccesses = (sharedAccessesByKey.get(sharedKey) || []).filter((item) => {
+      const durationDays = resolveAccessDurationDays(item);
+      const expiresMs = new Date(item.expires_at).getTime();
+      return durationDays > 0 && Number.isFinite(expiresMs);
+    });
+    const sharedDurations = new Set(sharedAccesses.map(resolveAccessDurationDays));
+    const maxSharedExpiresMs = sharedAccesses.length
+      ? Math.max(...sharedAccesses.map((item) => new Date(item.expires_at).getTime()))
+      : 0;
+    const currentExpiresMs = new Date(access.expires_at).getTime();
+    const sharedValid =
+      sharedAccesses.length >= 2 &&
+      sharedDurations.size >= 2 &&
+      Number.isFinite(currentExpiresMs) &&
+      currentExpiresMs < maxSharedExpiresMs;
+
+    if (!billingValid && !sharedValid) {
+      invalidAlertIds.push(alert.id);
+    }
+  }
+
+  if (invalidAlertIds.length > 0) {
+    await supabaseAdmin.from("license_alerts").delete().in("id", invalidAlertIds);
+  }
+}
+
+async function ensureAutomaticLicenseAlerts(supabaseAdmin: SupabaseClient) {
+  const { data: assignedLicensesData, error: assignedLicensesError } = await supabaseAdmin
+    .from("product_licenses")
+    .select(
+      "id, product_id, variant_id, license_text, status, billing_duration_days, billing_duration_months, billing_ends_at, rotation_status, requires_rotation_alert, assigned_order_id, assigned_order_item_id, assigned_user_id"
+    )
+    .eq("status", "assigned")
+    .not("assigned_order_id", "is", null)
+    .not("assigned_order_item_id", "is", null)
+    .not("assigned_user_id", "is", null)
+    .limit(100);
+
+  if (assignedLicensesError) {
+    throw new Error(`No se pudieron revisar licencias asignadas: ${assignedLicensesError.message}`);
+  }
+
+  const assignedLicenses = (assignedLicensesData as AssignedLicenseRow[]) || [];
+
+  if (assignedLicenses.length > 0) {
+    const productIds = uniqueIds(assignedLicenses.map((item) => item.product_id));
+    const variantIds = uniqueIds(assignedLicenses.map((item) => item.variant_id));
+    const orderIds = uniqueIds(assignedLicenses.map((item) => item.assigned_order_id));
+    const profileIds = uniqueIds(assignedLicenses.map((item) => item.assigned_user_id));
+
+    const productsResult = productIds.length
+      ? await supabaseAdmin.from("products").select("id, name, enable_license_alerts, access_duration_months").in("id", productIds)
+      : { data: [], error: null };
+    const variantsResult = variantIds.length
+      ? await supabaseAdmin.from("product_variants").select("id, name, access_duration_months").in("id", variantIds)
+      : { data: [], error: null };
+    const ordersResult = orderIds.length
+      ? await supabaseAdmin.from("orders").select("id, order_number, created_at").in("id", orderIds)
+      : { data: [], error: null };
+    const profilesResult = profileIds.length
+      ? await supabaseAdmin.from("profiles").select("id, email, full_name").in("id", profileIds)
+      : { data: [], error: null };
+
+    const firstLookupError = [
+      productsResult.error,
+      variantsResult.error,
+      ordersResult.error,
+      profilesResult.error,
+    ].find(Boolean);
+
+    if (firstLookupError) {
+      throw new Error(`No se pudieron preparar datos de alertas automaticas: ${firstLookupError.message}`);
+    }
+
+    const productsMap = new Map(
+      ((productsResult.data as Array<ProductRow & { enable_license_alerts?: boolean; access_duration_months?: number | null }>) || []).map((item) => [item.id, item])
+    );
+    const variantsMap = new Map(((variantsResult.data as VariantRow[]) || []).map((item) => [item.id, item]));
+    const ordersMap = new Map(((ordersResult.data as BackfillOrderRow[]) || []).map((item) => [item.id, item]));
+    const profilesMap = new Map(((profilesResult.data as ProfileRow[]) || []).map((item) => [item.id, item]));
+
+    const candidates = assignedLicenses.filter((license) => {
+      if (!license.id) return false;
+      const product = license.product_id ? productsMap.get(license.product_id) : null;
+      if (!product) return false;
+      const variant = license.variant_id ? variantsMap.get(license.variant_id) ?? null : null;
+      return canTrackLicenseAccess({ product, variant, license });
+    });
+
+    for (const licenseBatch of chunkArray(candidates, 25)) {
+      const licenseIds = uniqueIds(licenseBatch.map((item) => item.id));
+      const accessesResult = await supabaseAdmin
+        .from("license_accesses")
+        .select("id, license_id, order_id, order_item_id, user_id, product_id, variant_id, starts_at, expires_at, status")
+        .in("license_id", licenseIds);
+
+      if (accessesResult.error) {
+        throw new Error(`No se pudieron revisar accesos existentes: ${accessesResult.error.message}`);
+      }
+
+      const accesses = (accessesResult.data as AccessRow[]) || [];
+      const sharedReviewKeys = new Set<string>();
+
+      for (const license of licenseBatch) {
+        if (!license.id) continue;
+
+        const product = license.product_id ? productsMap.get(license.product_id) : null;
+        if (!product) continue;
+
+        const variant = license.variant_id ? variantsMap.get(license.variant_id) ?? null : null;
+        const order = license.assigned_order_id ? ordersMap.get(license.assigned_order_id) : null;
+        const profile = license.assigned_user_id ? profilesMap.get(license.assigned_user_id) : null;
+        const accessDurationMonths = resolveAccessDurationMonths({ product, variant });
+        const startsAt = order?.created_at ? new Date(order.created_at) : new Date();
+        const expiresAt = addMonths(startsAt, accessDurationMonths);
+        const productLabel = variant?.name ? `${product.name || "Producto"} - ${variant.name}` : product.name || "Producto";
+
+        let access = accesses.find(
+          (item) =>
+            item.license_id === license.id &&
+            item.order_id === license.assigned_order_id &&
+            item.order_item_id === license.assigned_order_item_id
+        );
+
+        if (!access) {
+          const { data: createdAccess, error: createAccessError } = await supabaseAdmin
+            .from("license_accesses")
+            .insert([
+              {
+                license_id: license.id,
+                order_id: license.assigned_order_id,
+                order_item_id: license.assigned_order_item_id,
+                user_id: license.assigned_user_id,
+                product_id: license.product_id,
+                variant_id: license.variant_id,
+                starts_at: startsAt.toISOString(),
+                expires_at: expiresAt.toISOString(),
+                status: "active",
+                requires_rotation: shouldCreateBillingRotationAlert({ product, variant, license }),
+              },
+            ])
+            .select("id")
+            .single();
+
+          if (createAccessError || !createdAccess) continue;
+
+          access = {
+            id: createdAccess.id,
+            license_id: license.id,
+            order_id: license.assigned_order_id || null,
+            order_item_id: license.assigned_order_item_id || null,
+            user_id: license.assigned_user_id || null,
+            product_id: license.product_id || null,
+            variant_id: license.variant_id || null,
+            starts_at: startsAt.toISOString(),
+            expires_at: expiresAt.toISOString(),
+            status: "active",
+          };
+
+          accesses.push(access);
+        }
+
+        if (shouldCreateBillingRotationAlert({ product, variant, license })) {
+          await createRotationAlertIfMissing({
+            supabaseAdmin,
+            license,
+            access,
+            productLabel,
+            customerEmail: profile?.email,
+            reason: "billing_shorter_than_license",
+          });
+        }
+
+        const normalizedLicenseText = normalizeLicenseText(license.license_text);
+        if (license.product_id && normalizedLicenseText) {
+          sharedReviewKeys.add(`${license.product_id}::${normalizedLicenseText}`);
+        }
+      }
+
+      for (const key of sharedReviewKeys) {
+        const [productId, ...licenseTextParts] = key.split("::");
+        await ensureSharedDurationAlertsForLicenseText({
+          supabaseAdmin,
+          productId,
+          licenseText: licenseTextParts.join("::"),
+        });
+      }
+    }
+  }
+
+  await cleanupInvalidAutomaticAlerts(supabaseAdmin);
 }
 
 function parsePositiveInteger(value: unknown, fallback: number) {
@@ -205,6 +848,15 @@ export async function GET(request: NextRequest) {
     const auth = await requireAdmin(request);
 
     if (auth.error) return auth.error;
+
+    let automaticPreparationError: string | null = null;
+
+    try {
+      await ensureAutomaticLicenseAlerts(auth.supabaseAdmin);
+    } catch (error) {
+      automaticPreparationError = error instanceof Error ? error.message : "No se pudieron preparar alertas automaticas.";
+      console.error("Error preparando alertas automaticas:", error);
+    }
 
     const url = new URL(request.url);
     const filterParam = url.searchParams.get("filter") || "pending";
@@ -461,6 +1113,7 @@ export async function GET(request: NextRequest) {
         billing_duration_days: license?.billing_duration_days || null,
         billing_duration_months: license?.billing_duration_months || null,
         billing_ends_at: license?.billing_ends_at || null,
+        billing_remaining_days: resolveBillingRemainingDays(license?.billing_ends_at || null),
         rotation_status: license?.rotation_status || null,
         access_starts_at: access?.starts_at || null,
         access_expires_at: access?.expires_at || alert.due_at,
@@ -475,6 +1128,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       ok: true,
+      warning: automaticPreparationError,
       alerts: enrichedAlerts,
       pagination: {
         page,
