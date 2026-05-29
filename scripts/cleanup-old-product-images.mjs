@@ -17,7 +17,7 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 const BUCKET = "product-images";
-const FOLDER = "products";
+const FOLDERS = ["products", "variants"];
 const PUBLIC_PREFIX = `/storage/v1/object/public/${BUCKET}/`;
 const DELETE_BATCH_SIZE = 1000;
 
@@ -36,40 +36,42 @@ function extractBucketPathFromPublicUrl(url) {
   }
 }
 
-async function listAllFiles(bucket, folder) {
+async function listAllFiles(bucket, folders) {
   const allFiles = [];
-  let offset = 0;
-  const limit = 100;
 
-  while (true) {
-    const { data, error } = await supabase.storage.from(bucket).list(folder, {
-      limit,
-      offset,
-      sortBy: { column: "name", order: "asc" },
-    });
+  for (const folder of folders) {
+    let offset = 0;
+    const limit = 100;
 
-    if (error) {
-      throw new Error(`Error listando archivos: ${error.message}`);
+    while (true) {
+      const { data, error } = await supabase.storage.from(bucket).list(folder, {
+        limit,
+        offset,
+        sortBy: { column: "name", order: "asc" },
+      });
+
+      if (error) {
+        throw new Error(`Error listando archivos en ${folder}: ${error.message}`);
+      }
+
+      const files = (data || []).filter((item) => item.name);
+
+      allFiles.push(
+        ...files.map((file) => ({
+          ...file,
+          fullPath: `${folder}/${file.name}`,
+        }))
+      );
+
+      if (files.length < limit) break;
+      offset += limit;
     }
-
-    const files = (data || []).filter((item) => item.name);
-
-    allFiles.push(
-      ...files.map((file) => ({
-        ...file,
-        fullPath: `${folder}/${file.name}`,
-      }))
-    );
-
-    if (files.length < limit) break;
-    offset += limit;
   }
 
   return allFiles;
 }
 
-async function getUsedImagePaths() {
-  const usedPaths = new Set();
+async function addUsedImagePathsFromTable({ table, select, usedPaths }) {
   let from = 0;
   const pageSize = 1000;
 
@@ -77,12 +79,12 @@ async function getUsedImagePaths() {
     const to = from + pageSize - 1;
 
     const { data, error } = await supabase
-      .from("products")
-      .select("id, name, image_url")
+      .from(table)
+      .select(select)
       .range(from, to);
 
     if (error) {
-      throw new Error(`Error leyendo products: ${error.message}`);
+      throw new Error(`Error leyendo ${table}: ${error.message}`);
     }
 
     const rows = data || [];
@@ -97,6 +99,22 @@ async function getUsedImagePaths() {
     if (rows.length < pageSize) break;
     from += pageSize;
   }
+}
+
+async function getUsedImagePaths() {
+  const usedPaths = new Set();
+
+  await addUsedImagePathsFromTable({
+    table: "products",
+    select: "id, name, image_url",
+    usedPaths,
+  });
+
+  await addUsedImagePathsFromTable({
+    table: "product_variants",
+    select: "id, name, image_url",
+    usedPaths,
+  });
 
   return usedPaths;
 }
@@ -117,11 +135,11 @@ async function deleteInBatches(bucket, paths) {
 }
 
 async function main() {
-  console.log("Revisando imágenes usadas en la tabla products...");
+  console.log("Revisando imágenes usadas en products y product_variants...");
   const usedPaths = await getUsedImagePaths();
 
   console.log("Listando archivos del bucket...");
-  const storageFiles = await listAllFiles(BUCKET, FOLDER);
+  const storageFiles = await listAllFiles(BUCKET, FOLDERS);
 
   const allStoragePaths = storageFiles.map((file) => file.fullPath);
   const unusedPaths = allStoragePaths.filter((path) => !usedPaths.has(path));

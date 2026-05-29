@@ -3,6 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { supabase } from "../../../../lib/supabase";
+import {
+  IMAGE_INPUT_ACCEPT,
+  convertImageFileToWebp,
+  createImageStoragePath,
+} from "../../../../lib/imageUpload";
 
 type ProductType = "simple" | "variable" | "composite";
 
@@ -1041,18 +1046,15 @@ export default function EditProductPage() {
       let finalImageUrl = currentImageUrl || null;
 
       if (imageFile) {
-        const fileExt = imageFile.name.split(".").pop()?.toLowerCase() || "jpg";
-        const fileName = `${Date.now()}-${Math.random()
-          .toString(36)
-          .slice(2)}.${fileExt}`;
-        const filePath = `products/${fileName}`;
+        const webpImageFile = await convertImageFileToWebp(imageFile);
+        const filePath = createImageStoragePath("products");
 
         const { error: uploadError } = await supabase.storage
           .from("product-images")
-          .upload(filePath, imageFile, {
+          .upload(filePath, webpImageFile, {
             cacheControl: "31536000",
             upsert: false,
-            contentType: imageFile.type || undefined,
+            contentType: webpImageFile.type,
           });
 
         if (uploadError) {
@@ -1122,19 +1124,17 @@ export default function EditProductPage() {
         let finalVariantImageUrl = item.image_url.trim() || null;
 
         if (item.imageFile) {
-          const fileExt =
-            item.imageFile.name.split(".").pop()?.toLowerCase() || "jpg";
-          const fileName = `${Date.now()}-${Math.random()
-            .toString(36)
-            .slice(2)}.${fileExt}`;
-          const filePath = `variants/${fileName}`;
+          const webpVariantImageFile = await convertImageFileToWebp(
+            item.imageFile
+          );
+          const filePath = createImageStoragePath("variants");
 
           const { error: uploadVariantImageError } = await supabase.storage
             .from("product-images")
-            .upload(filePath, item.imageFile, {
+            .upload(filePath, webpVariantImageFile, {
               cacheControl: "31536000",
               upsert: false,
-              contentType: item.imageFile.type || undefined,
+              contentType: webpVariantImageFile.type,
             });
 
           if (uploadVariantImageError) {
@@ -1442,7 +1442,7 @@ export default function EditProductPage() {
                 </label>
                 <input
                   type="file"
-                  accept="image/*"
+                  accept={IMAGE_INPUT_ACCEPT}
                   onChange={(e) => setImageFile(e.target.files?.[0] || null)}
                   className={fileInputClass}
                 />
@@ -1619,7 +1619,7 @@ export default function EditProductPage() {
                           </label>
                           <input
                             type="file"
-                            accept="image/*"
+                            accept={IMAGE_INPUT_ACCEPT}
                             onChange={(e) =>
                               updateVariantImageFile(
                                 item.tempId,

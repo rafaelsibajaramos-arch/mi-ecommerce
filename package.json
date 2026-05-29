@@ -6,7 +6,9 @@
     "dev": "next dev --webpack",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "check:product-images": "node scripts/check-old-product-images.mjs",
+    "cleanup:product-images": "node scripts/cleanup-old-product-images.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.9.0",

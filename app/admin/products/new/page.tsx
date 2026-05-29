@@ -3,6 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../../../lib/supabase";
+import {
+  IMAGE_INPUT_ACCEPT,
+  convertImageFileToWebp,
+  createImageStoragePath,
+  getImageUploadErrorMessage,
+} from "../../../../lib/imageUpload";
 
 function slugify(value: string) {
   return value
@@ -68,19 +74,15 @@ export default function NewProductPage() {
       let uploadedImageUrl: string | null = null;
 
       if (imageFile) {
-        const fileExt =
-          imageFile.name.split(".").pop()?.toLowerCase() || "jpg";
-        const fileName = `${Date.now()}-${Math.random()
-          .toString(36)
-          .slice(2)}.${fileExt}`;
-        const filePath = `products/${fileName}`;
+        const webpImageFile = await convertImageFileToWebp(imageFile);
+        const filePath = createImageStoragePath("products");
 
         const { error: uploadError } = await supabase.storage
           .from("product-images")
-          .upload(filePath, imageFile, {
+          .upload(filePath, webpImageFile, {
             cacheControl: "31536000",
             upsert: false,
-            contentType: imageFile.type || undefined,
+            contentType: webpImageFile.type,
           });
 
         if (uploadError) {
@@ -117,6 +119,8 @@ export default function NewProductPage() {
 
       router.push("/admin/products");
       router.refresh();
+    } catch (error) {
+      setMessage(getImageUploadErrorMessage(error));
     } finally {
       setSaving(false);
     }
@@ -222,7 +226,7 @@ export default function NewProductPage() {
             </label>
             <input
               type="file"
-              accept="image/*"
+              accept={IMAGE_INPUT_ACCEPT}
               onChange={(e) => setImageFile(e.target.files?.[0] || null)}
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700 outline-none file:mr-4 file:rounded-xl file:border-0 file:bg-slate-900 file:px-4 file:py-2 file:text-white"
             />
