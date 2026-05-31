@@ -891,90 +891,101 @@ export default function HomePage() {
   const quickViewPrice = quickViewItem?.displayPrice || 0;
   const quickViewStock = quickViewItem?.displayStock || 0;
 
-  const renderProductCard = (item: CatalogItem) => {
-    return (
-      <article
-        key={item.catalogId}
-        onClick={() => handleOpenQuickView(item)}
-        className="group flex h-full cursor-pointer flex-col overflow-hidden rounded-[18px] border border-white/10 bg-white/[0.04] backdrop-blur-md transition duration-300 hover:-translate-y-1 hover:border-blue-400/30 hover:shadow-[0_20px_80px_rgba(59,130,246,0.12)] sm:rounded-[22px]"
-      >
-        <div className="p-2 pb-0 sm:p-3 sm:pb-0">
-          <div className="relative aspect-square w-full overflow-hidden rounded-[14px] bg-gradient-to-b from-white/[0.05] to-white/[0.02] sm:rounded-[18px]">
-            <ProductImage
-              src={item.displayImageUrl}
-              alt={item.displayName}
-              className="h-full w-full object-contain p-2 transition duration-500 group-hover:scale-[1.04] sm:p-3"
-              fallbackSubtitle="Sin imagen"
-            />
+const renderProductCard = (item: CatalogItem) => {
+  return (
+    <article
+      key={item.catalogId}
+      onClick={() => handleOpenQuickView(item)}
+      className="group flex h-full cursor-pointer flex-col overflow-hidden rounded-[18px] border border-white/10 bg-white/[0.04] backdrop-blur-md transition duration-300 hover:-translate-y-1 hover:border-blue-400/30 hover:shadow-[0_20px_80px_rgba(59,130,246,0.12)] sm:rounded-[22px]"
+    >
+      <div className="p-2 pb-0 sm:p-3 sm:pb-0">
+        <div className="relative aspect-square w-full overflow-hidden rounded-[14px] bg-gradient-to-b from-white/[0.05] to-white/[0.02] sm:rounded-[18px]">
+          <ProductImage
+            src={item.displayImageUrl}
+            alt={item.displayName}
+            className="h-full w-full object-contain p-2 transition duration-500 group-hover:scale-[1.04] sm:p-3"
+            fallbackSubtitle="Sin imagen"
+          />
 
-            <div className="absolute left-2 top-2 z-10 sm:left-3 sm:top-3">
-              <span
-                className={
-                  item.displayStock > 0
-                    ? "inline-flex rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2 py-0.5 text-[9px] font-bold text-emerald-300 sm:px-2.5 sm:py-1 sm:text-[10px]"
-                    : "inline-flex rounded-full border border-red-400/20 bg-red-400/10 px-2 py-0.5 text-[9px] font-bold text-red-300 sm:px-2.5 sm:py-1 sm:text-[10px]"
-                }
-              >
-                {item.displayStock > 0 ? "Disponible" : "Agotado"}
-              </span>
-            </div>
-
-            {isAdmin && (
-              <Link
-                href={`/admin/products/${item.product.id}`}
-                onClick={(e) => e.stopPropagation()}
-                aria-label={`Editar ${item.product.name}`}
-                className="absolute right-2 top-2 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-black/45 text-white/85 shadow-[0_10px_24px_rgba(0,0,0,0.35)] transition hover:scale-105 hover:bg-white hover:text-black sm:right-3 sm:top-3 sm:h-10 sm:w-10"
-                title="Editar producto"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  className="h-3.5 w-3.5 sm:h-4.5 sm:w-4.5"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M12 20h9" />
-                  <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" />
-                </svg>
-              </Link>
-            )}
+          <div className="absolute left-2 top-2 z-10 sm:left-3 sm:top-3">
+            <span className={
+              item.displayStock > 0
+                ? "inline-flex rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2 py-0.5 text-[9px] font-bold text-emerald-300 sm:px-2.5 sm:py-1 sm:text-[10px]"
+                : "inline-flex rounded-full border border-red-400/20 bg-red-400/10 px-2 py-0.5 text-[9px] font-bold text-red-300 sm:px-2.5 sm:py-1 sm:text-[10px]"
+            }>
+              {item.displayStock > 0 ? "Disponible" : "Agotado"}
+            </span>
           </div>
+
+          {isAdmin && (
+            <Link
+              href={`/admin/products/${item.product.id}`}
+              onClick={(e) => e.stopPropagation()}
+              aria-label={`Editar ${item.product.name}`}
+              className="absolute right-2 top-2 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-black/45 text-white/85 shadow-[0_10px_24px_rgba(0,0,0,0.35)] transition hover:scale-105 hover:bg-white hover:text-black sm:right-3 sm:top-3 sm:h-10 sm:w-10"
+              title="Editar producto"
+            >
+              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 sm:h-4.5 sm:w-4.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" />
+              </svg>
+            </Link>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-1 flex-col p-2 sm:p-3">
+        <div className="min-h-[38px] sm:min-h-[46px]">
+          <h3 className="h-[34px] overflow-hidden text-[11px] font-extrabold uppercase leading-4 text-white sm:h-[40px] sm:text-[13px] sm:leading-[20px] md:h-[44px] md:text-[14px] md:leading-[22px]">
+            {item.displayName}
+          </h3>
         </div>
 
-        <div className="flex flex-1 flex-col p-2 sm:p-3">
-          <div className="min-h-[38px] sm:min-h-[46px]">
-            <h3 className="h-[34px] overflow-hidden text-[11px] font-extrabold uppercase leading-4 text-white sm:h-[40px] sm:text-[13px] sm:leading-[20px] md:h-[44px] md:text-[14px] md:leading-[22px]">
-              {item.displayName}
-            </h3>
-          </div>
+        <div className="mt-auto border-t border-white/10 pt-2 sm:pt-3">
+          <p className="text-lg font-black text-white sm:text-xl md:text-[22px]">
+            ${formatPrice(item.displayPrice)}
+          </p>
 
-          <div className="mt-auto border-t border-white/10 pt-2 sm:pt-3">
-            <p className="text-lg font-black text-white sm:text-xl md:text-[22px]">
-              ${formatPrice(item.displayPrice)}
+          {isAdmin && (
+            <p className="mt-1 text-[10px] font-semibold text-white/45 sm:text-xs">
+              Stock: {item.displayStock}
             </p>
+          )}
 
-            {isAdmin && (
-              <p className="mt-1 text-[10px] font-semibold text-white/45 sm:text-xs">
-                Stock: {item.displayStock}
-              </p>
-            )}
+          <div className="mt-2 grid grid-cols-2 gap-2 sm:mt-3">
+            {/* Ver detalles */}
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); handleOpenQuickView(item); }}
+              className="group/btn relative inline-flex h-[34px] items-center justify-center gap-1.5 overflow-hidden rounded-2xl border border-white/15 bg-white/[0.06] px-2 text-[10px] font-bold text-white/80 transition-all duration-200 hover:border-white/25 hover:bg-white/[0.12] hover:text-white sm:h-10 sm:text-xs"
+            >
+              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+              <span>Detalles</span>
+            </button>
 
+            {/* Añadir al carrito */}
             <button
               type="button"
               onClick={(e) => handleAddToCart(e, item)}
               disabled={item.displayStock <= 0}
-              className="mt-2 inline-flex h-[34px] w-full items-center justify-center rounded-2xl bg-white px-2 text-[11px] font-bold text-black transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 sm:mt-3 sm:h-10 sm:px-3 sm:text-sm"
+              aria-label="Añadir al carrito"
+              className="relative inline-flex h-[34px] items-center justify-center overflow-hidden rounded-2xl bg-white px-2 transition-all duration-200 hover:bg-slate-100 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 sm:h-10"
             >
-              Añadir al carrito
+              <svg viewBox="0 0 24 24" className="h-4 w-4 sm:h-5 sm:w-5" fill="none" stroke="black" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <path d="M16 10a4 4 0 0 1-8 0" />
+              </svg>
             </button>
           </div>
         </div>
-      </article>
-    );
-  };
+      </div>
+    </article>
+  );
+};
 
   return (
     <>
