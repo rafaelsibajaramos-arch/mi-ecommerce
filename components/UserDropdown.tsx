@@ -106,7 +106,7 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
 
   // Tamaños streamingmayor + estilo icono streamxpress
   const iconWrapClass =
-    "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.10),rgba(255,255,255,0.03))] text-white/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.10)] transition duration-300 group-hover:border-sky-400/30 group-hover:text-sky-300 min-[390px]:h-9 min-[390px]:w-9 md:h-8 md:w-8";
+  "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-blue-500/70 bg-[linear-gradient(145deg,#0d1f4a,#071230)] text-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.5),inset_0_1px_0_rgba(100,160,255,0.15)] transition duration-300 group-hover:border-blue-400 group-hover:text-blue-300 group-hover:shadow-[0_0_16px_rgba(59,130,246,0.7)] min-[390px]:h-9 min-[390px]:w-9 md:h-8 md:w-8";
 
   return (
     <div ref={dropdownRef} className="relative">
@@ -232,13 +232,11 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
              <button
   type="button"
   onClick={logout}
-  className="group relative flex w-full items-center justify-center gap-2 overflow-hidden rounded-2xl border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))] px-4 py-3 text-[13px] font-semibold text-white transition-all duration-300 hover:border-red-400/30 hover:bg-[linear-gradient(180deg,rgba(239,68,68,0.12),rgba(239,68,68,0.06))] hover:text-red-200"
+  className="group relative flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-[13px] font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition-all duration-300 hover:border-red-400/25 hover:bg-red-500/10 hover:text-red-200"
 >
-  <span className="absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100 bg-[radial-gradient(circle_at_center,rgba(239,68,68,0.15),transparent_70%)]" />
-
   <svg
     viewBox="0 0 24 24"
-    className="relative z-10 h-4 w-4"
+    className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-0.5"
     fill="none"
     stroke="currentColor"
     strokeWidth="2"
@@ -250,7 +248,7 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
     <path d="M21 12H9" />
   </svg>
 
-  <span className="relative z-10">Cerrar sesión</span>
+  <span>Cerrar sesión</span>
 </button>
             </div>
           </div>
