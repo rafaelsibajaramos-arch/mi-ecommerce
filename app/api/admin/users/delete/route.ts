@@ -13,6 +13,7 @@ type TargetProfile = {
   id: string;
   email: string | null;
   full_name: string | null;
+  deleted_at?: string | null;
 };
 
 type OrderRow = {
@@ -111,7 +112,7 @@ export async function POST(request: NextRequest) {
 
     const { data: targetProfile, error: targetProfileError } = await supabaseAdmin
       .from("profiles")
-      .select("id, email, full_name")
+      .select("id, email, full_name, deleted_at")
       .eq("id", targetUserId)
       .maybeSingle();
 
@@ -121,6 +122,12 @@ export async function POST(request: NextRequest) {
 
     if (!targetProfile) {
       return jsonError("El usuario ya no existe o no tiene perfil.", 404);
+    }
+
+    const safeProfile = targetProfile as TargetProfile;
+
+    if (safeProfile.deleted_at) {
+      return jsonError("Este usuario ya estaba eliminado.", 409);
     }
 
     const { data: ordersData, error: ordersError } = await supabaseAdmin
@@ -147,17 +154,16 @@ export async function POST(request: NextRequest) {
 
     const assignedLicenses = (assignedLicensesData as AssignedLicenseRow[]) || [];
 
+    const now = new Date().toISOString();
+
     if (assignedLicenses.length > 0) {
-      // Las licencias ya entregadas no deben volver a stock al eliminar un usuario.
-      // Antes se restauraba el stock y se dejaban como available, provocando que
-      // licencias antiguas reaparecieran como vendibles. Ahora se desactivan.
+      // Las licencias entregadas quedan desactivadas para que no vuelvan a stock,
+      // pero conservan assigned_order_id y assigned_order_item_id para que el
+      // historial de compras siga mostrando qué licencia recibió el cliente.
       const { error: disableLicensesError } = await supabaseAdmin
         .from("product_licenses")
         .update({
           status: "disabled",
-          assigned_order_id: null,
-          assigned_order_item_id: null,
-          assigned_user_id: null,
         })
         .eq("assigned_user_id", targetUserId)
         .eq("status", "assigned");
@@ -170,79 +176,62 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (orderIds.length > 0) {
-      const { error: deleteOrderItemsError } = await supabaseAdmin
-        .from("order_items")
-        .delete()
-        .in("order_id", orderIds);
+    const { error: expireAccessesError } = await supabaseAdmin
+      .from("license_accesses")
+      .update({
+        status: "expired",
+        rotation_completed_at: now,
+      })
+      .eq("user_id", targetUserId)
+      .eq("status", "active");
 
-      if (deleteOrderItemsError) {
-        return jsonError(
-          `No se pudieron eliminar los productos de los pedidos: ${deleteOrderItemsError.message}`,
-          500
-        );
-      }
-
-      const { error: deleteOrdersError } = await supabaseAdmin
-        .from("orders")
-        .delete()
-        .in("id", orderIds);
-
-      if (deleteOrdersError) {
-        return jsonError(
-          `No se pudieron eliminar los pedidos: ${deleteOrdersError.message}`,
-          500
-        );
-      }
-    }
-
-    const { error: deleteTransactionsError } = await supabaseAdmin
-      .from("wallet_transactions")
-      .delete()
-      .eq("user_id", targetUserId);
-
-    if (deleteTransactionsError) {
+    if (expireAccessesError) {
       return jsonError(
-        `No se pudieron eliminar las recargas y movimientos: ${deleteTransactionsError.message}`,
+        `No se pudieron cerrar los accesos activos del usuario: ${expireAccessesError.message}`,
         500
       );
     }
 
-    const { error: deleteProfileError } = await supabaseAdmin
+    // No borramos orders, order_items ni wallet_transactions: son historial de
+    // compras/recargas y deben quedar visibles en el panel administrativo.
+    const { error: markProfileDeletedError } = await supabaseAdmin
       .from("profiles")
-      .delete()
+      .update({
+        deleted_at: now,
+        deleted_by: user.id,
+      })
       .eq("id", targetUserId);
 
-    if (deleteProfileError) {
+    if (markProfileDeletedError) {
       return jsonError(
-        `No se pudo eliminar el perfil del usuario: ${deleteProfileError.message}`,
+        `No se pudo marcar el perfil como eliminado: ${markProfileDeletedError.message}`,
         500
       );
     }
 
-    const { error: deleteAuthUserError } =
-      await supabaseAdmin.auth.admin.deleteUser(targetUserId);
+    const { error: softDeleteAuthUserError } =
+      await supabaseAdmin.auth.admin.deleteUser(targetUserId, true);
 
-    if (deleteAuthUserError) {
+    if (softDeleteAuthUserError) {
       return jsonError(
-        `El perfil se eliminó, pero falló la eliminación en Auth: ${deleteAuthUserError.message}`,
+        `El historial se conservó, pero falló la baja del usuario en Auth: ${softDeleteAuthUserError.message}`,
         500
       );
     }
-
-    const safeProfile = targetProfile as TargetProfile;
 
     return NextResponse.json({
       ok: true,
-      message: "Usuario eliminado correctamente.",
+      message: "Usuario eliminado correctamente. El historial de compras se conservó.",
       deletedUser: {
         id: safeProfile.id,
         email: safeProfile.email,
         full_name: safeProfile.full_name,
       },
-      deletedCounts: {
+      preservedCounts: {
         orders: orderIds.length,
-        disabledLicenses: assignedLicenses.length,
+      },
+      disabledCounts: {
+        licenses: assignedLicenses.length,
       },
     });
   } catch (error) {

@@ -71,6 +71,7 @@ export default function AdminUsersPage() {
     const { data, error } = await supabase
       .from("profiles")
       .select("id, email, full_name, role, created_at")
+      .is("deleted_at", null)
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -330,7 +331,7 @@ export default function AdminUsersPage() {
 
   const handleDeleteUser = async (user: Profile) => {
     const confirmed = window.confirm(
-      `¿Seguro que quieres eliminar a ${user.full_name || user.email}?\n\nSe borrarán su perfil, pedidos, recargas, movimientos y accesos entregados relacionados con su cuenta. Esta acción no se puede deshacer.`
+      `¿Seguro que quieres eliminar a ${user.full_name || user.email}?\n\nSe desactivará su cuenta y sus licencias, pero se conservará su historial de compras, productos comprados, recargas y movimientos para consulta administrativa. Esta acción no se puede deshacer.`
     );
 
     if (!confirmed) {
@@ -382,7 +383,7 @@ export default function AdminUsersPage() {
       });
 
       setMessage(
-        `Usuario eliminado correctamente: ${user.full_name || user.email}.`
+        `Usuario eliminado correctamente: ${user.full_name || user.email}. El historial de compras se conservó.`
       );
       setMessageType("success");
     } catch (error) {

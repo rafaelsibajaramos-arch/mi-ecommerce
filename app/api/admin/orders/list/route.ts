@@ -269,7 +269,7 @@ export async function GET(request: NextRequest) {
             "id, product_id, variant_id, license_text, status, assigned_order_id, assigned_order_item_id, assigned_user_id"
           )
           .in("assigned_order_id", chunk)
-          .eq("status", "assigned");
+          .in("status", ["assigned", "disabled"]);
 
         return {
           data: (data as LicenseRow[]) || [],
