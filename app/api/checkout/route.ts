@@ -70,6 +70,9 @@ type LicenseRow = {
   variant_id: string | null;
   license_text: string;
   status: string;
+  assigned_order_id?: string | null;
+  assigned_order_item_id?: string | null;
+  assigned_user_id?: string | null;
   is_priority?: boolean;
   billing_duration_days?: number | null;
   billing_duration_months?: number | null;
@@ -568,7 +571,7 @@ async function fetchAvailableLicensePool({
 }) {
   let query = supabaseAdmin
     .from("product_licenses")
-    .select("id, product_id, variant_id, license_text, status, is_priority, billing_duration_days, billing_duration_months, billing_ends_at, requires_rotation_alert, license_mode, max_active_users")
+    .select("id, product_id, variant_id, license_text, status, assigned_order_id, assigned_order_item_id, assigned_user_id, is_priority, billing_duration_days, billing_duration_months, billing_ends_at, requires_rotation_alert, license_mode, max_active_users")
     .eq("product_id", productId)
     .eq("status", "available")
     .eq("is_priority", isPriority)
@@ -586,7 +589,36 @@ async function fetchAvailableLicensePool({
     throw new Error(error.message);
   }
 
-  return (data as LicenseRow[]) || [];
+  const pool = ((data as LicenseRow[]) || []).filter(
+    (license) =>
+      !license.assigned_order_id &&
+      !license.assigned_order_item_id &&
+      !license.assigned_user_id
+  );
+
+  if (pool.length === 0) return [];
+
+  // Protección extra para datos antiguos: si una licencia ya tiene historial de
+  // acceso, no debe salir de nuevo por checkout aunque haya quedado available.
+  const { data: usedAccesses, error: usedAccessesError } = await supabaseAdmin
+    .from("license_accesses")
+    .select("license_id")
+    .in(
+      "license_id",
+      pool.map((license) => license.id)
+    );
+
+  if (usedAccessesError) {
+    throw new Error(usedAccessesError.message);
+  }
+
+  const usedLicenseIds = new Set(
+    ((usedAccesses as Array<{ license_id: string | null }> | null) || [])
+      .map((access) => access.license_id)
+      .filter(Boolean) as string[]
+  );
+
+  return pool.filter((license) => !usedLicenseIds.has(license.id));
 }
 
 // Selecciona las licencias a entregar respetando prioridad, fallback y reglas de no repetición.

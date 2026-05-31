@@ -16,11 +16,6 @@ type LicenseAlertRow = {
   status: string;
 };
 
-type LicenseRow = {
-  id: string;
-  billing_ends_at: string | null;
-};
-
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
 }
@@ -172,50 +167,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    const { count: activeSameLicenseAccesses, error: activeAccessError } = await auth.supabaseAdmin
-      .from("license_accesses")
-      .select("id", { count: "exact", head: true })
-      .eq("license_id", alert.license_id)
-      .eq("status", "active")
-      .gt("expires_at", now);
-
-    if (activeAccessError) {
-      return jsonError(
-        `No se pudo validar si la licencia tiene otros accesos activos: ${activeAccessError.message}`,
-        500
-      );
-    }
-
-    const { data: licenseData, error: licenseError } = await auth.supabaseAdmin
-      .from("product_licenses")
-      .select("id, billing_ends_at")
-      .eq("id", alert.license_id)
-      .maybeSingle();
-
-    if (licenseError) {
-      return jsonError(`No se pudo consultar la licencia: ${licenseError.message}`, 500);
-    }
-
-    const license = licenseData as LicenseRow | null;
-    const providerExpired = Boolean(
-      license?.billing_ends_at && new Date(license.billing_ends_at).getTime() <= Date.now()
-    );
-
-    const hasOtherAccessesOnThisRow = Number(activeSameLicenseAccesses || 0) > 0;
-
-    const licenseUpdate = hasOtherAccessesOnThisRow
-      ? {
-          rotation_status: "normal",
-          last_rotated_at: now,
-        }
-      : {
-          status: providerExpired ? "disabled" : "available",
-          assigned_order_id: null,
-          assigned_order_item_id: null,
-          assigned_user_id: null,
-          rotation_status: "normal",
-          last_rotated_at: now,
-        };
+    // IMPORTANTE: una licencia entregada no debe volver a venta de forma automática.
+    // Antes, al completar la alerta, si no había otros accesos activos, se cambiaba
+    // a status="available" y se limpiaban los campos assigned_*. Eso hacía que
+    // licencias antiguas reaparecieran en el stock y pudieran venderse otra vez.
+    // Ahora solo cerramos el acceso vencido y registramos la rotación; si quieres
+    // vender una licencia de nuevo, debes cargarla manualmente como una licencia nueva.
+    const licenseUpdate = {
+      rotation_status: "normal",
+      last_rotated_at: now,
+    };
 
     const { error: updateLicenseError } = await auth.supabaseAdmin
       .from("product_licenses")

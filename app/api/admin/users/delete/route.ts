@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js";
 import { createSupabaseAdmin } from "../../../../../lib/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -21,18 +21,6 @@ type OrderRow = {
 
 type AssignedLicenseRow = {
   id: string;
-  product_id: string;
-  variant_id: string | null;
-};
-
-type ProductStockRow = {
-  id: string;
-  stock: number | null;
-};
-
-type VariantStockRow = {
-  id: string;
-  stock: number | null;
 };
 
 function jsonError(message: string, status = 400) {
@@ -74,96 +62,6 @@ function createSupabaseUserClientFromToken(token: string) {
       },
     },
   });
-}
-
-function groupCountById(items: Array<string | null | undefined>) {
-  const counts = new Map<string, number>();
-
-  for (const item of items) {
-    if (!item) continue;
-    counts.set(item, (counts.get(item) || 0) + 1);
-  }
-
-  return counts;
-}
-
-async function restoreLicenseStock(
-  supabaseAdmin: SupabaseClient,
-  assignedLicenses: AssignedLicenseRow[]
-) {
-  const productCounts = groupCountById(
-    assignedLicenses
-      .filter((license) => !license.variant_id)
-      .map((license) => license.product_id)
-  );
-
-  const variantCounts = groupCountById(
-    assignedLicenses
-      .filter((license) => Boolean(license.variant_id))
-      .map((license) => license.variant_id)
-  );
-
-  if (productCounts.size > 0) {
-    const productIds = Array.from(productCounts.keys());
-
-    const { data: productsData, error: productsError } = await supabaseAdmin
-      .from("products")
-      .select("id, stock")
-      .in("id", productIds);
-
-    if (productsError) {
-      throw new Error(
-        `No se pudo restaurar el stock de productos: ${productsError.message}`
-      );
-    }
-
-    for (const product of (productsData as ProductStockRow[]) || []) {
-      const increment = productCounts.get(product.id) || 0;
-      const nextStock = Number(product.stock || 0) + increment;
-
-      const { error: updateError } = await supabaseAdmin
-        .from("products")
-        .update({ stock: nextStock })
-        .eq("id", product.id);
-
-      if (updateError) {
-        throw new Error(
-          `No se pudo actualizar el stock del producto ${product.id}: ${updateError.message}`
-        );
-      }
-    }
-  }
-
-  if (variantCounts.size > 0) {
-    const variantIds = Array.from(variantCounts.keys());
-
-    const { data: variantsData, error: variantsError } = await supabaseAdmin
-      .from("product_variants")
-      .select("id, stock")
-      .in("id", variantIds);
-
-    if (variantsError) {
-      throw new Error(
-        `No se pudo restaurar el stock de variantes: ${variantsError.message}`
-      );
-    }
-
-    for (const variant of (variantsData as VariantStockRow[]) || []) {
-      const increment = variantCounts.get(variant.id) || 0;
-      const nextStock = Number(variant.stock || 0) + increment;
-
-      const { error: updateError } = await supabaseAdmin
-        .from("product_variants")
-        .update({ stock: nextStock })
-        .eq("id", variant.id);
-
-      if (updateError) {
-        throw new Error(
-          `No se pudo actualizar el stock de la variante ${variant.id}: ${updateError.message}`
-        );
-      }
-    }
-  }
 }
 
 export async function POST(request: NextRequest) {
@@ -239,7 +137,7 @@ export async function POST(request: NextRequest) {
     const { data: assignedLicensesData, error: assignedLicensesError } =
       await supabaseAdmin
         .from("product_licenses")
-        .select("id, product_id, variant_id")
+        .select("id")
         .eq("assigned_user_id", targetUserId)
         .eq("status", "assigned");
 
@@ -250,21 +148,23 @@ export async function POST(request: NextRequest) {
     const assignedLicenses = (assignedLicensesData as AssignedLicenseRow[]) || [];
 
     if (assignedLicenses.length > 0) {
-      await restoreLicenseStock(supabaseAdmin, assignedLicenses);
-
-      const { error: releaseLicensesError } = await supabaseAdmin
+      // Las licencias ya entregadas no deben volver a stock al eliminar un usuario.
+      // Antes se restauraba el stock y se dejaban como available, provocando que
+      // licencias antiguas reaparecieran como vendibles. Ahora se desactivan.
+      const { error: disableLicensesError } = await supabaseAdmin
         .from("product_licenses")
         .update({
-          status: "available",
+          status: "disabled",
           assigned_order_id: null,
           assigned_order_item_id: null,
           assigned_user_id: null,
         })
-        .eq("assigned_user_id", targetUserId);
+        .eq("assigned_user_id", targetUserId)
+        .eq("status", "assigned");
 
-      if (releaseLicensesError) {
+      if (disableLicensesError) {
         return jsonError(
-          `No se pudieron liberar las licencias del usuario: ${releaseLicensesError.message}`,
+          `No se pudieron desactivar las licencias del usuario: ${disableLicensesError.message}`,
           500
         );
       }
@@ -342,7 +242,7 @@ export async function POST(request: NextRequest) {
       },
       deletedCounts: {
         orders: orderIds.length,
-        releasedLicenses: assignedLicenses.length,
+        disabledLicenses: assignedLicenses.length,
       },
     });
   } catch (error) {

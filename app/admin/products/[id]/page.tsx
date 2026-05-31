@@ -58,6 +58,9 @@ type ProductLicenseRow = {
   variant_id: string | null;
   license_text: string;
   status: "available" | "assigned" | "disabled";
+  assigned_order_id?: string | null;
+  assigned_order_item_id?: string | null;
+  assigned_user_id?: string | null;
   is_priority: boolean;
   billing_duration_days: number | null;
   billing_duration_months: number | null;
@@ -590,7 +593,7 @@ export default function EditProductPage() {
   const fetchLicenses = async () => {
     const { data, error } = await supabase
       .from("product_licenses")
-      .select("id, product_id, variant_id, license_text, status, is_priority, billing_duration_days, billing_duration_months, requires_rotation_alert, license_mode, max_active_users")
+      .select("id, product_id, variant_id, license_text, status, assigned_order_id, assigned_order_item_id, assigned_user_id, is_priority, billing_duration_days, billing_duration_months, requires_rotation_alert, license_mode, max_active_users")
       .eq("product_id", id)
       .eq("status", "available")
       .order("created_at", { ascending: true });
@@ -600,7 +603,34 @@ export default function EditProductPage() {
       return;
     }
 
-    const rows = (data as ProductLicenseRow[]) || [];
+    const availableRows = ((data as ProductLicenseRow[]) || []).filter(
+      (row) =>
+        !row.assigned_order_id &&
+        !row.assigned_order_item_id &&
+        !row.assigned_user_id
+    );
+    const licenseIds = availableRows.map((row) => row.id);
+    let usedLicenseIds = new Set<string>();
+
+    if (licenseIds.length > 0) {
+      const { data: accessesData, error: accessesError } = await supabase
+        .from("license_accesses")
+        .select("license_id")
+        .in("license_id", licenseIds);
+
+      if (accessesError) {
+        setMessage("No se pudieron validar licencias antiguas.");
+        return;
+      }
+
+      usedLicenseIds = new Set(
+        ((accessesData as Array<{ license_id: string | null }> | null) || [])
+          .map((access) => access.license_id)
+          .filter(Boolean) as string[]
+      );
+    }
+
+    const rows = availableRows.filter((row) => !usedLicenseIds.has(row.id));
 
     const generalRows = rows
       .filter((row) => !row.variant_id && !row.is_priority)
