@@ -2,23 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { createSupabaseAdmin } from "../../../../../lib/supabaseAdmin";
 import {
-  buildWompiIntegritySignature,
-  getWompiCheckoutBaseUrl,
-  getWompiPublicKey,
-} from "../../../../../lib/wompi";
-import {
-  calculateTopupCustomerPaysFee,
-  calculateTopupFeeDiscountedFromBalance,
-  type PricingMode,
-} from "../../../../../lib/wompiPricing";
+  buildBankTopupReference,
+  normalizePaymentOrigin,
+  tryAutoApproveBankTopup,
+} from "../../../../../lib/bankTopups";
+import { getWalletTopupByReference } from "../../../../../lib/walletTopups";
 
 export const runtime = "nodejs";
-
-type ProfileRow = {
-  id: string;
-  email: string | null;
-  full_name: string | null;
-};
 
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
@@ -26,66 +16,26 @@ function jsonError(message: string, status = 400) {
 
 function getBearerToken(request: NextRequest) {
   const authHeader = request.headers.get("authorization") || "";
-
-  if (!authHeader.startsWith("Bearer ")) {
-    return null;
-  }
-
-  return authHeader.slice(7).trim();
+  return authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : null;
 }
 
 function requireEnv(name: string) {
   const value = process.env[name];
-
-  if (!value || !value.trim()) {
-    throw new Error(`Falta la variable de entorno ${name}`);
-  }
-
+  if (!value || !value.trim()) throw new Error(`Falta la variable de entorno ${name}`);
   return value.trim();
 }
 
 function createSupabaseUserClientFromToken(token: string) {
-  const url = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
-  const anonKey = requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY");
-
-  return createClient(url, anonKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-    global: {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    },
+  return createClient(requireEnv("NEXT_PUBLIC_SUPABASE_URL"), requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"), {
+    auth: { autoRefreshToken: false, persistSession: false },
+    global: { headers: { Authorization: `Bearer ${token}` } },
   });
-}
-
-function getRequestOrigin(request: NextRequest) {
-  const forwardedProto = request.headers.get("x-forwarded-proto");
-  const forwardedHost = request.headers.get("x-forwarded-host");
-  const host = forwardedHost || request.headers.get("host");
-  const proto = forwardedProto || (host?.includes("localhost") ? "http" : "https");
-
-  if (!host) {
-    throw new Error("No se pudo determinar el dominio de la aplicación.");
-  }
-
-  return `${proto}://${host}`;
-}
-
-function generateTopupReference(userId: string) {
-  const random = Math.random().toString(36).slice(2, 8).toUpperCase();
-  return `TOPUP-${userId.slice(0, 8).toUpperCase()}-${Date.now()}-${random}`;
 }
 
 export async function POST(request: NextRequest) {
   try {
     const token = getBearerToken(request);
-
-    if (!token) {
-      return jsonError("No autorizado.", 401);
-    }
+    if (!token) return jsonError("No autorizado.", 401);
 
     const supabaseAuth = createSupabaseUserClientFromToken(token);
     const supabaseAdmin = createSupabaseAdmin();
@@ -95,123 +45,67 @@ export async function POST(request: NextRequest) {
       error: authError,
     } = await supabaseAuth.auth.getUser();
 
-    if (authError || !user) {
-      return jsonError("Sesión inválida.", 401);
-    }
+    if (authError || !user) return jsonError("Sesión inválida.", 401);
 
     const body = await request.json();
-    const amount = Number(body?.amount || 0);
-    const pricingMode: PricingMode =
-      body?.pricingMode === "fee_discounted_from_balance"
-        ? "fee_discounted_from_balance"
-        : "customer_pays_fee";
+    const amount = Math.round(Number(body?.amount || 0));
+    const payerOrigin = typeof body?.payerOrigin === "string" ? body.payerOrigin.trim() : "";
+    const destinationAccount =
+      typeof body?.destinationAccount === "string" ? body.destinationAccount.trim() : "";
+    const receiptUrl = typeof body?.receiptUrl === "string" ? body.receiptUrl.trim() : "";
 
     if (!Number.isFinite(amount) || amount < 1000) {
       return jsonError("El monto mínimo de recarga es $ 1.000 COP.");
     }
 
-    const normalizedAmount = Math.round(amount);
-
-    let creditedAmount = 0;
-    let payableAmount = 0;
-
-    if (pricingMode === "fee_discounted_from_balance") {
-      const pricingSummary = calculateTopupFeeDiscountedFromBalance(normalizedAmount);
-      creditedAmount = pricingSummary.netCreditAmount;
-      payableAmount = pricingSummary.paidAmount;
-    } else {
-      const pricingSummary = calculateTopupCustomerPaysFee(normalizedAmount);
-      creditedAmount = pricingSummary.targetCreditAmount;
-      payableAmount = pricingSummary.totalToPay;
+    const normalizedOrigin = normalizePaymentOrigin(payerOrigin);
+    if (!normalizedOrigin || normalizedOrigin.length < 6) {
+      return jsonError("Ingresa la llave, celular o cuenta origen desde donde pagaste por Bre-B / Llaves.");
     }
 
-    if (creditedAmount < 1000) {
-      return jsonError(
-        "El saldo neto a acreditar sería muy bajo. Sube el monto para continuar."
-      );
+    if (!receiptUrl) {
+      return jsonError("Sube la foto del comprobante para dejar respaldo de la recarga.");
     }
 
-    const amountInCents = payableAmount * 100;
-    const currency = "COP";
-    const reference = generateTopupReference(user.id);
+    const reference = buildBankTopupReference(user.id);
+    const now = new Date().toISOString();
 
-    const { data: profileData, error: profileError } = await supabaseAdmin
-      .from("profiles")
-      .select("id, email, full_name")
-      .eq("id", user.id)
-      .maybeSingle();
+    const { data: insertedTopup, error: insertError } = await supabaseAdmin
+      .from("wallet_topups")
+      .insert({
+        user_id: user.id,
+        reference,
+        amount,
+        amount_in_cents: amount * 100,
+        currency: "COP",
+        provider: "BREB_LLAVES",
+        status: "PENDING",
+        wompi_status: null,
+        payer_origin: payerOrigin,
+        normalized_payer_origin: normalizedOrigin,
+        destination_account: destinationAccount || null,
+        receipt_url: receiptUrl,
+        error_message: null,
+        created_at: now,
+        updated_at: now,
+      })
+      .select("id, reference")
+      .single();
 
-    if (profileError) {
-      return jsonError("No se pudo cargar el perfil del usuario.", 500);
+    if (insertError || !insertedTopup) {
+      return jsonError(`No se pudo crear la recarga: ${insertError?.message || "error desconocido"}`, 500);
     }
 
-    const profile = (profileData as ProfileRow | null) || {
-      id: user.id,
-      email: user.email || null,
-      full_name:
-        typeof user.user_metadata?.full_name === "string"
-          ? user.user_metadata.full_name
-          : null,
-    };
-
-    const redirectUrl = `${getRequestOrigin(
-      request
-    )}/account/wallet/topup-result?reference=${encodeURIComponent(reference)}`;
-
-    const signature = buildWompiIntegritySignature({
-      reference,
-      amountInCents,
-      currency,
-    });
-
-    const checkoutParams = new URLSearchParams({
-      "public-key": getWompiPublicKey(),
-      currency,
-      "amount-in-cents": String(amountInCents),
-      reference,
-      "signature:integrity": signature,
-      "redirect-url": redirectUrl,
-      "customer-data:email": profile.email || user.email || "",
-      "customer-data:full-name": profile.full_name || "Usuario StreamingMayor",
-    });
-
-    const checkoutUrl = `${getWompiCheckoutBaseUrl()}?${checkoutParams.toString()}`;
-
-    const { error: insertError } = await supabaseAdmin.from("wallet_topups").insert({
-      user_id: user.id,
-      reference,
-      amount: creditedAmount,
-      amount_in_cents: amountInCents,
-      currency,
-      provider: "WOMPI",
-      status: "PENDING",
-      wompi_status: "PENDING",
-      redirect_url: redirectUrl,
-      checkout_url: checkoutUrl,
-    });
-
-    if (insertError) {
-      return jsonError(
-        `No se pudo crear la recarga pendiente: ${insertError.message}`,
-        500
-      );
-    }
+    await tryAutoApproveBankTopup(supabaseAdmin, String(insertedTopup.id));
+    const topup = await getWalletTopupByReference(supabaseAdmin, reference);
 
     return NextResponse.json({
       ok: true,
       reference,
-      amount: creditedAmount,
-      amount_in_cents: amountInCents,
-      currency,
-      payable_amount: payableAmount,
-      processing_fee: Math.max(0, payableAmount - creditedAmount),
-      pricing_mode: pricingMode,
-      checkout_url: checkoutUrl,
+      topup,
+      matched: String(topup?.status || "").toUpperCase() === "APPROVED",
     });
   } catch (error) {
-    return jsonError(
-      error instanceof Error ? error.message : "Ocurrió un error inesperado.",
-      500
-    );
+    return jsonError(error instanceof Error ? error.message : "Ocurrió un error inesperado.", 500);
   }
 }

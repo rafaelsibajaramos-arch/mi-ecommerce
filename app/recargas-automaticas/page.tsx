@@ -2,20 +2,19 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import {
-  calculateTopupCustomerPaysFee,
-  COLOMBIA_VAT_RATE,
-  WOMPI_ADVANCED_FIXED_FEE,
-} from "../../lib/wompiPricing";
+  IMAGE_INPUT_ACCEPT,
+  convertImageFileToWebp,
+  createImageStoragePath,
+  getImageUploadErrorMessage,
+} from "../../lib/imageUpload";
 
-type BannerState = {
-  kind: "success" | "error" | "info";
-  text: string;
-} | null;
+const PRESET_AMOUNTS = [100, 1000, 5000, 10000, 20000, 50000];
+const BREB_DESTINATION = "Bre-B / Llaves - 3117664491";
 
-const PRESET_AMOUNTS = [10000, 20000, 30000, 40000, 50000];
+type BannerState = { kind: "success" | "error" | "info"; text: string } | null;
 
 function formatMoney(value: number | null | undefined) {
   return `$ ${Number(value || 0).toLocaleString("es-CO")}`;
@@ -23,8 +22,10 @@ function formatMoney(value: number | null | undefined) {
 
 export default function AutomaticTopupsPage() {
   const router = useRouter();
-
   const [amountInput, setAmountInput] = useState("10000");
+  const [payerOrigin, setPayerOrigin] = useState("");
+  const destinationAccount = BREB_DESTINATION;
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [checkingSession, setCheckingSession] = useState(true);
   const [topupLoading, setTopupLoading] = useState(false);
@@ -39,7 +40,6 @@ export default function AutomaticTopupsPage() {
       } = await supabase.auth.getUser();
 
       if (!mounted) return;
-
       setIsLoggedIn(Boolean(user));
       setCheckingSession(false);
     };
@@ -58,45 +58,39 @@ export default function AutomaticTopupsPage() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!banner) return;
+  const parsedAmount = useMemo(() => Math.max(0, Math.round(Number(amountInput || 0))), [amountInput]);
 
-    const timer = window.setTimeout(() => {
-      setBanner(null);
-    }, 7000);
+  async function uploadReceipt(userId: string) {
+    if (!receiptFile) throw new Error("Selecciona la foto del comprobante.");
 
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [banner]);
+    const webpFile = await convertImageFileToWebp(receiptFile, { quality: 0.82 });
+    const path = createImageStoragePath("receipts").replace("receipts/", `receipts/${userId}/`);
 
-  const parsedAmount = useMemo(() => {
-    return Math.max(0, Math.round(Number(amountInput || 0)));
-  }, [amountInput]);
+    const { error: uploadError } = await supabase.storage
+      .from("receipts")
+      .upload(path, webpFile, { contentType: "image/webp", upsert: false });
 
-  const customerPaysSummary = useMemo(() => {
-    return calculateTopupCustomerPaysFee(parsedAmount);
-  }, [parsedAmount]);
+    if (uploadError) throw new Error(uploadError.message);
 
-  const handlePresetClick = (value: number) => {
-    setAmountInput(String(value));
-  };
+    const { data } = supabase.storage.from("receipts").getPublicUrl(path);
+    return data.publicUrl;
+  }
 
-  const handleStartTopup = async () => {
-    if (parsedAmount < 1000) {
-      setBanner({
-        kind: "error",
-        text: "El saldo mínimo recomendado para recargar es $ 1.000 COP.",
-      });
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+
+    if (parsedAmount < 100) {
+      setBanner({ kind: "error", text: "El monto mínimo de recarga es $ 100 COP." });
       return;
     }
 
-    if (!isLoggedIn) {
-      setBanner({
-        kind: "info",
-        text: "Primero inicia sesión para poder completar la recarga.",
-      });
-      router.push("/");
+    if (!payerOrigin.trim()) {
+      setBanner({ kind: "error", text: "Ingresa el nombre exacto de quien envió el pago, tal como aparece en el correo Bre-B." });
+      return;
+    }
+
+    if (!receiptFile) {
+      setBanner({ kind: "error", text: "Sube el comprobante como respaldo." });
       return;
     }
 
@@ -108,10 +102,13 @@ export default function AutomaticTopupsPage() {
         data: { session },
       } = await supabase.auth.getSession();
 
-      if (!session?.access_token) {
+      if (!session?.access_token || !session.user?.id) {
+        setBanner({ kind: "info", text: "Primero inicia sesión para reportar tu recarga." });
         router.push("/");
         return;
       }
+
+      const receiptUrl = await uploadReceipt(session.user.id);
 
       const response = await fetch("/api/wallet/topups/create", {
         method: "POST",
@@ -121,122 +118,66 @@ export default function AutomaticTopupsPage() {
         },
         body: JSON.stringify({
           amount: parsedAmount,
-          pricingMode: "customer_pays_fee",
+          payerOrigin,
+          destinationAccount,
+          receiptUrl,
         }),
       });
 
       const result = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(result?.error || "No se pudo reportar la recarga.");
 
-      if (!response.ok) {
-        throw new Error(result?.error || "No se pudo iniciar la recarga.");
-      }
-
-      if (!result?.checkout_url) {
-        throw new Error("No se recibió la URL del checkout.");
-      }
-
-      window.location.href = String(result.checkout_url);
+      router.push(`/account/wallet/topup-result?reference=${encodeURIComponent(result.reference)}`);
     } catch (error) {
       setBanner({
         kind: "error",
-        text:
-          error instanceof Error
-            ? error.message
-            : "Ocurrió un error iniciando la recarga.",
+        text: error instanceof Error ? error.message : getImageUploadErrorMessage(error),
       });
       setTopupLoading(false);
     }
-  };
+  }
+
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    setReceiptFile(event.target.files?.[0] || null);
+  }
 
   return (
     <main className="min-h-screen bg-transparent px-4 py-8 text-white md:px-6 md:py-10">
-      <section className="mx-auto max-w-7xl space-y-6">
+      <section className="mx-auto max-w-5xl space-y-6">
         <div className="rounded-[28px] border border-white/10 bg-slate-800/80 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-md md:p-8">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-            <div className="max-w-3xl">
-              <p className="text-sm uppercase tracking-[0.2em] text-white/45">
-                Recargas automáticas
-              </p>
-              <h1 className="mt-2 text-4xl font-extrabold tracking-tight md:text-5xl">
-                Recarga saldo a tu billetera de forma automática
-              </h1>
-              <p className="mt-4 text-base text-white/70 md:text-lg">
-                Recarga tu saldo de forma segura a través de Wompi. Antes de
-                pagar podrás ver el costo de procesamiento y el valor total de
-                tu recarga.
-              </p>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2 lg:w-[360px]">
-              <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4">
-                <p className="text-xs uppercase tracking-[0.18em] text-emerald-300/70">
-                  Tarifa de procesamiento
-                </p>
-                <p className="mt-2 text-2xl font-black text-emerald-300">
-                  2,65%
-                </p>
-                <p className="mt-1 text-sm text-emerald-200/80">
-                  + {formatMoney(WOMPI_ADVANCED_FIXED_FEE)} + IVA
-                </p>
-              </div>
-
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <p className="text-xs uppercase tracking-[0.18em] text-white/35">
-                  IVA aplicado
-                </p>
-                <p className="mt-2 text-2xl font-black text-white">
-                  {(COLOMBIA_VAT_RATE * 100).toFixed(0)}%
-                </p>
-                <p className="mt-1 text-sm text-white/60">
-                  Aplicado sobre la comisión de procesamiento
-                </p>
-              </div>
-            </div>
-          </div>
+          <p className="text-sm uppercase tracking-[0.2em] text-white/45">Recargas automáticas</p>
+          <h1 className="mt-2 text-4xl font-extrabold tracking-tight md:text-5xl">
+            Recarga automática por Bre-B / Llaves
+          </h1>
+          <p className="mt-4 text-base text-white/70 md:text-lg">
+            Paga por Bre-B / Llaves a la llave 3117664491 y reporta el monto exacto junto con el nombre de quien envió el pago. El correo oficial de Nequi/Bre-B no trae celular origen; trae el nombre del remitente. Si el monto y el nombre coinciden, el sistema acredita el saldo al instante. Si el correo se demora, queda pendiente para revisión manual con tu comprobante.
+          </p>
         </div>
 
         {banner && (
           <div
-            className={`rounded-2xl border px-4 py-3 text-sm font-semibold shadow-sm ${
-              banner.kind === "success"
+            className={`rounded-2xl border px-4 py-3 text-sm font-semibold shadow-sm ${banner.kind === "success"
                 ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-300"
                 : banner.kind === "info"
-                ? "border-blue-400/20 bg-blue-400/10 text-blue-300"
-                : "border-red-400/20 bg-red-400/10 text-red-300"
-            }`}
+                  ? "border-blue-400/20 bg-blue-400/10 text-blue-300"
+                  : "border-red-400/20 bg-red-400/10 text-red-300"
+              }`}
           >
             {banner.text}
           </div>
         )}
 
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
-          <div className="rounded-[28px] border border-white/10 bg-slate-800/80 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-md md:p-8">
-            <div className="flex flex-col gap-6">
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <form onSubmit={handleSubmit} className="rounded-[28px] border border-white/10 bg-slate-800/80 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-md md:p-8">
+            <div className="space-y-6">
               <div>
-                <p className="text-sm font-semibold uppercase tracking-[0.18em] text-white/35">
-                  Simulador
-                </p>
-                <h2 className="mt-2 text-2xl font-extrabold md:text-3xl">
-                  Simula tu recarga antes de pagar
-                </h2>
-                <p className="mt-3 text-white/65">
-                  Ingresa el saldo que deseas recibir en tu billetera. El
-                  simulador te mostrará el costo de procesamiento y el total
-                  aproximado que deberás pagar.
-                </p>
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-white/75">
-                  Saldo que deseas recibir
-                </label>
+                <label className="mb-2 block text-sm font-semibold text-white/75">Monto exacto que transferiste</label>
                 <input
                   type="number"
-                  min="1000"
-                  step="1000"
+                  min="100"
+                  step="100"
                   value={amountInput}
                   onChange={(event) => setAmountInput(event.target.value)}
-                  placeholder="10000"
                   className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3.5 text-lg font-semibold text-white outline-none transition focus:border-blue-400/40 focus:bg-white/10"
                 />
               </div>
@@ -246,198 +187,68 @@ export default function AutomaticTopupsPage() {
                   <button
                     key={amount}
                     type="button"
-                    onClick={() => handlePresetClick(amount)}
-                    className={`rounded-2xl border px-4 py-2.5 text-sm font-semibold transition ${
-                      parsedAmount === amount
+                    onClick={() => setAmountInput(String(amount))}
+                    className={`rounded-2xl border px-4 py-2.5 text-sm font-semibold transition ${parsedAmount === amount
                         ? "border-blue-400/30 bg-blue-500/15 text-blue-300"
                         : "border-white/10 bg-white/5 text-white/75 hover:bg-white/10 hover:text-white"
-                    }`}
+                      }`}
                   >
                     {formatMoney(amount)}
                   </button>
                 ))}
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-5">
-                  <p className="text-xs uppercase tracking-[0.18em] text-emerald-300/70">
-                    Resumen de tu recarga
-                  </p>
-                  <h3 className="mt-2 text-xl font-black text-emerald-300">
-                    Total estimado de la operación
-                  </h3>
-
-                  <div className="mt-4 space-y-2 text-sm text-emerald-100/90">
-                    <div className="flex items-center justify-between gap-4">
-                      <span>Saldo a recibir</span>
-                      <strong>
-                        {formatMoney(customerPaysSummary.targetCreditAmount)}
-                      </strong>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-4">
-                      <span>Costo de procesamiento</span>
-                      <strong>
-                        {formatMoney(customerPaysSummary.processingFee)}
-                      </strong>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-4 border-t border-emerald-300/15 pt-2 text-base font-bold text-white">
-                      <span>Total a pagar</span>
-                      <strong>
-                        {formatMoney(customerPaysSummary.totalToPay)}
-                      </strong>
-                    </div>
-                  </div>
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-white/75">Llave Bre-B destino</label>
+                <div className="rounded-2xl border border-white/10 bg-slate-900 px-4 py-3.5 text-white">
+                  {BREB_DESTINATION}
                 </div>
-
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-                  <p className="text-xs uppercase tracking-[0.18em] text-white/35">
-                    ¿Cómo funciona esta recarga?
-                  </p>
-                  <h3 className="mt-2 text-xl font-black text-white">
-                    Información importante
-                  </h3>
-
-                  <div className="mt-4 space-y-3 text-sm text-white/75">
-                    <p>
-                      El saldo que eliges en el simulador es el saldo que
-                      recibirás en tu billetera cuando el pago sea aprobado.
-                    </p>
-                    <p>
-                      El costo de procesamiento se suma al valor final del pago y
-                      se muestra antes de que continúes con la recarga.
-                    </p>
-                  </div>
-                </div>
+                <p className="mt-2 text-xs text-white/45">Paga exactamente a esta llave y conserva el comprobante.</p>
               </div>
 
-              <div className="rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-100/90">
-                <strong className="text-amber-200">Importante:</strong> la
-                recarga automática tiene un costo adicional por procesamiento.
-                Te recomendamos usar este método solo cuando realmente
-                necesites recargar saldo de forma inmediata.
-                <p className="mt-2 text-amber-100/85">
-                  Antes de continuar, revisa el valor total a pagar mostrado por
-                  el simulador.
-                </p>
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-white/75">Nombre de quien envió el pago</label>
+                <input
+                  value={payerOrigin}
+                  onChange={(event) => setPayerOrigin(event.target.value)}
+                  placeholder="Ej: DANNA GABRIELA NAVARRO"
+                  className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3.5 text-white outline-none transition focus:border-blue-400/40 focus:bg-white/10"
+                />
+                <p className="mt-2 text-xs text-white/45">Debe coincidir con el nombre que aparece en el correo: “Recibiste $X de NOMBRE...”.</p>
               </div>
 
-              <div className="space-y-3">
-                <div className="flex flex-col gap-3 sm:flex-row">
-                  <button
-                    type="button"
-                    onClick={handleStartTopup}
-                    disabled={checkingSession || topupLoading || parsedAmount < 1000}
-                    className="inline-flex items-center justify-center rounded-2xl bg-sky-500 px-5 py-3 text-sm font-semibold text-white shadow-[0_0_22px_rgba(14,165,233,0.2)] transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {checkingSession
-                      ? "Validando sesión..."
-                      : topupLoading
-                      ? "Redirigiendo a Wompi..."
-                      : isLoggedIn
-                      ? "Continuar con el pago"
-                      : "Inicia sesión para recargar"}
-                  </button>
-
-                  <Link
-                    href={isLoggedIn ? "/account/wallet" : "/"}
-                    className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-white/80 transition hover:bg-white/10"
-                  >
-                    {isLoggedIn ? "Volver a mi billetera" : "Ir al inicio"}
-                  </Link>
-                </div>
-
-                <p className="text-sm text-white/55">
-                  Total estimado a pagar:{" "}
-                  <span className="font-semibold text-white">
-                    {formatMoney(customerPaysSummary.totalToPay)}
-                  </span>
-                </p>
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-white/75">Foto del comprobante</label>
+                <input
+                  type="file"
+                  accept={IMAGE_INPUT_ACCEPT}
+                  onChange={handleFileChange}
+                  className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/75 file:mr-4 file:rounded-xl file:border-0 file:bg-blue-500/20 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-blue-200"
+                />
               </div>
+
+              <button
+                type="submit"
+                disabled={checkingSession || topupLoading || parsedAmount < 100}
+                className="w-full rounded-2xl bg-blue-500 px-5 py-3.5 text-sm font-bold text-white shadow-lg shadow-blue-500/20 transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {checkingSession ? "Validando sesión..." : topupLoading ? "Validando recarga..." : isLoggedIn ? "Reportar y validar recarga" : "Inicia sesión para recargar"}
+              </button>
             </div>
-          </div>
+          </form>
 
-          <div className="space-y-6">
-            <div className="rounded-[28px] border border-white/10 bg-slate-800/80 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-md md:p-8">
-              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-white/35">
-                Instrucciones
-              </p>
-
-              <div className="mt-5 space-y-4">
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-xs uppercase tracking-[0.18em] text-white/35">
-                    1. Ingresa el saldo que deseas recibir
-                  </p>
-                  <p className="mt-2 text-sm text-white/75">
-                    Escribe el valor que quieres que se abone a tu billetera.
-                  </p>
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-xs uppercase tracking-[0.18em] text-white/35">
-                    2. Revisa el total a pagar
-                  </p>
-                  <p className="mt-2 text-sm text-white/75">
-                    El simulador calculará el costo de procesamiento y te
-                    mostrará el valor final antes del pago.
-                  </p>
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-xs uppercase tracking-[0.18em] text-white/35">
-                    3. Completa el pago
-                  </p>
-                  <p className="mt-2 text-sm text-white/75">
-                    Podrás pagar con los medios habilitados en la plataforma,
-                    como Nequi, Daviplata o PSE.
-                  </p>
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-xs uppercase tracking-[0.18em] text-white/35">
-                    4. Recibe tu saldo automáticamente
-                  </p>
-                  <p className="mt-2 text-sm text-white/75">
-                    Una vez el pago sea aprobado, el saldo se abonará
-                    automáticamente a tu billetera.
-                  </p>
-                </div>
-              </div>
+          <aside className="rounded-[28px] border border-white/10 bg-slate-800/80 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-md">
+            <h2 className="text-xl font-extrabold">Cómo queda automático</h2>
+            <div className="mt-4 space-y-4 text-sm text-white/65">
+              <p><strong className="text-white">1.</strong> Bre-B / Llaves manda el correo oficial cuando entra el pago.</p>
+              <p><strong className="text-white">2.</strong> El parser guarda monto, nombre del remitente, referencia y fecha del correo oficial.</p>
+              <p><strong className="text-white">3.</strong> Tu reporte se cruza por monto exacto + nombre del remitente.</p>
+              <p><strong className="text-white">4.</strong> Si coincide, se acredita. Si no, queda pendiente con tu comprobante.</p>
             </div>
-
-            <div className="rounded-[28px] border border-white/10 bg-slate-800/80 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-md md:p-8">
-              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-white/35">
-                Información de tarifas
-              </p>
-
-              <div className="mt-4 space-y-3 text-sm text-white/70">
-                <p>
-                  Esta recarga utiliza la tarifa pública vigente de Wompi para
-                  calcular el costo de procesamiento.
-                </p>
-
-                <p>
-                  <strong className="text-white">Porcentaje:</strong> 2,65% por
-                  transacción exitosa.
-                </p>
-
-                <p>
-                  <strong className="text-white">Cargo fijo:</strong> $700.
-                </p>
-
-                <p>
-                  <strong className="text-white">IVA:</strong> 19% sobre la
-                  comisión.
-                </p>
-
-                <p className="rounded-2xl border border-white/10 bg-white/5 p-4 text-white/80">
-                  Los valores mostrados en esta página son estimados con base en
-                  la tarifa pública vigente de Wompi.
-                </p>
-              </div>
-            </div>
-          </div>
+            <Link href="/account/wallet" className="mt-6 inline-flex w-full items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-white/80 transition hover:bg-white/10">
+              Ver mi billetera
+            </Link>
+          </aside>
         </div>
       </section>
     </main>

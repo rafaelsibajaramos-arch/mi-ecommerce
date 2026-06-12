@@ -121,7 +121,7 @@ export async function convertImageFileToWebp(
   });
 }
 
-export function createImageStoragePath(folder: "products" | "variants") {
+export function createImageStoragePath(folder: "products" | "variants" | "receipts") {
   const fileName = `${Date.now()}-${Math.random().toString(36).slice(2)}.webp`;
   return `${folder}/${fileName}`;
 }

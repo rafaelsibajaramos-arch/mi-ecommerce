@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { createSupabaseAdmin } from "../../../../../lib/supabaseAdmin";
-import { tryAutoApproveBankTopup } from "../../../../../lib/bankTopups";
-import { getWalletTopupByReference } from "../../../../../lib/walletTopups";
+import { createSupabaseAdmin } from "../../../../../../lib/supabaseAdmin";
 
 export const runtime = "nodejs";
 
@@ -35,7 +33,6 @@ export async function POST(request: NextRequest) {
 
     const supabaseAuth = createSupabaseUserClientFromToken(token);
     const supabaseAdmin = createSupabaseAdmin();
-
     const {
       data: { user },
       error: authError,
@@ -43,21 +40,43 @@ export async function POST(request: NextRequest) {
 
     if (authError || !user) return jsonError("Sesión inválida.", 401);
 
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from("profiles")
+      .select("id, role")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (profileError) return jsonError("No se pudo validar el administrador.", 500);
+    if (!profile || String((profile as { role?: string | null }).role || "") !== "admin") {
+      return jsonError("No tienes permisos de administrador.", 403);
+    }
+
     const body = await request.json();
-    const reference = typeof body?.reference === "string" ? body.reference.trim() : "";
-    if (!reference) return jsonError("Falta la referencia de recarga.");
+    const topupId = typeof body?.topupId === "string" ? body.topupId.trim() : "";
+    const reason = typeof body?.reason === "string" ? body.reason.trim() : "Recarga rechazada por revisión manual";
 
-    let topup = await getWalletTopupByReference(supabaseAdmin, reference);
-    if (!topup || topup.user_id !== user.id) {
-      return jsonError("La recarga no existe o no te pertenece.", 404);
-    }
+    if (!topupId) return jsonError("Falta el id de la recarga.");
 
-    if (String(topup.status || "PENDING").toUpperCase() === "PENDING") {
-      await tryAutoApproveBankTopup(supabaseAdmin, topup.id);
-      topup = await getWalletTopupByReference(supabaseAdmin, reference);
-    }
+    const now = new Date().toISOString();
+    const { data, error } = await supabaseAdmin
+      .from("wallet_topups")
+      .update({
+        status: "REJECTED",
+        rejected_at: now,
+        error_message: reason,
+        approved_by: user.id,
+        admin_note: reason,
+        updated_at: now,
+      })
+      .eq("id", topupId)
+      .eq("status", "PENDING")
+      .select("*")
+      .maybeSingle();
 
-    return NextResponse.json({ ok: true, topup });
+    if (error) return jsonError(error.message, 500);
+    if (!data) return jsonError("La recarga no está pendiente o no existe.", 409);
+
+    return NextResponse.json({ ok: true, topup: data });
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : "Ocurrió un error inesperado.", 500);
   }

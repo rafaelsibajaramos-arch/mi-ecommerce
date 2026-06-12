@@ -191,6 +191,15 @@ export default function WalletPage() {
     }
   };
 
+  const formatTransactionNote = (tx: WalletTransaction) => {
+    const note = tx.note || "";
+
+    return note
+      .replace(/Recarga Wompi aprobada/gi, "Recarga Bre-B / Llaves aprobada")
+      .replace(/Wompi/gi, "Bre-B / Llaves")
+      .trim();
+  };
+
   const getTransactionTitle = (tx: WalletTransaction) => {
     const txType = (tx.type || "").toLowerCase().trim();
     const txNote = (tx.note || "").toLowerCase().trim();
@@ -298,7 +307,7 @@ export default function WalletPage() {
                   {formatSignedMoney(latestTransaction)}
                 </p>
                 <p className="mt-3 text-sm text-white/60">
-                  {latestTransaction.note || "Movimiento registrado"}
+                  {formatTransactionNote(latestTransaction) || "Movimiento registrado"}
                 </p>
                 <p className="mt-2 text-sm text-white/40">
                   {formatDate(latestTransaction.created_at)}
@@ -435,7 +444,7 @@ export default function WalletPage() {
                         </div>
 
                         <p className="mt-2 text-sm text-white/55">
-                          {tx.note || "Registrado"}
+                          {formatTransactionNote(tx) || "Registrado"}
                         </p>
 
                         <p className="mt-1 text-sm text-white/35">

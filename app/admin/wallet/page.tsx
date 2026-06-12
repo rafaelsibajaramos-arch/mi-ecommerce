@@ -54,7 +54,7 @@ type FormattedTransaction = {
   created_at: string;
   note?: string | null;
   description?: string | null;
-  source: "manual" | "wompi" | "wallet";
+  source: "manual" | "bank_transfer" | "wallet";
   reference?: string | null;
   wompi_transaction_id?: string | null;
   payment_method_type?: string | null;
@@ -210,7 +210,7 @@ export default function AdminWalletPage() {
   const [searchEmail, setSearchEmail] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [showOnlyWompiRecharges, setShowOnlyWompiRecharges] = useState(false);
+  const [showOnlyBancoRecharges, setShowOnlyBancoRecharges] = useState(false);
 
   const [transactionSearchEmail, setTransactionSearchEmail] = useState("");
   const [transactionStartDate, setTransactionStartDate] = useState("");
@@ -294,8 +294,8 @@ export default function AdminWalletPage() {
       const descriptionText = transaction.description || "";
       const source = `${noteText} ${descriptionText}`
         .toLowerCase()
-        .includes("wompi")
-        ? "wompi"
+        .includes("Bre-B / Llaves") || `${noteText} ${descriptionText}`.toLowerCase().includes("breb-")
+        ? "bank_transfer"
         : "manual";
 
       return {
@@ -312,30 +312,30 @@ export default function AdminWalletPage() {
       } satisfies FormattedTransaction;
     });
 
-    const formattedWompiTopups = rawTopups.map((topup) => {
+    const formattedBankTopups = rawTopups.map((topup) => {
       const profile = topup.user_id ? profileMap.get(topup.user_id) : null;
 
       return {
-        id: `wompi-${topup.id}`,
+        id: `breb-${topup.id}`,
         user_id: topup.user_id,
         email: profile?.email || "Sin correo",
         full_name: profile?.full_name || null,
-        type: "recarga_wompi",
+        type: "recarga_bancaria",
         amount: Number(topup.amount || 0),
         created_at: topup.credited_at || topup.approved_at || topup.created_at || "",
-        note: "Recarga automática Wompi",
+        note: "Recarga automática bancaria",
         description: topup.reference
-          ? `Recarga automática Wompi (${topup.reference})`
-          : "Recarga automática Wompi",
-        source: "wompi",
+          ? `Recarga automática bancaria (${topup.reference})`
+          : "Recarga automática bancaria",
+        source: "bank_transfer",
         reference: topup.reference,
         wompi_transaction_id: topup.wompi_transaction_id,
         payment_method_type: topup.wompi_payment_method_type,
       } satisfies FormattedTransaction;
     });
 
-    const wompiReferences = new Set(
-      formattedWompiTopups.map((topup) => topup.reference).filter(Boolean)
+    const bankTopupReferences = new Set(
+      formattedBankTopups.map((topup) => topup.reference).filter(Boolean)
     );
 
     const formatted = [
@@ -343,11 +343,11 @@ export default function AdminWalletPage() {
         if (!transaction.description && !transaction.note) return true;
 
         const text = `${transaction.description || ""} ${transaction.note || ""}`;
-        return !Array.from(wompiReferences).some((reference) =>
+        return !Array.from(bankTopupReferences).some((reference) =>
           text.includes(String(reference))
         );
       }),
-      ...formattedWompiTopups,
+      ...formattedBankTopups,
     ].sort((a, b) => {
       return (
         new Date(b.created_at || 0).getTime() -
@@ -493,7 +493,7 @@ export default function AdminWalletPage() {
       const endMatch = !endDate || (txDate && txDate <= endDate);
 
       const wompiMatch =
-        !showOnlyWompiRecharges || transaction.source === "wompi";
+        !showOnlyBancoRecharges || transaction.source === "bank_transfer";
 
       return emailMatch && startMatch && endMatch && wompiMatch;
     });
@@ -502,7 +502,7 @@ export default function AdminWalletPage() {
     searchEmail,
     startDate,
     endDate,
-    showOnlyWompiRecharges,
+    showOnlyBancoRecharges,
   ]);
 
   const hasTransactionSearch = transactionSearchEmail.trim().length > 0;
@@ -731,10 +731,10 @@ export default function AdminWalletPage() {
       return;
     }
 
-    if (transaction.source === "wompi") {
+    if (transaction.source === "bank_transfer") {
       setBanner({
         kind: "error",
-        text: "Las recargas Wompi quedan como registro de pago automático. Para descontar saldo, usa el formulario de débito manual.",
+        text: "Las recargas automáticas por Bre-B / Llaves quedan como registro de pago validado. Para descontar saldo, usa el formulario de débito manual.",
       });
       return;
     }
@@ -1113,7 +1113,7 @@ export default function AdminWalletPage() {
               Historial de recargas
             </h3>
             <p className="mt-2 text-sm text-slate-500">
-              Aquí se muestran recargas manuales y recargas automáticas aprobadas por Wompi.
+              Aquí se muestran recargas manuales y recargas automáticas aprobadas por Bre-B / Llaves.
             </p>
           </div>
 
@@ -1121,16 +1121,16 @@ export default function AdminWalletPage() {
             <button
               type="button"
               onClick={() => {
-                setShowOnlyWompiRecharges((current) => !current);
+                setShowOnlyBancoRecharges((current) => !current);
                 setRechargePage(1);
               }}
               className={`inline-flex items-center justify-center rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
-                showOnlyWompiRecharges
+                showOnlyBancoRecharges
                   ? "border-slate-900 bg-slate-900 text-white"
                   : "border-slate-200 text-slate-700 hover:bg-slate-50"
               }`}
             >
-              Recargas Wompi
+              Recargas Bre-B / Llaves
             </button>
 
             <button
@@ -1225,9 +1225,9 @@ export default function AdminWalletPage() {
                             {transaction.full_name}
                           </p>
                         )}
-                        {transaction.source === "wompi" && (
+                        {transaction.source === "bank_transfer" && (
                           <p className="mt-2 inline-flex rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-blue-700">
-                            Wompi
+                            Banco
                           </p>
                         )}
                       </div>
@@ -1251,7 +1251,7 @@ export default function AdminWalletPage() {
                       </div>
 
                       <div className="flex justify-start md:justify-end">
-                        {transaction.source === "wompi" ? (
+                        {transaction.source === "bank_transfer" ? (
                           <span className="inline-flex items-center justify-center rounded-2xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700">
                             Automática
                           </span>

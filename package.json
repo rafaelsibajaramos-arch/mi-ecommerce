@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "check:product-images": "node scripts/check-old-product-images.mjs",
-    "cleanup:product-images": "node scripts/cleanup-old-product-images.mjs"
+    "cleanup:product-images": "node scripts/cleanup-old-product-images.mjs",
+    "bank-email-parser": "python3 scripts/bank-email-parser.py"
   },
   "dependencies": {
     "@supabase/ssr": "^0.9.0",
