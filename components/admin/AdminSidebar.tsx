@@ -10,6 +10,7 @@ const adminLinks = [
   { href: "/admin/products", label: "Productos" },
   { href: "/admin/users", label: "Usuarios" },
   { href: "/admin/wallet", label: "Wallet" },
+  { href: "/admin/recargas-automaticas", label: "Recargas automáticas" }, // 👈 NUEVO
   { href: "/admin/license-alerts", label: "Alertas" },
 ];
 
@@ -20,6 +21,7 @@ export default function AdminSidebar() {
   const [open, setOpen] = useState(false);
   const [openPathname, setOpenPathname] = useState<string | null>(null);
   const [pendingAlertsCount, setPendingAlertsCount] = useState(0);
+  const [topupAlertsCount, setTopupAlertsCount] = useState(0); // 👈 NUEVO
 
   const isMenuOpen = open && openPathname === pathname;
 
@@ -40,7 +42,6 @@ export default function AdminSidebar() {
     router.push("/login");
     router.refresh();
   };
-
 
   useEffect(() => {
     let mounted = true;
@@ -77,24 +78,48 @@ export default function AdminSidebar() {
       }
     };
 
+    // 👈 NUEVO: cuenta alertas de recargas demoradas (status OPEN) leyendo directo desde Supabase
+    const fetchTopupAlerts = async () => {
+      try {
+        const { count, error } = await supabase
+          .from("wallet_topup_alerts")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "OPEN");
+
+        if (!mounted) return;
+        if (error) {
+          setTopupAlertsCount(0);
+          return;
+        }
+        setTopupAlertsCount(Number(count || 0));
+      } catch {
+        if (mounted) setTopupAlertsCount(0);
+      }
+    };
+
     void fetchPendingAlerts();
+    void fetchTopupAlerts(); // 👈 NUEVO
 
     const interval = window.setInterval(() => {
       void fetchPendingAlerts();
+      void fetchTopupAlerts(); // 👈 NUEVO
     }, 60000);
 
     const handleFocus = () => {
       void fetchPendingAlerts();
+      void fetchTopupAlerts(); // 👈 NUEVO
     };
 
     window.addEventListener("focus", handleFocus);
     window.addEventListener("license-alerts-updated", handleFocus);
+    window.addEventListener("topup-alerts-updated", handleFocus); // 👈 NUEVO
 
     return () => {
       mounted = false;
       window.clearInterval(interval);
       window.removeEventListener("focus", handleFocus);
       window.removeEventListener("license-alerts-updated", handleFocus);
+      window.removeEventListener("topup-alerts-updated", handleFocus); // 👈 NUEVO
     };
   }, []);
 
@@ -131,6 +156,17 @@ export default function AdminSidebar() {
       ? "flex items-center rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-[#050816] shadow-sm"
       : "flex items-center rounded-2xl px-4 py-3 text-sm font-medium text-white/72 transition hover:bg-white/10 hover:text-white";
 
+  // 👈 NUEVO: decide si un link debe mostrar punto rojo y cuántas alertas tiene
+  const getAlertInfo = (href: string) => {
+    if (href === "/admin/license-alerts") {
+      return { show: pendingAlertsCount > 0, count: pendingAlertsCount };
+    }
+    if (href === "/admin/recargas-automaticas") {
+      return { show: topupAlertsCount > 0, count: topupAlertsCount };
+    }
+    return { show: false, count: 0 };
+  };
+
   return (
     <>
       <button
@@ -161,17 +197,15 @@ export default function AdminSidebar() {
 
       <div
         onClick={closeMenu}
-        className={`fixed inset-0 z-[130] bg-black/55 transition-opacity duration-300 lg:hidden ${
-          isMenuOpen
+        className={`fixed inset-0 z-[130] bg-black/55 transition-opacity duration-300 lg:hidden ${isMenuOpen
             ? "pointer-events-auto opacity-100"
             : "pointer-events-none opacity-0"
-        }`}
+          }`}
       />
 
       <aside
-        className={`fixed left-0 top-0 z-[140] flex h-dvh w-[84vw] max-w-[320px] flex-col bg-[#050816] text-white shadow-2xl transition-transform duration-300 lg:hidden ${
-          isMenuOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
+        className={`fixed left-0 top-0 z-[140] flex h-dvh w-[84vw] max-w-[320px] flex-col bg-[#050816] text-white shadow-2xl transition-transform duration-300 lg:hidden ${isMenuOpen ? "translate-x-0" : "-translate-x-full"
+          }`}
       >
         <div className="flex items-center justify-between border-b border-white/10 px-5 py-5">
           <div>
@@ -210,8 +244,7 @@ export default function AdminSidebar() {
 
           <nav className="space-y-2">
             {adminLinks.map((item) => {
-              const showAlertDot =
-                item.href === "/admin/license-alerts" && pendingAlertsCount > 0;
+              const alertInfo = getAlertInfo(item.href); // 👈 NUEVO
 
               return (
                 <Link
@@ -221,10 +254,10 @@ export default function AdminSidebar() {
                   className={`${navClass(item.href)} justify-between gap-3`}
                 >
                   <span>{item.label}</span>
-                  {showAlertDot ? (
+                  {alertInfo.show ? (
                     <span
                       className="h-3 w-3 rounded-full bg-red-500 shadow-[0_0_12px_rgba(239,68,68,0.95)]"
-                      aria-label={`${pendingAlertsCount} alerta(s) pendiente(s)`}
+                      aria-label={`${alertInfo.count} alerta(s) pendiente(s)`}
                     />
                   ) : null}
                 </Link>
@@ -258,8 +291,7 @@ export default function AdminSidebar() {
 
           <nav className="space-y-2">
             {adminLinks.map((item) => {
-              const showAlertDot =
-                item.href === "/admin/license-alerts" && pendingAlertsCount > 0;
+              const alertInfo = getAlertInfo(item.href); // 👈 NUEVO
 
               return (
                 <Link
@@ -268,10 +300,10 @@ export default function AdminSidebar() {
                   className={`${navClass(item.href)} justify-between gap-3`}
                 >
                   <span>{item.label}</span>
-                  {showAlertDot ? (
+                  {alertInfo.show ? (
                     <span
                       className="h-3 w-3 rounded-full bg-red-500 shadow-[0_0_12px_rgba(239,68,68,0.95)]"
-                      aria-label={`${pendingAlertsCount} alerta(s) pendiente(s)`}
+                      aria-label={`${alertInfo.count} alerta(s) pendiente(s)`}
                     />
                   ) : null}
                 </Link>

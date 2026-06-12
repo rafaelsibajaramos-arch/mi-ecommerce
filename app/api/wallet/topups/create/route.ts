@@ -63,9 +63,7 @@ export async function POST(request: NextRequest) {
       return jsonError("Ingresa la llave, celular o cuenta origen desde donde pagaste por Bre-B / Llaves.");
     }
 
-    if (!receiptUrl) {
-      return jsonError("Sube la foto del comprobante para dejar respaldo de la recarga.");
-    }
+
 
     const reference = buildBankTopupReference(user.id);
     const now = new Date().toISOString();

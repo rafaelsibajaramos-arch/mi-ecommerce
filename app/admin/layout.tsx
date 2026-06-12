@@ -29,6 +29,8 @@ export default async function AdminLayout({
     redirect("/");
   }
 
+
+
   return (
     <main className="min-h-screen bg-[#f4f6fb] text-[#0f172a]">
       <div className="flex min-h-screen">

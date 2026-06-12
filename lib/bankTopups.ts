@@ -22,9 +22,35 @@ export function normalizePaymentOrigin(value: string | null | undefined) {
   return String(value || "")
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^0-9A-Za-z]/g, "")
+    .replace(/[^0-9A-Za-z\s]/g, "")
     .trim()
     .toUpperCase();
+}
+
+/**
+ * Verifica si todas las palabras del input del usuario están contenidas
+ * en el nombre normalizado que llegó del banco.
+ * Ej: "rafael sibaja" coincide con "RAFAEL ALBERTO SIBAJA RAMOS"
+ */
+function payerNamesMatch(userInput: string, bankValue: string): boolean {
+  const normalizeForMatch = (s: string) =>
+    s
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^0-9A-Za-z\s]/g, "")
+      .trim()
+      .toUpperCase();
+
+  const inputWords = normalizeForMatch(userInput)
+    .split(/\s+/)
+    .filter((w) => w.length > 1); // ignorar letras sueltas como "A"
+
+  const bankNormalized = normalizeForMatch(bankValue);
+
+  if (inputWords.length === 0) return false;
+
+  // Todas las palabras del input deben aparecer en el nombre del banco
+  return inputWords.every((word) => bankNormalized.includes(word));
 }
 
 export function buildBankTopupReference(userId: string) {
@@ -36,10 +62,11 @@ export async function findUnusedBankPaymentForTopup(
   supabaseAdmin: SupabaseClient,
   topup: WalletTopupRow
 ) {
-  const normalizedOrigin = normalizePaymentOrigin(topup.payer_origin);
+  const userInput = String(topup.payer_origin || "").trim();
 
-  if (!normalizedOrigin) return null;
+  if (!userInput) return null;
 
+  // Traemos todos los pagos del mismo monto sin usar, sin filtrar por nombre exacto
   const { data, error } = await supabaseAdmin
     .from("bank_payment_notifications")
     .select(
@@ -47,16 +74,20 @@ export async function findUnusedBankPaymentForTopup(
     )
     .eq("provider", "BREB_LLAVES")
     .eq("amount", Number(topup.amount || 0))
-    .eq("normalized_payer_origin", normalizedOrigin)
     .eq("is_used", false)
     .order("paid_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(50);
 
   if (error) throw new Error(error.message);
+  if (!data || data.length === 0) return null;
 
-  return (data as BankPaymentNotificationRow | null) || null;
+  // Filtramos en JS con coincidencia parcial de palabras
+  const match = (data as BankPaymentNotificationRow[]).find((payment) =>
+    payerNamesMatch(userInput, payment.payer_origin)
+  );
+
+  return match || null;
 }
 
 export async function approveTopupWithBankPayment({
