@@ -1,0 +1,8 @@
+{
+    "crons": [
+        {
+            "path": "/api/cron/bank-parser",
+            "schedule": "*/1 * * * *"
+        }
+    ]
+}

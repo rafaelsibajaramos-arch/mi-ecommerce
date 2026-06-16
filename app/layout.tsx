@@ -1,0 +1,66 @@
+import type { Metadata, Viewport } from "next";
+import "./globals.css";
+import { CartProvider } from "../context/CartContext";
+import CartDrawer from "../components/CartDrawer";
+import Navbar from "../components/Navbar";
+import ShootingStars from "../components/ShootingStars";
+import AuthGuard from "../components/AuthGuard";
+import SiteBrandingSync from "../components/SiteBrandingSync";
+
+export const metadata: Metadata = {
+  title: "StreamingMayor",
+  description: "Tienda online moderna",
+  icons: {
+    icon: [
+      { url: "/favicon.ico?v=2", sizes: "any" },
+      { url: "/icon.png?v=2", type: "image/png", sizes: "512x512" },
+    ],
+    shortcut: "/favicon.ico?v=2",
+    apple: [{ url: "/apple-touch-icon.png?v=2", sizes: "180x180", type: "image/png" }],
+  },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+};
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html lang="es" suppressHydrationWarning>
+      <body suppressHydrationWarning>
+        <div className="site-background" aria-hidden="true">
+          <div className="site-gradient" />
+          <div className="site-vignette" />
+
+          <span className="floating-dot dot-1" />
+          <span className="floating-dot dot-2" />
+          <span className="floating-dot dot-3" />
+          <span className="floating-dot dot-4" />
+          <span className="floating-dot dot-5" />
+          <span className="floating-dot dot-6" />
+          <span className="floating-dot dot-7" />
+          <span className="floating-dot dot-8" />
+          <span className="floating-dot dot-9" />
+          <span className="floating-dot dot-10" />
+        </div>
+
+        <ShootingStars />
+
+        <CartProvider>
+          <AuthGuard>
+            <SiteBrandingSync />
+            <Navbar />
+            <div className="relative z-10">{children}</div>
+            <CartDrawer />
+          </AuthGuard>
+        </CartProvider>
+      </body>
+    </html>
+  );
+} 
