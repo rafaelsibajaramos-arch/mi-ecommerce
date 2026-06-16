@@ -132,6 +132,8 @@ type ReceiptLicenseRow = {
 const PRODUCTS_PER_PAGE = 12;
 const SEARCH_DEBOUNCE_MS = 350;
 const ADMIN_CACHE_KEY = "streamingmayor_is_admin";
+const PHOTO_MODE_KEY = "streamingmayor_photo_mode";
+const PHOTO_MODE_EVENT = "streamingmayor:photo-mode-change";
 
 export default function HomePage() {
   const { addToCart } = useCart();
@@ -147,6 +149,7 @@ export default function HomePage() {
   const [message, setMessage] = useState("");
   const [receiptMessage, setReceiptMessage] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
+  const [photoMode, setPhotoMode] = useState(false);
   const [quickViewItem, setQuickViewItem] = useState<CatalogItem | null>(null);
   const [receiptOrder, setReceiptOrder] = useState<ReceiptOrder | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -166,6 +169,26 @@ export default function HomePage() {
     } catch {
       // Ignora errores de localStorage.
     }
+  }, []);
+
+  useEffect(() => {
+    const syncPhotoMode = () => {
+      try {
+        setPhotoMode(window.localStorage.getItem(PHOTO_MODE_KEY) === "true");
+      } catch {
+        setPhotoMode(false);
+      }
+    };
+
+    syncPhotoMode();
+
+    window.addEventListener("storage", syncPhotoMode);
+    window.addEventListener(PHOTO_MODE_EVENT, syncPhotoMode);
+
+    return () => {
+      window.removeEventListener("storage", syncPhotoMode);
+      window.removeEventListener(PHOTO_MODE_EVENT, syncPhotoMode);
+    };
   }, []);
 
   const isAbortLikeError = (error: unknown) => {
@@ -889,6 +912,7 @@ export default function HomePage() {
 
   const quickViewPrice = quickViewItem?.displayPrice || 0;
   const quickViewStock = quickViewItem?.displayStock || 0;
+  const showAdminControls = isAdmin && !photoMode;
 
   const renderProductCard = (item: CatalogItem) => {
     return (
@@ -916,7 +940,7 @@ export default function HomePage() {
               </span>
             </div>
 
-            {isAdmin && (
+            {showAdminControls && (
               <Link
                 href={`/admin/products/${item.product.id}`}
                 onClick={(e) => e.stopPropagation()}
@@ -945,7 +969,7 @@ export default function HomePage() {
               ${formatPrice(item.displayPrice)}
             </p>
 
-            {isAdmin && (
+            {showAdminControls && (
               <p className="mt-1 text-[10px] font-semibold text-white/45 sm:text-xs">
                 Stock: {item.displayStock}
               </p>
@@ -1288,7 +1312,7 @@ export default function HomePage() {
               style={{ maxHeight: "calc(100dvh - 24px)" }}
               onClick={(e) => e.stopPropagation()}
             >
-              {isAdmin && (
+              {showAdminControls && (
                 <Link
                   href={`/admin/products/${quickViewItem.product.id}`}
                   onClick={(e) => e.stopPropagation()}
@@ -1355,7 +1379,7 @@ export default function HomePage() {
                           {quickViewStock > 0 ? "Disponible" : "Agotado"}
                         </span>
 
-                        {isAdmin && (
+                        {showAdminControls && (
                           <span className="inline-flex rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-semibold text-white/50">
                             Stock: {quickViewStock}
                           </span>

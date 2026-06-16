@@ -15,10 +15,13 @@ type Profile = {
 
 const PROFILE_CACHE_KEY = "streamingmayor_profile_cache";
 const ADMIN_CACHE_KEY = "streamingmayor_is_admin";
+const PHOTO_MODE_KEY = "streamingmayor_photo_mode";
+const PHOTO_MODE_EVENT = "streamingmayor:photo-mode-change";
 
 export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean }) {
   const [open, setOpen] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [photoMode, setPhotoMode] = useState(false);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
 
@@ -38,6 +41,26 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
       window.setTimeout(() => void loadProfile(), 900);
     });
     return () => { subscription.unsubscribe(); };
+  }, []);
+
+  useEffect(() => {
+    const syncPhotoMode = () => {
+      try {
+        setPhotoMode(window.localStorage.getItem(PHOTO_MODE_KEY) === "true");
+      } catch {
+        setPhotoMode(false);
+      }
+    };
+
+    syncPhotoMode();
+
+    window.addEventListener("storage", syncPhotoMode);
+    window.addEventListener(PHOTO_MODE_EVENT, syncPhotoMode);
+
+    return () => {
+      window.removeEventListener("storage", syncPhotoMode);
+      window.removeEventListener(PHOTO_MODE_EVENT, syncPhotoMode);
+    };
   }, []);
 
   useEffect(() => {
@@ -80,6 +103,19 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
         window.localStorage.setItem(ADMIN_CACHE_KEY, nextProfile.role === "admin" ? "true" : "false");
       } catch {}
     } catch {}
+  };
+
+  const togglePhotoMode = () => {
+    const nextValue = !photoMode;
+
+    setPhotoMode(nextValue);
+
+    try {
+      window.localStorage.setItem(PHOTO_MODE_KEY, nextValue ? "true" : "false");
+      window.dispatchEvent(new CustomEvent(PHOTO_MODE_EVENT, { detail: nextValue }));
+    } catch {
+      // Ignora errores de localStorage.
+    }
   };
 
   const logout = async () => {
@@ -153,9 +189,22 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
                   </p>
                 </div>
                 {/* Badge — azul streamingmayor */}
-                <span className="shrink-0 rounded-full border border-blue-400/40 bg-blue-500/15 px-2.5 py-1 text-[10px] font-semibold capitalize text-blue-300 shadow-[0_0_12px_rgba(59,130,246,0.35)] min-[390px]:px-3 min-[390px]:text-xs md:px-3 md:py-1 md:text-xs">
-                  {profile.role || "user"}
-                </span>
+                {canSeeAdmin ? (
+                  <button
+                    type="button"
+                    onClick={togglePhotoMode}
+                    title={photoMode ? "Desactivar modo foto" : "Activar modo foto"}
+                    className={`shrink-0 rounded-full border border-blue-400/40 bg-blue-500/15 px-2.5 py-1 text-[10px] font-semibold capitalize text-blue-300 shadow-[0_0_12px_rgba(59,130,246,0.35)] transition duration-200 hover:border-blue-300 hover:bg-blue-500/20 hover:text-blue-200 min-[390px]:px-3 min-[390px]:text-xs md:px-3 md:py-1 md:text-xs ${
+                      photoMode ? "border-sky-300/55 bg-sky-400/20 text-sky-100" : ""
+                    }`}
+                  >
+                    {photoMode ? "Foto" : profile.role || "user"}
+                  </button>
+                ) : (
+                  <span className="shrink-0 rounded-full border border-blue-400/40 bg-blue-500/15 px-2.5 py-1 text-[10px] font-semibold capitalize text-blue-300 shadow-[0_0_12px_rgba(59,130,246,0.35)] min-[390px]:px-3 min-[390px]:text-xs md:px-3 md:py-1 md:text-xs">
+                    {profile.role || "user"}
+                  </span>
+                )}
               </div>
 
               {/* Balance — sky-400 streamingmayor dentro de card streamxpress */}

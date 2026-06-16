@@ -13,6 +13,9 @@ const bebasNeue = Bebas_Neue({
   weight: "400",
 });
 
+const PHOTO_MODE_KEY = "streamingmayor_photo_mode";
+const PHOTO_MODE_EVENT = "streamingmayor:photo-mode-change";
+
 // Barra de navegación principal del sitio.
 export default function Navbar() {
   const { cart, openCart } = useCart();
@@ -20,6 +23,7 @@ export default function Navbar() {
 
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [photoMode, setPhotoMode] = useState(false);
 
   const totalItems = cart.reduce((acc, item) => acc + item.quantity, 0);
 
@@ -62,6 +66,26 @@ export default function Navbar() {
     };
   }, [checkSessionAndRole]);
 
+  useEffect(() => {
+    const syncPhotoMode = () => {
+      try {
+        setPhotoMode(window.localStorage.getItem(PHOTO_MODE_KEY) === "true");
+      } catch {
+        setPhotoMode(false);
+      }
+    };
+
+    syncPhotoMode();
+
+    window.addEventListener("storage", syncPhotoMode);
+    window.addEventListener(PHOTO_MODE_EVENT, syncPhotoMode);
+
+    return () => {
+      window.removeEventListener("storage", syncPhotoMode);
+      window.removeEventListener(PHOTO_MODE_EVENT, syncPhotoMode);
+    };
+  }, []);
+
   // Devuelve las clases CSS de los enlaces de navegación según su estado.
   const navLinkClass = (href: string) =>
     pathname === href
@@ -94,7 +118,7 @@ export default function Navbar() {
                 Inicio
               </Link>
 
-              {isAdmin && (
+              {isAdmin && !photoMode && (
                 <Link
                   href="/admin/products"
                   className={navLinkClass("/admin/products")}
