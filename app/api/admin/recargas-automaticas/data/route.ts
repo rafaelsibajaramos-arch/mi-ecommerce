@@ -37,6 +37,26 @@ type TopupRow = {
   expiration_reason: string | null;
   voided_at: string | null;
   void_reason: string | null;
+  promotion_id: string | null;
+  promotion_name: string | null;
+  promotion_bonus_type: string | null;
+  promotion_bonus_value: number | null;
+  promotion_bonus_amount: number | null;
+  promotion_total_amount: number | null;
+  promotion_applied_at: string | null;
+};
+
+type PromotionRow = {
+  id: string;
+  name: string | null;
+  status: string | null;
+  min_amount: number | null;
+  bonus_type: string | null;
+  bonus_value: number | null;
+  starts_at: string | null;
+  ends_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
 };
 
 type BankPaymentRow = {
@@ -201,6 +221,13 @@ function normalizeTopup(row: AnyRow): TopupRow {
     expiration_reason: textValue(row, "expiration_reason"),
     voided_at: textValue(row, "voided_at"),
     void_reason: textValue(row, "void_reason"),
+    promotion_id: textValue(row, "promotion_id"),
+    promotion_name: textValue(row, "promotion_name"),
+    promotion_bonus_type: textValue(row, "promotion_bonus_type"),
+    promotion_bonus_value: numberValue(row, "promotion_bonus_value"),
+    promotion_bonus_amount: numberValue(row, "promotion_bonus_amount"),
+    promotion_total_amount: numberValue(row, "promotion_total_amount"),
+    promotion_applied_at: textValue(row, "promotion_applied_at"),
   };
 }
 
@@ -221,6 +248,21 @@ function normalizeBankPayment(row: AnyRow): BankPaymentRow {
     matched_topup_id: textValue(row, "matched_topup_id"),
     used_at: textValue(row, "used_at"),
     created_at: textValue(row, "created_at"),
+  };
+}
+
+function normalizePromotion(row: AnyRow): PromotionRow {
+  return {
+    id: String(row.id || ""),
+    name: textValue(row, "name"),
+    status: textValue(row, "status"),
+    min_amount: numberValue(row, "min_amount"),
+    bonus_type: textValue(row, "bonus_type"),
+    bonus_value: numberValue(row, "bonus_value"),
+    starts_at: textValue(row, "starts_at"),
+    ends_at: textValue(row, "ends_at"),
+    created_at: textValue(row, "created_at"),
+    updated_at: textValue(row, "updated_at"),
   };
 }
 
@@ -304,25 +346,43 @@ async function loadAlerts(supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
   return data || [];
 }
 
+async function loadPromotions(supabaseAdmin: ReturnType<typeof createSupabaseAdmin>, partialErrors: string[]) {
+  const { data, error } = await supabaseAdmin
+    .from("wallet_topup_promotions")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(200);
+
+  if (error) {
+    partialErrors.push(`wallet_topup_promotions: ${error.message}`);
+    return [] as PromotionRow[];
+  }
+
+  return ((((data || []) as unknown) as AnyRow[]).map(normalizePromotion));
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { supabaseAdmin } = await requireAdmin(request);
     const partialErrors: string[] = [];
 
     const bankPayments = await loadBankPayments(supabaseAdmin);
-    const [topups, alerts] = await Promise.all([
+    const [topups, alerts, promotions] = await Promise.all([
       loadTopups(supabaseAdmin, partialErrors),
       loadAlerts(supabaseAdmin, partialErrors),
+      loadPromotions(supabaseAdmin, partialErrors),
     ]);
 
     return jsonOk({
       topups,
       alerts,
+      promotions,
       bankPayments,
       partialErrors,
       counts: {
         topups: topups.length,
         alerts: alerts.length,
+        promotions: promotions.length,
         bankPayments: bankPayments.length,
         availableBankPayments: bankPayments.length,
       },

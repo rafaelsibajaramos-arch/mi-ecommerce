@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { creditWalletTopup, getWalletTopupById, type WalletTopupRow } from "./walletTopups";
+import { buildPromotionTopupPatch, findActiveTopupPromotion } from "./topupPromotions";
 
 export type BankPaymentNotificationRow = {
   id: string;
@@ -226,6 +227,7 @@ export async function approveTopupWithBankPayment({
   const delaySeconds = calculateDelaySeconds(topup.created_at, now);
   const matchedBankPaymentId = bankPaymentId || null;
   let matchedBankPaymentReference: string | null = null;
+  let promotionReferenceAt: string | null = now;
 
   if (matchedBankPaymentId) {
     const { data: lockedPayment, error: lockError } = await supabaseAdmin
@@ -238,14 +240,21 @@ export async function approveTopupWithBankPayment({
       })
       .eq("id", matchedBankPaymentId)
       .eq("is_used", false)
-      .select("id, transaction_reference")
+      .select("id, transaction_reference, paid_at, created_at")
       .maybeSingle();
 
     if (lockError) throw new Error(lockError.message);
     if (!lockedPayment) throw new Error("Ese pago bancario ya fue usado por otra recarga.");
 
     matchedBankPaymentReference = String(lockedPayment.transaction_reference || "");
+    promotionReferenceAt = String((lockedPayment as { paid_at?: string | null; created_at?: string | null }).paid_at || (lockedPayment as { created_at?: string | null }).created_at || now);
   }
+
+  const promotionCalculation = await findActiveTopupPromotion({
+    supabaseAdmin,
+    amount: topup.amount,
+    referenceAt: promotionReferenceAt,
+  });
 
   const patch: Record<string, unknown> = {
     provider: "BREB_LLAVES",
@@ -257,6 +266,7 @@ export async function approveTopupWithBankPayment({
     matched_bank_reference: matchedBankPaymentReference,
     approved_by: approvedBy || null,
     admin_note: manualNote || topup.admin_note || null,
+    ...buildPromotionTopupPatch(promotionCalculation, topup.amount),
     updated_at: now,
   };
 

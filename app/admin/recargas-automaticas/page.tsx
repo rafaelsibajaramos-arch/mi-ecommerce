@@ -1,5 +1,6 @@
 "use client";
 
+import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../../lib/supabase";
 
@@ -33,6 +34,13 @@ type TopupRow = {
   expiration_reason: string | null;
   voided_at: string | null;
   void_reason: string | null;
+  promotion_id: string | null;
+  promotion_name: string | null;
+  promotion_bonus_type: string | null;
+  promotion_bonus_value: number | null;
+  promotion_bonus_amount: number | null;
+  promotion_total_amount: number | null;
+  promotion_applied_at: string | null;
 };
 
 type FormattedTopup = TopupRow & {
@@ -77,6 +85,29 @@ type BankPaymentRow = {
   created_at: string | null;
 };
 
+type PromotionRow = {
+  id: string;
+  name: string | null;
+  status: string | null;
+  min_amount: number | null;
+  bonus_type: string | null;
+  bonus_value: number | null;
+  starts_at: string | null;
+  ends_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+type PromotionFormState = {
+  name: string;
+  minAmount: string;
+  bonusType: "PERCENTAGE" | "FIXED";
+  bonusValue: string;
+  startsAt: string;
+  endsAt: string;
+  status: "ACTIVE" | "PAUSED";
+};
+
 type BannerState = { kind: "success" | "error"; text: string } | null;
 type MainTab = "HISTORIAL" | "ALERTAS" | "BANCO";
 
@@ -84,6 +115,7 @@ type RecargasDataResponse = {
   ok?: boolean;
   topups?: FormattedTopup[];
   alerts?: AlertRow[];
+  promotions?: PromotionRow[];
   bankPayments?: BankPaymentRow[];
   partialErrors?: string[];
   error?: string;
@@ -117,6 +149,65 @@ function formatDate(value: string | null | undefined) {
   } catch {
     return "Sin fecha";
   }
+}
+
+
+function toLocalDateTimeInput(value: string | null | undefined) {
+  const date = value ? new Date(value) : new Date();
+  if (!Number.isFinite(date.getTime())) return "";
+
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
+function dateTimeInputToIso(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const date = new Date(trimmed);
+  if (!Number.isFinite(date.getTime())) return null;
+  return date.toISOString();
+}
+
+function buildDefaultPromotionForm(): PromotionFormState {
+  return {
+    name: "Aumento de recarga 10%",
+    minAmount: "30000",
+    bonusType: "PERCENTAGE",
+    bonusValue: "10",
+    startsAt: toLocalDateTimeInput(new Date().toISOString()),
+    endsAt: "",
+    status: "ACTIVE",
+  };
+}
+
+function promotionRuntimeStatus(promotion: PromotionRow) {
+  const status = normalizeStatus(promotion.status);
+  const now = Date.now();
+  const startsAt = promotion.starts_at ? new Date(promotion.starts_at).getTime() : 0;
+  const endsAt = promotion.ends_at ? new Date(promotion.ends_at).getTime() : null;
+
+  if (status === "PAUSED") {
+    return { label: "Pausada", cls: "border border-slate-200 bg-slate-50 text-slate-600" };
+  }
+
+  if (Number.isFinite(startsAt) && startsAt > now) {
+    return { label: "Programada", cls: "border border-blue-200 bg-blue-50 text-blue-700" };
+  }
+
+  if (endsAt && Number.isFinite(endsAt) && endsAt < now) {
+    return { label: "Vencida", cls: "border border-zinc-200 bg-zinc-50 text-zinc-600" };
+  }
+
+  return { label: "Activa", cls: "border border-emerald-200 bg-emerald-50 text-emerald-700" };
+}
+
+function promotionBonusLabel(promotion: PromotionRow) {
+  const type = String(promotion.bonus_type || "PERCENTAGE").toUpperCase();
+  const value = Number(promotion.bonus_value || 0);
+
+  if (type === "FIXED") return `${formatMoney(value)} fijos`;
+  return `${value.toLocaleString("es-CO")}% adicional`;
 }
 
 function formatDelay(seconds: number | null | undefined) {
@@ -225,6 +316,7 @@ export default function RecargasAutomaticasPage() {
 
   const [topups, setTopups] = useState<FormattedTopup[]>([]);
   const [alerts, setAlerts] = useState<AlertRow[]>([]);
+  const [promotions, setPromotions] = useState<PromotionRow[]>([]);
   const [bankPayments, setBankPayments] = useState<BankPaymentRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -234,6 +326,9 @@ export default function RecargasAutomaticasPage() {
 
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [promotionForm, setPromotionForm] = useState<PromotionFormState>(() => buildDefaultPromotionForm());
+  const [editingPromotionId, setEditingPromotionId] = useState<string | null>(null);
+  const [savingPromotion, setSavingPromotion] = useState(false);
 
   const loadData = useCallback(async (showLoader = false) => {
     if (showLoader) setLoading(true);
@@ -266,6 +361,7 @@ export default function RecargasAutomaticasPage() {
 
       setTopups((result?.topups || []).filter(isVisibleTopup));
       setAlerts(result?.alerts || []);
+      setPromotions(result?.promotions || []);
       setBankPayments((result?.bankPayments || []).filter((payment) => !payment.is_used && !payment.matched_topup_id));
       setLoading(false);
 
@@ -277,6 +373,7 @@ export default function RecargasAutomaticasPage() {
     } catch (error) {
       setTopups([]);
       setAlerts([]);
+      setPromotions([]);
       setBankPayments([]);
       setLoading(false);
       setBanner({
@@ -323,6 +420,11 @@ export default function RecargasAutomaticasPage() {
   const approvedCount = useMemo(
     () => topups.filter((topup) => normalizeStatus(topup.status) === "APPROVED").length,
     [topups]
+  );
+
+  const activePromotionsCount = useMemo(
+    () => promotions.filter((promotion) => promotionRuntimeStatus(promotion).label === "Activa").length,
+    [promotions]
   );
 
   const availableBankPayments = useMemo(
@@ -540,6 +642,76 @@ export default function RecargasAutomaticasPage() {
     }
   }
 
+
+  function resetPromotionForm() {
+    setEditingPromotionId(null);
+    setPromotionForm(buildDefaultPromotionForm());
+  }
+
+  function editPromotion(promotion: PromotionRow) {
+    setEditingPromotionId(promotion.id);
+    setPromotionForm({
+      name: promotion.name || "",
+      minAmount: String(Math.round(Number(promotion.min_amount || 0))),
+      bonusType: String(promotion.bonus_type || "PERCENTAGE").toUpperCase() === "FIXED" ? "FIXED" : "PERCENTAGE",
+      bonusValue: String(Math.round(Number(promotion.bonus_value || 0))),
+      startsAt: toLocalDateTimeInput(promotion.starts_at),
+      endsAt: promotion.ends_at ? toLocalDateTimeInput(promotion.ends_at) : "",
+      status: normalizeStatus(promotion.status) === "PAUSED" ? "PAUSED" : "ACTIVE",
+    });
+  }
+
+  async function savePromotion(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSavingPromotion(true);
+    setBanner(null);
+
+    try {
+      await postAdminAction("/api/admin/topup-promotions", {
+        action: "save",
+        id: editingPromotionId,
+        name: promotionForm.name,
+        minAmount: Number(promotionForm.minAmount),
+        bonusType: promotionForm.bonusType,
+        bonusValue: Number(promotionForm.bonusValue),
+        startsAt: dateTimeInputToIso(promotionForm.startsAt),
+        endsAt: dateTimeInputToIso(promotionForm.endsAt),
+        status: promotionForm.status,
+      });
+
+      setBanner({ kind: "success", text: editingPromotionId ? "Promoción actualizada." : "Promoción creada." });
+      resetPromotionForm();
+      await loadData(false);
+    } catch (error) {
+      setBanner({ kind: "error", text: error instanceof Error ? error.message : "No se pudo guardar la promoción." });
+    } finally {
+      setSavingPromotion(false);
+    }
+  }
+
+  async function togglePromotionStatus(promotion: PromotionRow) {
+    setUpdatingId(promotion.id);
+    setBanner(null);
+
+    const currentStatus = normalizeStatus(promotion.status) === "PAUSED" ? "PAUSED" : "ACTIVE";
+    const nextStatus = currentStatus === "ACTIVE" ? "PAUSED" : "ACTIVE";
+
+    try {
+      await postAdminAction("/api/admin/topup-promotions", {
+        action: "status",
+        id: promotion.id,
+        status: nextStatus,
+      });
+
+      setBanner({ kind: "success", text: nextStatus === "ACTIVE" ? "Promoción activada." : "Promoción pausada." });
+      await loadData(false);
+    } catch (error) {
+      setBanner({ kind: "error", text: error instanceof Error ? error.message : "No se pudo cambiar la promoción." });
+    } finally {
+      setUpdatingId(null);
+    }
+  }
+
   async function updateAlertStatus(alert: AlertRow, newStatus: "REVIEWED" | "DISMISSED" | "OPEN") {
     setUpdatingId(alert.id);
     setBanner(null);
@@ -602,7 +774,7 @@ export default function RecargasAutomaticasPage() {
         </div>
       )}
 
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">En proceso</p>
           <p className="mt-2 text-3xl font-extrabold text-amber-600">{pendingCount}</p>
@@ -610,6 +782,10 @@ export default function RecargasAutomaticasPage() {
         <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Aprobadas</p>
           <p className="mt-2 text-3xl font-extrabold text-emerald-600">{approvedCount}</p>
+        </div>
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Promos activas</p>
+          <p className="mt-2 text-3xl font-extrabold text-violet-600">{activePromotionsCount}</p>
         </div>
         <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Alertas abiertas</p>
@@ -727,6 +903,12 @@ export default function RecargasAutomaticasPage() {
                         <div>
                           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Monto</p>
                           <p className="mt-1 text-lg font-extrabold text-slate-900">{formatMoney(topup.amount)}</p>
+                          {Number(topup.promotion_bonus_amount || 0) > 0 && (
+                            <div className="mt-2 rounded-2xl border border-violet-100 bg-violet-50 px-3 py-2">
+                              <p className="text-xs font-bold text-violet-700">Bono: {formatMoney(topup.promotion_bonus_amount)}</p>
+                              <p className="mt-1 text-xs text-violet-700">Total: {formatMoney(topup.promotion_total_amount || Number(topup.amount || 0) + Number(topup.promotion_bonus_amount || 0))}</p>
+                            </div>
+                          )}
                         </div>
 
                         <div>
@@ -745,6 +927,9 @@ export default function RecargasAutomaticasPage() {
                           <p className="mt-1 text-xs text-slate-600">Aprobada: {formatDate(topup.executed_at || topup.credited_at || topup.approved_at)}</p>
                           {topup.matched_bank_reference && (
                             <p className="mt-1 break-all text-xs text-blue-600">Banco: {topup.matched_bank_reference}</p>
+                          )}
+                          {topup.promotion_name && (
+                            <p className="mt-1 text-xs font-semibold text-violet-600">Promo: {topup.promotion_name}</p>
                           )}
                         </div>
 

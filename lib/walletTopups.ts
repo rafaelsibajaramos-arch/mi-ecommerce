@@ -19,6 +19,13 @@ export type WalletTopupRow = {
     matched_bank_reference?: string | null;
     approved_by?: string | null;
     admin_note?: string | null;
+    promotion_id?: string | null;
+    promotion_name?: string | null;
+    promotion_bonus_type?: string | null;
+    promotion_bonus_value?: number | null;
+    promotion_bonus_amount?: number | null;
+    promotion_total_amount?: number | null;
+    promotion_applied_at?: string | null;
     error_message: string | null;
     approved_at: string | null;
     rejected_at: string | null;
@@ -196,6 +203,20 @@ async function ensureWalletTransactionForTopup(
     if (insertError) throw new Error(insertError.message);
 }
 
+
+async function applyTopupPromotionBonus(
+    supabaseAdmin: SupabaseClient,
+    topupId: string
+) {
+    const { data, error } = await supabaseAdmin.rpc("apply_wallet_topup_promotion_bonus", {
+        p_topup_id: topupId,
+    });
+
+    if (error) throw new Error(error.message);
+
+    return Number(data || 0);
+}
+
 export async function creditWalletTopup(
     supabaseAdmin: SupabaseClient,
     topupId: string
@@ -213,5 +234,9 @@ export async function creditWalletTopup(
     if (creditedTopup && normalizeTopupStatus(creditedTopup.status) === "APPROVED") {
         await repairLegacyWompiTransactionLabel(supabaseAdmin, creditedTopup, startedAt);
         await ensureWalletTransactionForTopup(supabaseAdmin, creditedTopup);
+
+        if (Number(creditedTopup.promotion_bonus_amount || 0) > 0 && !creditedTopup.promotion_applied_at) {
+            await applyTopupPromotionBonus(supabaseAdmin, creditedTopup.id);
+        }
     }
 }

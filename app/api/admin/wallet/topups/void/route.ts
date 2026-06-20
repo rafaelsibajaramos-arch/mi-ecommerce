@@ -13,6 +13,9 @@ type TopupForVoid = {
   status: string | null;
   credited_at: string | null;
   matched_bank_payment_id: string | null;
+  promotion_bonus_amount?: number | null;
+  promotion_total_amount?: number | null;
+  promotion_applied_at?: string | null;
 };
 
 function jsonError(message: string, status = 400) {
@@ -115,7 +118,7 @@ export async function POST(request: NextRequest) {
 
     const { data: topupData, error: topupError } = await supabaseAdmin
       .from("wallet_topups")
-      .select("id, user_id, reference, amount, provider, status, credited_at, matched_bank_payment_id")
+      .select("id, user_id, reference, amount, provider, status, credited_at, matched_bank_payment_id, promotion_bonus_amount, promotion_total_amount, promotion_applied_at")
       .eq("id", topupId)
       .maybeSingle();
 
@@ -131,12 +134,14 @@ export async function POST(request: NextRequest) {
 
     const now = new Date().toISOString();
     const amount = Math.abs(Number(topup.amount || 0));
+    const appliedBonus = topup.promotion_applied_at ? Math.max(0, Number(topup.promotion_bonus_amount || 0)) : 0;
+    const amountToReverse = amount + appliedBonus;
     let reversed = false;
 
     const shouldReverseAutomaticCredit =
       status === "APPROVED" &&
       !!topup.user_id &&
-      amount > 0 &&
+      amountToReverse > 0 &&
       (!!topup.credited_at || (await hasAutomaticCreditTransaction({ supabaseAdmin, topup })));
 
     if (shouldReverseAutomaticCredit) {
@@ -150,16 +155,16 @@ export async function POST(request: NextRequest) {
       if (!profile) return jsonError("No se encontró el perfil del cliente.", 404);
 
       const currentBalance = Number((profile as { balance?: number | null }).balance || 0);
-      if (currentBalance < amount) {
+      if (currentBalance < amountToReverse) {
         return jsonError(
-          `No se puede descontar ${amount.toLocaleString("es-CO")} porque el cliente solo tiene ${currentBalance.toLocaleString("es-CO")} de saldo.`,
+          `No se puede descontar ${amountToReverse.toLocaleString("es-CO")} porque el cliente solo tiene ${currentBalance.toLocaleString("es-CO")} de saldo.`,
           409
         );
       }
 
       const { error: balanceError } = await supabaseAdmin
         .from("profiles")
-        .update({ balance: currentBalance - amount })
+        .update({ balance: currentBalance - amountToReverse })
         .eq("id", topup.user_id);
 
       if (balanceError) return jsonError(balanceError.message, 500);
@@ -171,7 +176,7 @@ export async function POST(request: NextRequest) {
       const { error: txError } = await supabaseAdmin.from("wallet_transactions").insert({
         user_id: topup.user_id,
         type: "debit",
-        amount,
+        amount: amountToReverse,
         note: label,
         description: label,
       });
@@ -214,7 +219,9 @@ export async function POST(request: NextRequest) {
         voided_at: now,
         voided_by: user.id,
         void_reason: reversed
-          ? "Anulada por admin. Se descontó saldo porque había sido cargada automáticamente."
+          ? appliedBonus > 0
+            ? `Anulada por admin. Se descontó saldo base + bono promocional (${amountToReverse.toLocaleString("es-CO")}).`
+            : "Anulada por admin. Se descontó saldo porque había sido cargada automáticamente."
           : "Anulada por admin. No se descontó saldo porque no había carga automática confirmada.",
         admin_note: reversed
           ? "Anulada desde admin con reversa de saldo automático."

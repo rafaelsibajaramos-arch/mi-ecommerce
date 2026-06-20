@@ -10,7 +10,8 @@ const adminLinks = [
   { href: "/admin/products", label: "Productos" },
   { href: "/admin/users", label: "Usuarios" },
   { href: "/admin/wallet", label: "Wallet" },
-  { href: "/admin/recargas-automaticas", label: "Recargas automáticas" }, // 👈 NUEVO
+  { href: "/admin/recargas-automaticas", label: "Recargas automáticas" },
+  { href: "/admin/promociones-recargas", label: "Promociones" },
   { href: "/admin/license-alerts", label: "Alertas" },
 ];
 
