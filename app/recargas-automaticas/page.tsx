@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
 
 const PRESET_AMOUNTS = [1000, 5000, 10000, 20000, 30000, 50000, 100000];
@@ -67,6 +67,8 @@ function formatDateTime(value: string | null | undefined) {
 
 export default function AutomaticTopupsPage() {
   const router = useRouter();
+  const submitButtonRef = useRef<HTMLButtonElement | null>(null);
+
   const [amountInput, setAmountInput] = useState("10000");
   const [payerOrigin, setPayerOrigin] = useState("");
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -110,12 +112,14 @@ export default function AutomaticTopupsPage() {
     const loadActivePromotion = async () => {
       try {
         setPromoLoading(true);
+
         const response = await fetch("/api/wallet/topups/active-promotion", {
           method: "GET",
           cache: "no-store",
         });
 
         const result = await response.json().catch(() => null);
+
         if (!response.ok || !result?.ok) {
           throw new Error(result?.error || "No se pudo consultar la promoción activa.");
         }
@@ -171,10 +175,30 @@ export default function AutomaticTopupsPage() {
   );
 
   const promotedTotal = parsedAmount + promotionBonus;
-  const missingForPromotion = featuredPromotion ? Math.max(0, featuredPromotion.minAmount - parsedAmount) : 0;
+  const missingForPromotion = featuredPromotion
+    ? Math.max(0, featuredPromotion.minAmount - parsedAmount)
+    : 0;
+
   const hasPromotion = Boolean(featuredPromotion);
   const promotionText = getPromotionText(featuredPromotion);
   const promotionEndsAt = formatDateTime(featuredPromotion?.endsAt);
+
+  function handleApplyPromotion() {
+    const promoAmount = featuredPromotion?.minAmount || 30000;
+
+    setAmountInput(String(promoAmount));
+
+    window.setTimeout(() => {
+      submitButtonRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+
+      submitButtonRef.current?.focus({
+        preventScroll: true,
+      });
+    }, 120);
+  }
 
   async function copyKey() {
     try {
@@ -195,7 +219,10 @@ export default function AutomaticTopupsPage() {
     }
 
     if (!payerOrigin.trim()) {
-      setBanner({ kind: "error", text: "Ingresa el nombre de quien realizó la transferencia." });
+      setBanner({
+        kind: "error",
+        text: "Ingresa el nombre de quien realizó la transferencia.",
+      });
       return;
     }
 
@@ -228,7 +255,10 @@ export default function AutomaticTopupsPage() {
       });
 
       const result = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(result?.error || "No se pudo reportar la recarga.");
+
+      if (!response.ok) {
+        throw new Error(result?.error || "No se pudo reportar la recarga.");
+      }
 
       router.push(`/account/wallet/topup-result?reference=${encodeURIComponent(result.reference)}`);
     } catch (error) {
@@ -254,13 +284,16 @@ export default function AutomaticTopupsPage() {
                 <div className="mb-2 inline-flex rounded-full border border-blue-300/20 bg-blue-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.25em] text-blue-200">
                   Recarga automática
                 </div>
+
                 <h1 className="text-xl font-extrabold tracking-tight md:text-2xl">
                   Recarga por Bre-B / Llaves
                 </h1>
+
                 <p className="mt-1 text-sm leading-6 text-white/60">
                   Transfiere a la llave, luego indica el monto y tu nombre. El saldo se acredita automáticamente.
                 </p>
               </div>
+
               <Link
                 href="/account/wallet"
                 className="hidden shrink-0 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold text-white/80 transition hover:bg-white/10 sm:inline-flex"
@@ -277,6 +310,7 @@ export default function AutomaticTopupsPage() {
                 </p>
                 <p className="text-lg font-bold text-blue-200">{BREB_KEY}</p>
               </div>
+
               <button
                 type="button"
                 onClick={copyKey}
@@ -290,10 +324,11 @@ export default function AutomaticTopupsPage() {
 
         {/* Sección de promociones */}
         <section
-          className={`overflow-hidden rounded-2xl border shadow-xl backdrop-blur-xl ${hasPromotion
-            ? "border-emerald-300/30 bg-slate-950/85 shadow-emerald-950/10"
-            : "border-white/10 bg-slate-950/80 shadow-black/20"
-            }`}
+          className={`overflow-hidden rounded-2xl border shadow-xl backdrop-blur-xl ${
+            hasPromotion
+              ? "border-emerald-300/30 bg-slate-950/85 shadow-emerald-950/10"
+              : "border-white/10 bg-slate-950/80 shadow-black/20"
+          }`}
         >
           <div className="relative p-4 md:p-4">
             <div className="pointer-events-none absolute -right-12 -top-12 h-36 w-36 rounded-full bg-emerald-400/20 blur-3xl" />
@@ -314,37 +349,47 @@ export default function AutomaticTopupsPage() {
                   <p className="text-[10px] font-black uppercase tracking-[0.28em] text-emerald-200/80">
                     Sección de promociones
                   </p>
+
                   <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-emerald-300/25 bg-emerald-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-200">
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-lg shadow-emerald-300/40" />
                     Promo activa
                   </div>
+
                   <h2 className="mt-2 text-xl font-black leading-tight tracking-tight text-white md:text-2xl">
                     {promotionText} por recargas desde {formatMoney(featuredPromotion?.minAmount)}
                   </h2>
+
                   <p className="mt-2 text-xs font-semibold text-white/60">
                     El aumento se aplica automáticamente al aprobar tu recarga.
                   </p>
 
                   {promotionEndsAt && (
-  <p className="mt-2 text-[14.3px] font-bold text-emerald-200">
-    Disponible hasta: {promotionEndsAt}
-  </p>
-)}
+                    <p className="mt-2 text-[14.3px] font-bold text-emerald-200">
+                      Disponible hasta: {promotionEndsAt}
+                    </p>
+                  )}
                 </div>
 
                 <div className="rounded-xl border border-white/10 bg-white/[0.06] p-3 md:min-w-48">
                   <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/45">
                     Ejemplo
                   </p>
+
                   <div className="mt-2 space-y-1.5 text-xs">
                     <div className="flex items-center justify-between gap-4 text-white/65">
-                      <span>Recargas</span>
-                      <span className="font-black text-white">{formatMoney(featuredPromotion?.minAmount)}</span>
+                      <span>Recarga</span>
+                      <span className="font-black text-white">
+                        {formatMoney(featuredPromotion?.minAmount)}
+                      </span>
                     </div>
+
                     <div className="flex items-center justify-between gap-4 text-white/65">
                       <span>Aumento</span>
-                      <span className="font-black text-emerald-300">+{formatMoney(minPromotionBonus)}</span>
+                      <span className="font-black text-emerald-300">
+                        +{formatMoney(minPromotionBonus)}
+                      </span>
                     </div>
+
                     <div className="border-t border-white/10 pt-1.5">
                       <div className="flex items-center justify-between gap-4">
                         <span className="text-white/70">Recibes</span>
@@ -357,7 +402,7 @@ export default function AutomaticTopupsPage() {
 
                   <button
                     type="button"
-                    onClick={() => setAmountInput(String(featuredPromotion?.minAmount || 30000))}
+                    onClick={handleApplyPromotion}
                     className="mt-3 w-full rounded-lg bg-emerald-400 px-3 py-2 text-xs font-black text-slate-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-300"
                   >
                     Aprovechar
@@ -369,12 +414,15 @@ export default function AutomaticTopupsPage() {
                 <p className="text-[10px] font-black uppercase tracking-[0.28em] text-white/45">
                   Sección de promociones
                 </p>
+
                 <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-white/55">
                   Sin promoción activa
                 </div>
+
                 <h2 className="mt-2 text-lg font-black leading-tight tracking-tight text-white md:text-xl">
                   En este momento no hay promociones disponibles.
                 </h2>
+
                 <p className="mt-1.5 text-xs leading-5 text-white/55">
                   Cuando actives una promoción, aparecerá aquí automáticamente.
                 </p>
@@ -385,12 +433,13 @@ export default function AutomaticTopupsPage() {
 
         {banner && (
           <div
-            className={`rounded-xl border px-4 py-2.5 text-sm font-semibold ${banner.kind === "success"
-              ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-300"
-              : banner.kind === "info"
-                ? "border-blue-400/20 bg-blue-400/10 text-blue-300"
-                : "border-red-400/20 bg-red-400/10 text-red-300"
-              }`}
+            className={`rounded-xl border px-4 py-2.5 text-sm font-semibold ${
+              banner.kind === "success"
+                ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-300"
+                : banner.kind === "info"
+                  ? "border-blue-400/20 bg-blue-400/10 text-blue-300"
+                  : "border-red-400/20 bg-red-400/10 text-red-300"
+            }`}
           >
             {banner.text}
           </div>
@@ -410,6 +459,7 @@ export default function AutomaticTopupsPage() {
             <label className="mb-1.5 block text-sm font-semibold text-white/75">
               ¿Cuánto transferiste?
             </label>
+
             <input
               type="number"
               min="100"
@@ -418,12 +468,15 @@ export default function AutomaticTopupsPage() {
               onChange={(event) => setAmountInput(event.target.value)}
               className="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-lg font-black text-white outline-none transition focus:border-blue-400/40 focus:bg-white/10"
             />
+
             <div className="mt-2 flex flex-wrap gap-2">
               {PRESET_AMOUNTS.map((amount) => {
                 const presetPromotion =
                   activePromotions
                     .filter((promotion) => amount >= promotion.minAmount)
-                    .sort((a, b) => b.minAmount - a.minAmount || b.bonusValue - a.bonusValue)[0] || null;
+                    .sort((a, b) => b.minAmount - a.minAmount || b.bonusValue - a.bonusValue)[0] ||
+                  null;
+
                 const presetBonus = getPromotionBonus(presetPromotion, amount);
 
                 return (
@@ -431,12 +484,14 @@ export default function AutomaticTopupsPage() {
                     key={amount}
                     type="button"
                     onClick={() => setAmountInput(String(amount))}
-                    className={`rounded-xl border px-3 py-1.5 text-xs font-semibold transition ${parsedAmount === amount
-                      ? "border-blue-400/30 bg-blue-500/15 text-blue-300"
-                      : "border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white"
-                      }`}
+                    className={`rounded-xl border px-3 py-1.5 text-xs font-semibold transition ${
+                      parsedAmount === amount
+                        ? "border-blue-400/30 bg-blue-500/15 text-blue-300"
+                        : "border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white"
+                    }`}
                   >
                     {formatMoney(amount)}
+
                     {presetBonus > 0 && (
                       <span className="ml-1 rounded-full bg-emerald-400/15 px-1.5 py-0.5 text-[10px] font-black text-emerald-200">
                         +{formatMoney(presetBonus)}
@@ -451,7 +506,8 @@ export default function AutomaticTopupsPage() {
               <div className="mt-3 rounded-2xl border border-emerald-300/15 bg-emerald-400/10 px-4 py-3 text-sm">
                 {promotionBonus > 0 ? (
                   <p className="font-semibold text-emerald-200">
-                    Tu recarga aplica para la promoción: recibirías {formatMoney(parsedAmount)} + {formatMoney(promotionBonus)} de aumento = {formatMoney(promotedTotal)}.
+                    Tu recarga aplica para la promoción: recibirías {formatMoney(parsedAmount)} +{" "}
+                    {formatMoney(promotionBonus)} de aumento = {formatMoney(promotedTotal)}.
                   </p>
                 ) : (
                   <p className="font-semibold text-white/65">
@@ -465,20 +521,23 @@ export default function AutomaticTopupsPage() {
           {/* Nombre */}
           <div>
             <label className="mb-1.5 block text-sm font-semibold text-white/75">
-              ¿A nombre de quién está registrada la cuenta que transfirió?
+              ¿A nombre de quién está registrada la cuenta que envió el dinero?
             </label>
+
             <input
               value={payerOrigin}
               onChange={(event) => setPayerOrigin(event.target.value)}
-              placeholder="Aquí va el nombre de quien hizo la transferencia"
+              placeholder="Nombre de quien hizo el envío"
               className="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-white outline-none transition placeholder:text-white/35 focus:border-blue-400/40 focus:bg-white/10"
             />
+
             <p className="mt-1 text-xs text-white/50">
               No necesitas escribir el nombre completo, basta con un nombre y un apellido.
             </p>
           </div>
 
           <button
+            ref={submitButtonRef}
             type="submit"
             disabled={checkingSession || topupLoading || parsedAmount < 100}
             className="w-full rounded-2xl bg-blue-500 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-blue-500/20 transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
