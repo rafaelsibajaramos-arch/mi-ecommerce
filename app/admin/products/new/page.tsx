@@ -98,6 +98,15 @@ export default function NewProductPage() {
         uploadedImageUrl = publicUrlData.publicUrl;
       }
 
+      const { data: lastProduct } = await supabase
+        .from("products")
+        .select("sort_order")
+        .order("sort_order", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const nextSortOrder = Number(lastProduct?.sort_order ?? -1) + 1;
+
       const { error } = await supabase.from("products").insert([
         {
           name: cleanName,
@@ -108,6 +117,7 @@ export default function NewProductPage() {
           image_url: uploadedImageUrl,
           category: category.trim() || null,
           is_active: isActive,
+          sort_order: nextSortOrder,
         },
       ]);
 

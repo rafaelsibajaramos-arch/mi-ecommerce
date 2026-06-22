@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type DragEvent, type KeyboardEvent } from "react";
 import Link from "next/link";
 import { supabase } from "../../../lib/supabase";
 
@@ -14,21 +14,25 @@ type Product = {
   category: string | null;
   is_active: boolean;
   created_at?: string;
+  sort_order?: number | null;
 };
 
-// Listado administrativo de productos con filtros básicos y acciones rápidas.
 export default function AdminProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [onlyOutOfStock, setOnlyOutOfStock] = useState(false);
+  const [savingOrder, setSavingOrder] = useState(false);
+  const [draggingProductId, setDraggingProductId] = useState<string | null>(null);
+  const [dragOverProductId, setDragOverProductId] = useState<string | null>(null);
+  const [positionInputs, setPositionInputs] = useState<Record<string, string>>({});
 
-  // Carga el listado de productos del panel administrativo.
   const fetchProducts = async () => {
     const { data, error } = await supabase
       .from("products")
       .select("*")
+      .order("sort_order", { ascending: true })
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -38,11 +42,199 @@ export default function AdminProductsPage() {
       return;
     }
 
-    setProducts((data as Product[]) || []);
+    setProducts(
+      ((data as Product[]) || []).map((product, index) => ({
+        ...product,
+        sort_order: product.sort_order ?? index,
+      }))
+    );
+
+    setPositionInputs({});
     setLoading(false);
   };
 
-  // Elimina un producto después de confirmar la acción.
+  const saveProductsOrder = async (
+    nextProducts: Product[],
+    successMessage = "Orden actualizado. El catálogo mostrará los productos en este mismo orden."
+  ) => {
+    setSavingOrder(true);
+    setMessage("");
+
+    const updates = await Promise.all(
+      nextProducts.map((product, index) =>
+        supabase
+          .from("products")
+          .update({ sort_order: index })
+          .eq("id", product.id)
+      )
+    );
+
+    const failedUpdate = updates.find((result) => result.error);
+
+    if (failedUpdate?.error) {
+      setMessage("No se pudo guardar el nuevo orden: " + failedUpdate.error.message);
+      void fetchProducts();
+    } else {
+      setMessage(successMessage);
+    }
+
+    setSavingOrder(false);
+  };
+
+  const getProductPosition = (productId: string) => {
+    return products.findIndex((product) => product.id === productId) + 1;
+  };
+
+  const clearPositionInput = (productId: string) => {
+    setPositionInputs((prev) => {
+      const next = { ...prev };
+      delete next[productId];
+      return next;
+    });
+  };
+
+  const handlePositionInputChange = (productId: string, value: string) => {
+    const cleanValue = value.replace(/[^\d]/g, "");
+
+    setPositionInputs((prev) => ({
+      ...prev,
+      [productId]: cleanValue,
+    }));
+  };
+
+  const handleMoveProductToPosition = async (
+    productId: string,
+    rawPosition: string
+  ) => {
+    if (savingOrder || !canManuallyOrder) {
+      clearPositionInput(productId);
+      return;
+    }
+
+    const currentIndex = products.findIndex((product) => product.id === productId);
+
+    if (currentIndex === -1) {
+      clearPositionInput(productId);
+      return;
+    }
+
+    if (!rawPosition.trim()) {
+      clearPositionInput(productId);
+      return;
+    }
+
+    const numericPosition = Number(rawPosition);
+
+    if (Number.isNaN(numericPosition)) {
+      clearPositionInput(productId);
+      return;
+    }
+
+    const targetPosition = Math.min(
+      Math.max(Math.trunc(numericPosition), 1),
+      products.length
+    );
+
+    const targetIndex = targetPosition - 1;
+
+    if (currentIndex === targetIndex) {
+      clearPositionInput(productId);
+      return;
+    }
+
+    const nextProducts = [...products];
+    const [movedProduct] = nextProducts.splice(currentIndex, 1);
+
+    nextProducts.splice(targetIndex, 0, movedProduct);
+
+    const orderedProducts = nextProducts.map((product, index) => ({
+      ...product,
+      sort_order: index,
+    }));
+
+    setProducts(orderedProducts);
+    clearPositionInput(productId);
+
+    await saveProductsOrder(
+      orderedProducts,
+      `Producto movido al puesto ${targetPosition}. El catálogo mostrará este nuevo orden.`
+    );
+  };
+
+  const handlePositionKeyDown = (
+    event: KeyboardEvent<HTMLInputElement>
+  ) => {
+    if (event.key === "Enter") {
+      event.currentTarget.blur();
+    }
+  };
+
+  const handleDragStart = (
+    event: DragEvent<HTMLElement>,
+    productId: string
+  ) => {
+    if (savingOrder || !canManuallyOrder) return;
+
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", productId);
+
+    setDraggingProductId(productId);
+  };
+
+  const handleDragOver = (
+    event: DragEvent<HTMLElement>,
+    targetProductId: string
+  ) => {
+    if (!draggingProductId || draggingProductId === targetProductId) return;
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDragOverProductId(targetProductId);
+  };
+
+  const handleDrop = async (
+    event: DragEvent<HTMLElement>,
+    targetProductId: string
+  ) => {
+    event.preventDefault();
+
+    const draggedProductId =
+      draggingProductId || event.dataTransfer.getData("text/plain");
+
+    setDraggingProductId(null);
+    setDragOverProductId(null);
+
+    if (!draggedProductId || draggedProductId === targetProductId) return;
+
+    const currentIndex = products.findIndex(
+      (product) => product.id === draggedProductId
+    );
+
+    const targetIndex = products.findIndex(
+      (product) => product.id === targetProductId
+    );
+
+    if (currentIndex === -1 || targetIndex === -1) return;
+
+    const nextProducts = [...products];
+    const [movedProduct] = nextProducts.splice(currentIndex, 1);
+
+    nextProducts.splice(targetIndex, 0, movedProduct);
+
+    const orderedProducts = nextProducts.map((product, index) => ({
+      ...product,
+      sort_order: index,
+    }));
+
+    setProducts(orderedProducts);
+    await saveProductsOrder(orderedProducts);
+  };
+
+  const handleDragEnd = () => {
+    setDraggingProductId(null);
+    setDragOverProductId(null);
+  };
+
   const handleDelete = async (id: string) => {
     const confirmed = window.confirm(
       "¿Seguro que quieres eliminar este producto?"
@@ -57,8 +249,19 @@ export default function AdminProductsPage() {
       return;
     }
 
-    setProducts((prev) => prev.filter((item) => item.id !== id));
-    setMessage("Producto eliminado correctamente.");
+    const nextProducts = products.filter((item) => item.id !== id);
+    const orderedProducts = nextProducts.map((product, index) => ({
+      ...product,
+      sort_order: index,
+    }));
+
+    setProducts(orderedProducts);
+    clearPositionInput(id);
+
+    await saveProductsOrder(
+      orderedProducts,
+      "Producto eliminado correctamente y orden ajustado."
+    );
   };
 
   useEffect(() => {
@@ -71,12 +274,12 @@ export default function AdminProductsPage() {
     };
   }, []);
 
-  // Formatea price para mostrarlo en la interfaz.
   const formatPrice = (value: number) => {
     return `$${Number(value || 0).toLocaleString("es-CO")}`;
   };
 
   const normalizedSearch = searchTerm.trim().toLowerCase();
+  const canManuallyOrder = !normalizedSearch && !onlyOutOfStock;
 
   const filteredProducts = products.filter((product) => {
     const matchesSearch =
@@ -97,11 +300,13 @@ export default function AdminProductsPage() {
           <p className="text-[11px] sm:text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
             Admin
           </p>
+
           <h1 className="mt-2 text-2xl sm:text-3xl font-extrabold text-slate-900">
             Productos
           </h1>
+
           <p className="mt-2 max-w-2xl text-sm sm:text-[15px] text-slate-600">
-            Gestiona todos los productos de tu tienda.
+            Gestiona todos los productos de tu tienda. El orden de esta lista es el mismo que verá el cliente en el catálogo.
           </p>
         </div>
 
@@ -118,6 +323,7 @@ export default function AdminProductsPage() {
           {message}
         </div>
       )}
+
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -187,103 +393,162 @@ export default function AdminProductsPage() {
           </div>
         ) : (
           <>
-            {/* MOBILE */}
             <div className="grid gap-4 p-4 sm:p-5 md:hidden">
-              {filteredProducts.map((product) => (
-                <div
-                  key={product.id}
-                  className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
-                >
-                  <div className="flex items-start gap-3">
-                    {product.image_url ? (
-                      <img
-                        src={product.image_url}
-                        alt={product.name}
-                        className="h-16 w-16 rounded-xl border border-slate-200 object-cover flex-shrink-0"
-                      />
-                    ) : (
-                      <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-100 text-[11px] text-slate-400">
-                        Sin img
-                      </div>
-                    )}
+              {filteredProducts.map((product) => {
+                const isDragging = draggingProductId === product.id;
+                const isDragOver = dragOverProductId === product.id;
+                const position = getProductPosition(product.id);
 
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-sm font-bold text-slate-900 break-words">
-                          {product.name}
-                        </p>
+                return (
+                  <div
+                    key={product.id}
+                    onDragOver={(event) => handleDragOver(event, product.id)}
+                    onDrop={(event) => handleDrop(event, product.id)}
+                    className={`rounded-2xl border bg-white p-4 shadow-sm transition ${
+                      isDragging
+                        ? "border-blue-300 opacity-50"
+                        : isDragOver
+                          ? "border-blue-400 ring-2 ring-blue-100"
+                          : "border-slate-200"
+                    }`}
+                  >
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <span
+                        draggable={canManuallyOrder && !savingOrder}
+                        onDragStart={(event) =>
+                          handleDragStart(event, product.id)
+                        }
+                        onDragEnd={handleDragEnd}
+                        className={`inline-flex items-center gap-2 rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600 ${
+                          canManuallyOrder
+                            ? "cursor-grab active:cursor-grabbing"
+                            : "cursor-not-allowed opacity-50"
+                        }`}
+                      >
+                        <span className="text-base leading-none">⋮⋮</span>
+                        Arrastrar
+                      </span>
 
-                        <span
-                          className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${
-                            product.is_active
-                              ? "bg-emerald-100 text-emerald-700"
-                              : "bg-slate-200 text-slate-600"
-                          }`}
-                        >
-                          {product.is_active ? "Activo" : "Inactivo"}
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold text-slate-500">
+                          Pos.
                         </span>
+
+                        <input
+                          type="number"
+                          min={1}
+                          max={products.length}
+                          disabled={!canManuallyOrder || savingOrder}
+                          value={positionInputs[product.id] ?? String(position)}
+                          onChange={(event) =>
+                            handlePositionInputChange(
+                              product.id,
+                              event.target.value
+                            )
+                          }
+                          onBlur={(event) =>
+                            handleMoveProductToPosition(
+                              product.id,
+                              event.target.value
+                            )
+                          }
+                          onKeyDown={handlePositionKeyDown}
+                          className="h-9 w-16 rounded-xl border border-slate-200 bg-white px-2 text-center text-sm font-bold text-slate-700 outline-none transition focus:border-blue-400 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:opacity-60"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-3">
+                      {product.image_url ? (
+                        <img
+                          src={product.image_url}
+                          alt={product.name}
+                          className="h-16 w-16 rounded-xl border border-slate-200 object-cover flex-shrink-0"
+                        />
+                      ) : (
+                        <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-100 text-[11px] text-slate-400">
+                          Sin img
+                        </div>
+                      )}
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-bold text-slate-900 break-words">
+                            {product.name}
+                          </p>
+
+                          <span
+                            className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${
+                              product.is_active
+                                ? "bg-emerald-100 text-emerald-700"
+                                : "bg-slate-200 text-slate-600"
+                            }`}
+                          >
+                            {product.is_active ? "Activo" : "Inactivo"}
+                          </span>
+                        </div>
+
+                        <p className="mt-1 text-xs text-slate-500 line-clamp-2">
+                          {product.description || "Sin descripción"}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                      <div className="rounded-xl bg-slate-50 px-3 py-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                          Categoría
+                        </p>
+                        <p className="mt-1 font-medium text-slate-700">
+                          {product.category || "Sin categoría"}
+                        </p>
                       </div>
 
-                      <p className="mt-1 text-xs text-slate-500 line-clamp-2">
-                        {product.description || "Sin descripción"}
-                      </p>
+                      <div className="rounded-xl bg-slate-50 px-3 py-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                          Stock
+                        </p>
+                        <p className="mt-1 font-medium text-slate-700">
+                          {product.stock ?? 0}
+                        </p>
+                      </div>
+
+                      <div className="col-span-2 rounded-xl bg-slate-50 px-3 py-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                          Precio
+                        </p>
+                        <p className="mt-1 font-semibold text-slate-900">
+                          {formatPrice(product.price)}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-2 gap-2">
+                      <Link
+                        href={`/admin/products/${product.id}`}
+                        className="inline-flex w-full items-center justify-center rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                      >
+                        Editar
+                      </Link>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(product.id)}
+                        className="inline-flex w-full items-center justify-center rounded-xl border border-red-200 px-4 py-2.5 text-xs font-semibold text-red-600 transition hover:bg-red-50"
+                      >
+                        Eliminar
+                      </button>
                     </div>
                   </div>
-
-                  <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                    <div className="rounded-xl bg-slate-50 px-3 py-2">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-                        Categoría
-                      </p>
-                      <p className="mt-1 font-medium text-slate-700">
-                        {product.category || "Sin categoría"}
-                      </p>
-                    </div>
-
-                    <div className="rounded-xl bg-slate-50 px-3 py-2">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-                        Stock
-                      </p>
-                      <p className="mt-1 font-medium text-slate-700">
-                        {product.stock ?? 0}
-                      </p>
-                    </div>
-
-                    <div className="col-span-2 rounded-xl bg-slate-50 px-3 py-2">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-                        Precio
-                      </p>
-                      <p className="mt-1 font-semibold text-slate-900">
-                        {formatPrice(product.price)}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-                    <Link
-                      href={`/admin/products/${product.id}`}
-                      className="inline-flex w-full items-center justify-center rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
-                    >
-                      Editar
-                    </Link>
-
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(product.id)}
-                      className="inline-flex w-full items-center justify-center rounded-xl border border-red-200 px-4 py-2.5 text-xs font-semibold text-red-600 transition hover:bg-red-50"
-                    >
-                      Eliminar
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
-            {/* TABLET / DESKTOP */}
             <div className="hidden md:block overflow-x-auto">
               <table className="min-w-full">
                 <thead className="bg-slate-50">
                   <tr className="text-left text-sm text-slate-600">
+                    <th className="px-5 py-4 font-semibold">Orden</th>
                     <th className="px-5 py-4 font-semibold">Producto</th>
                     <th className="px-5 py-4 font-semibold">Categoría</th>
                     <th className="px-5 py-4 font-semibold">Precio</th>
@@ -294,78 +559,136 @@ export default function AdminProductsPage() {
                 </thead>
 
                 <tbody>
-                  {filteredProducts.map((product) => (
-                    <tr
-                      key={product.id}
-                      className="border-t border-slate-200 text-sm text-slate-700"
-                    >
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-3">
-                          {product.image_url ? (
-                            <img
-                              src={product.image_url}
-                              alt={product.name}
-                              className="h-12 w-12 rounded-xl border border-slate-200 object-cover"
+                  {filteredProducts.map((product) => {
+                    const isDragging = draggingProductId === product.id;
+                    const isDragOver = dragOverProductId === product.id;
+                    const position = getProductPosition(product.id);
+
+                    return (
+                      <tr
+                        key={product.id}
+                        onDragOver={(event) =>
+                          handleDragOver(event, product.id)
+                        }
+                        onDrop={(event) => handleDrop(event, product.id)}
+                        className={`border-t text-sm text-slate-700 transition ${
+                          isDragging
+                            ? "border-blue-300 bg-blue-50 opacity-50"
+                            : isDragOver
+                              ? "border-blue-400 bg-blue-50"
+                              : "border-slate-200"
+                        }`}
+                      >
+                        <td className="px-5 py-4">
+                          <div className="flex items-center gap-3">
+                            <span
+                              draggable={canManuallyOrder && !savingOrder}
+                              onDragStart={(event) =>
+                                handleDragStart(event, product.id)
+                              }
+                              onDragEnd={handleDragEnd}
+                              className={`inline-flex items-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-500 ${
+                                canManuallyOrder
+                                  ? "cursor-grab active:cursor-grabbing"
+                                  : "cursor-not-allowed opacity-50"
+                              }`}
+                              title="Arrastrar producto"
+                            >
+                              ⋮⋮
+                            </span>
+
+                            <input
+                              type="number"
+                              min={1}
+                              max={products.length}
+                              disabled={!canManuallyOrder || savingOrder}
+                              value={positionInputs[product.id] ?? String(position)}
+                              onChange={(event) =>
+                                handlePositionInputChange(
+                                  product.id,
+                                  event.target.value
+                                )
+                              }
+                              onBlur={(event) =>
+                                handleMoveProductToPosition(
+                                  product.id,
+                                  event.target.value
+                                )
+                              }
+                              onKeyDown={handlePositionKeyDown}
+                              className="h-10 w-16 rounded-xl border border-slate-200 bg-white px-2 text-center text-sm font-bold text-slate-700 outline-none transition focus:border-blue-400 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:opacity-60"
                             />
-                          ) : (
-                            <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-slate-200 bg-slate-100 text-xs text-slate-400">
-                              Sin img
-                            </div>
-                          )}
-
-                          <div className="min-w-0">
-                            <p className="font-semibold text-slate-900">
-                              {product.name}
-                            </p>
-                            <p className="max-w-[320px] truncate text-xs text-slate-500">
-                              {product.description || "Sin descripción"}
-                            </p>
                           </div>
-                        </div>
-                      </td>
+                        </td>
 
-                      <td className="px-5 py-4">
-                        {product.category || "Sin categoría"}
-                      </td>
+                        <td className="px-5 py-4">
+                          <div className="flex items-center gap-3">
+                            {product.image_url ? (
+                              <img
+                                src={product.image_url}
+                                alt={product.name}
+                                className="h-12 w-12 rounded-xl border border-slate-200 object-cover"
+                              />
+                            ) : (
+                              <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-slate-200 bg-slate-100 text-xs text-slate-400">
+                                Sin img
+                              </div>
+                            )}
 
-                      <td className="px-5 py-4">
-                        {formatPrice(product.price)}
-                      </td>
+                            <div className="min-w-0">
+                              <p className="font-semibold text-slate-900">
+                                {product.name}
+                              </p>
+                              <p className="max-w-[320px] truncate text-xs text-slate-500">
+                                {product.description || "Sin descripción"}
+                              </p>
+                            </div>
+                          </div>
+                        </td>
 
-                      <td className="px-5 py-4">{product.stock ?? 0}</td>
+                        <td className="px-5 py-4">
+                          {product.category || "Sin categoría"}
+                        </td>
 
-                      <td className="px-5 py-4">
-                        <span
-                          className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                            product.is_active
-                              ? "bg-emerald-100 text-emerald-700"
-                              : "bg-slate-200 text-slate-600"
-                          }`}
-                        >
-                          {product.is_active ? "Activo" : "Inactivo"}
-                        </span>
-                      </td>
+                        <td className="px-5 py-4">
+                          {formatPrice(product.price)}
+                        </td>
 
-                      <td className="px-5 py-4">
-                        <div className="flex flex-wrap gap-2">
-                          <Link
-                            href={`/admin/products/${product.id}`}
-                            className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                        <td className="px-5 py-4">{product.stock ?? 0}</td>
+
+                        <td className="px-5 py-4">
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                              product.is_active
+                                ? "bg-emerald-100 text-emerald-700"
+                                : "bg-slate-200 text-slate-600"
+                            }`}
                           >
-                            Editar
-                          </Link>
+                            {product.is_active ? "Activo" : "Inactivo"}
+                          </span>
+                        </td>
 
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(product.id)}
-                            className="rounded-xl border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-50"
-                          >
-                            Eliminar
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        <td className="px-5 py-4">
+                          <div className="flex flex-wrap gap-2">
+                            <Link
+                              href={`/admin/products/${product.id}`}
+                              className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                            >
+                              Editar
+                            </Link>
+
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(product.id)}
+                              className="rounded-xl border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-50"
+                            >
+                              Eliminar
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

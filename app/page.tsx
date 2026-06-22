@@ -68,6 +68,7 @@ type Product = {
   category: string | null;
   is_active: boolean;
   created_at?: string;
+  sort_order?: number | null;
   product_type?: ProductType;
   fallback_to_general_licenses?: boolean;
 };
@@ -695,7 +696,8 @@ export default function HomePage() {
           .from("products")
           .select("*")
           .eq("is_active", true)
-          .order("name", { ascending: true });
+          .order("sort_order", { ascending: true })
+          .order("created_at", { ascending: false });
 
         if (selectedCategory !== "Todas") {
           query = query.eq("category", selectedCategory);
