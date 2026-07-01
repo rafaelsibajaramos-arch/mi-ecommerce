@@ -6,7 +6,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
 
 const PRESET_AMOUNTS = [1000, 5000, 10000, 20000, 30000, 50000, 100000];
-const BREB_KEY = "3117664491";
+const BREB_KEY = "rafaelsibajaramos@gmail.com";
 const BREB_DESTINATION = `Bre-B / Llaves - ${BREB_KEY}`;
 
 type BannerState = { kind: "success" | "error" | "info"; text: string } | null;

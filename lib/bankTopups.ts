@@ -28,30 +28,84 @@ export function normalizePaymentOrigin(value: string | null | undefined) {
     .toUpperCase();
 }
 
+const NAME_PARTICLES_TO_IGNORE = new Set([
+  "DE",
+  "DEL",
+  "LA",
+  "LAS",
+  "LOS",
+  "Y",
+  "E",
+  "DA",
+  "DO",
+  "DAS",
+  "DOS",
+  "VAN",
+  "VON",
+]);
+
+function normalizeNameForMatch(value: string) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^0-9A-Za-z\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
+}
+
+function uniqueNameTokens(value: string) {
+  const seen = new Set<string>();
+
+  return normalizeNameForMatch(value)
+    .split(" ")
+    .filter((word) => word.length > 1 && !NAME_PARTICLES_TO_IGNORE.has(word))
+    .filter((word) => {
+      if (seen.has(word)) return false;
+      seen.add(word);
+      return true;
+    });
+}
+
+function areAllTokensContained(shorterNameTokens: string[], longerNameTokens: string[]) {
+  const longerNameTokenSet = new Set(longerNameTokens);
+  return shorterNameTokens.every((word) => longerNameTokenSet.has(word));
+}
+
 /**
- * Verifica si todas las palabras del input del usuario están contenidas
- * en el nombre normalizado que llegó del banco.
- * Ej: "rafael sibaja" coincide con "RAFAEL ALBERTO SIBAJA RAMOS"
+ * Verifica si el nombre escrito por el cliente y el nombre reportado por el banco
+ * parecen pertenecer a la misma persona, incluso cuando uno viene más completo que el otro.
+ *
+ * Ejemplos válidos:
+ * - "Iris Lua" coincide con "Iris Daniela Lua Arroyo".
+ * - "Iris Daniela Lua Arroyo" coincide con "Iris Lua".
+ * - "María de la Cruz" coincide con "Maria Cruz".
+ *
+ * Para evitar aprobaciones inseguras, no se aprueban coincidencias automáticas con
+ * una sola palabra suelta, salvo que el nombre compacto sea exactamente igual.
  */
-function payerNamesMatch(userInput: string, bankValue: string): boolean {
-  const normalizeForMatch = (s: string) =>
-    s
-      .normalize("NFKD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^0-9A-Za-z\s]/g, "")
-      .trim()
-      .toUpperCase();
+export function payerNamesMatch(userInput: string, bankValue: string): boolean {
+  const normalizedUser = normalizeNameForMatch(userInput);
+  const normalizedBank = normalizeNameForMatch(bankValue);
 
-  const inputWords = normalizeForMatch(userInput)
-    .split(/\s+/)
-    .filter((w) => w.length > 1); // ignorar letras sueltas como "A"
+  if (!normalizedUser || !normalizedBank) return false;
 
-  const bankNormalized = normalizeForMatch(bankValue);
+  const compactUser = normalizedUser.replace(/\s/g, "");
+  const compactBank = normalizedBank.replace(/\s/g, "");
 
-  if (inputWords.length === 0) return false;
+  if (compactUser && compactUser === compactBank) return true;
 
-  // Todas las palabras del input deben aparecer en el nombre del banco
-  return inputWords.every((word) => bankNormalized.includes(word));
+  const userTokens = uniqueNameTokens(userInput);
+  const bankTokens = uniqueNameTokens(bankValue);
+
+  if (userTokens.length === 0 || bankTokens.length === 0) return false;
+
+  const [shorterNameTokens, longerNameTokens] =
+    userTokens.length <= bankTokens.length ? [userTokens, bankTokens] : [bankTokens, userTokens];
+
+  if (shorterNameTokens.length < 2) return false;
+
+  return areAllTokensContained(shorterNameTokens, longerNameTokens);
 }
 
 export function buildBankTopupReference(userId: string) {

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { createSupabaseAdmin } from "../../../../lib/supabaseAdmin";
-import { approveTopupWithBankPayment } from "../../../../lib/bankTopups";
+import { approveTopupWithBankPayment, payerNamesMatch } from "../../../../lib/bankTopups";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -66,38 +66,6 @@ function makeReference(messageId: string, amount: number, normalizedPayer: strin
     if (base) return `BREB-${base.slice(0, 80)}`;
     const stamp = new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 14);
     return `BREB-${amount}-${normalizedPayer.slice(0, 30)}-${stamp}`;
-}
-
-function normalizeNameForWords(value: string) {
-    return (value || "")
-        .normalize("NFKD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^0-9A-Za-z\s]/g, " ")
-        .replace(/\s+/g, " ")
-        .trim()
-        .toUpperCase();
-}
-
-function payerNamesMatch(userInput: string, bankValue: string) {
-    const normalizedUser = normalizeText(userInput);
-    const normalizedBank = normalizeText(bankValue);
-
-    if (!normalizedUser || !normalizedBank) return false;
-    if (normalizedUser === normalizedBank) return true;
-    if (normalizedBank.includes(normalizedUser) || normalizedUser.includes(normalizedBank)) return true;
-
-    const userWords = normalizeNameForWords(userInput)
-        .split(" ")
-        .filter((word) => word.length > 1);
-
-    const bankText = normalizeNameForWords(bankValue);
-
-    if (userWords.length === 0) return false;
-
-    // Ejemplo válido:
-    // Cliente escribe: "Nicolás Rodriguez"
-    // Banco llega como: "NICOLAS ARMANDO RODRIGUEZ AGUILAR"
-    return userWords.every((word) => bankText.includes(word));
 }
 
 type PendingTopupForMatch = {
