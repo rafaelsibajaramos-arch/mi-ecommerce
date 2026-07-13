@@ -279,13 +279,13 @@ async function loadBankPayments(supabaseAdmin: ReturnType<typeof createSupabaseA
     .eq("is_used", false)
     .is("matched_topup_id", null)
     .order("created_at", { ascending: false })
-    .limit(1000);
+    .limit(3000);
 
   if (error) {
     throw new Error(`No se pudieron cargar los pagos del banco: ${error.message}`);
   }
 
-  return ((((data || []) as unknown) as AnyRow[]).map(normalizeBankPayment).sort(sortByNewest).slice(0, 500));
+  return ((((data || []) as unknown) as AnyRow[]).map(normalizeBankPayment).sort(sortByNewest).slice(0, 1000));
 }
 
 async function loadTopups(supabaseAdmin: ReturnType<typeof createSupabaseAdmin>, partialErrors: string[]) {
@@ -293,7 +293,7 @@ async function loadTopups(supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
     .from("wallet_topups")
     .select("*")
     .order("created_at", { ascending: false })
-    .limit(500);
+    .limit(5000);
 
   if (error) {
     partialErrors.push(`wallet_topups: ${error.message}`);

@@ -151,6 +151,48 @@ function formatDate(value: string | null | undefined) {
   }
 }
 
+function toDateInputValue(date: Date) {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
+}
+
+function isWithinDateRange(value: string | null | undefined, from: string, to: string) {
+  if (!from && !to) return true;
+  if (!value) return false;
+
+  const current = new Date(value).getTime();
+  if (!Number.isFinite(current)) return false;
+
+  if (from) {
+    const fromTime = new Date(`${from}T00:00:00`).getTime();
+    if (Number.isFinite(fromTime) && current < fromTime) return false;
+  }
+
+  if (to) {
+    const toTime = new Date(`${to}T23:59:59.999`).getTime();
+    if (Number.isFinite(toTime) && current > toTime) return false;
+  }
+
+  return true;
+}
+
+function getTopupDateForFilter(topup: FormattedTopup) {
+  const status = normalizeStatus(topup.status);
+
+  if (status === "APPROVED") {
+    return topup.executed_at || topup.credited_at || topup.approved_at || topup.created_at;
+  }
+
+  if (status === "REJECTED") return topup.rejected_at || topup.created_at;
+  if (status === "EXPIRED") return topup.expired_at || topup.created_at;
+
+  return topup.created_at;
+}
+
+function sumMoney<T>(rows: T[], pick: (row: T) => number) {
+  return rows.reduce((total, row) => total + pick(row), 0);
+}
+
 
 function toLocalDateTimeInput(value: string | null | undefined) {
   const date = value ? new Date(value) : new Date();
@@ -322,6 +364,8 @@ export default function RecargasAutomaticasPage() {
 
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
 
   const [updatingId, setUpdatingId] = useState<string | null>(null);
@@ -329,6 +373,15 @@ export default function RecargasAutomaticasPage() {
   const [promotionForm, setPromotionForm] = useState<PromotionFormState>(() => buildDefaultPromotionForm());
   const [editingPromotionId, setEditingPromotionId] = useState<string | null>(null);
   const [savingPromotion, setSavingPromotion] = useState(false);
+
+  async function getAccessToken() {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) throw new Error("No tienes una sesión activa de administrador.");
+    return session.access_token;
+  }
 
   const loadData = useCallback(async (showLoader = false) => {
     if (showLoader) setLoading(true);
@@ -407,39 +460,21 @@ export default function RecargasAutomaticasPage() {
     return () => window.clearTimeout(timer);
   }, [banner]);
 
-  const openAlertsCount = useMemo(
-    () => alerts.filter((alert) => normalizeStatus(alert.status) === "OPEN").length,
-    [alerts]
-  );
-
-  const pendingCount = useMemo(
-    () => topups.filter((topup) => normalizeStatus(topup.status) === "PENDING").length,
-    [topups]
-  );
-
-  const approvedCount = useMemo(
-    () => topups.filter((topup) => normalizeStatus(topup.status) === "APPROVED").length,
-    [topups]
-  );
-
-  const activePromotionsCount = useMemo(
-    () => promotions.filter((promotion) => promotionRuntimeStatus(promotion).label === "Activa").length,
-    [promotions]
-  );
-
   const availableBankPayments = useMemo(
     () => bankPayments.filter((payment) => !payment.is_used),
     [bankPayments]
   );
 
-  const availableBankPaymentsCount = availableBankPayments.length;
+  const availableBankPaymentsInScope = useMemo(() => {
+    return availableBankPayments.filter((payment) =>
+      isWithinDateRange(payment.paid_at || payment.created_at, dateFrom, dateTo)
+    );
+  }, [availableBankPayments, dateFrom, dateTo]);
 
-  const filteredTopups = useMemo(() => {
+  const topupsInScope = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
 
     return topups.filter((topup) => {
-      const status = normalizeStatus(topup.status);
-      const statusMatch = statusFilter === "ALL" || status === statusFilter;
       const termMatch =
         !term ||
         topup.email.toLowerCase().includes(term) ||
@@ -448,14 +483,51 @@ export default function RecargasAutomaticasPage() {
         (topup.payer_origin || "").toLowerCase().includes(term) ||
         (topup.matched_bank_reference || "").toLowerCase().includes(term);
 
-      return statusMatch && termMatch;
+      return termMatch && isWithinDateRange(getTopupDateForFilter(topup), dateFrom, dateTo);
     });
-  }, [topups, searchTerm, statusFilter]);
+  }, [topups, searchTerm, dateFrom, dateTo]);
+
+  const alertsInScope = useMemo(() => {
+    return alerts.filter((alert) =>
+      isWithinDateRange(alert.executed_at || alert.requested_at || alert.created_at, dateFrom, dateTo)
+    );
+  }, [alerts, dateFrom, dateTo]);
+
+  const openAlertsCount = useMemo(
+    () => alertsInScope.filter((alert) => normalizeStatus(alert.status) === "OPEN").length,
+    [alertsInScope]
+  );
+
+  const pendingCount = useMemo(
+    () => topupsInScope.filter((topup) => normalizeStatus(topup.status) === "PENDING").length,
+    [topupsInScope]
+  );
+
+  const approvedTopupsInScope = useMemo(
+    () => topupsInScope.filter((topup) => normalizeStatus(topup.status) === "APPROVED"),
+    [topupsInScope]
+  );
+
+  const approvedCount = approvedTopupsInScope.length;
+
+  const totalRechargedAmount = useMemo(
+    () => sumMoney(approvedTopupsInScope, (topup) => Number(topup.amount || 0)),
+    [approvedTopupsInScope]
+  );
+
+  const availableBankPaymentsCount = availableBankPaymentsInScope.length;
+
+  const filteredTopups = useMemo(() => {
+    return topupsInScope.filter((topup) => {
+      const status = normalizeStatus(topup.status);
+      return statusFilter === "ALL" || status === statusFilter;
+    });
+  }, [topupsInScope, statusFilter]);
 
   const filteredAlerts = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
 
-    return alerts.filter((alert) => {
+    return alertsInScope.filter((alert) => {
       return (
         !term ||
         (alert.customer_email || "").toLowerCase().includes(term) ||
@@ -464,12 +536,12 @@ export default function RecargasAutomaticasPage() {
         (alert.reason || "").toLowerCase().includes(term)
       );
     });
-  }, [alerts, searchTerm]);
+  }, [alertsInScope, searchTerm]);
 
   const filteredBankPayments = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
 
-    return availableBankPayments.filter((payment) => {
+    return availableBankPaymentsInScope.filter((payment) => {
       return (
         !term ||
         (payment.payer_origin || "").toLowerCase().includes(term) ||
@@ -478,7 +550,7 @@ export default function RecargasAutomaticasPage() {
         (payment.subject || "").toLowerCase().includes(term)
       );
     });
-  }, [availableBankPayments, searchTerm]);
+  }, [availableBankPaymentsInScope, searchTerm]);
 
   const activeLength =
     mainTab === "HISTORIAL"
@@ -523,13 +595,25 @@ export default function RecargasAutomaticasPage() {
     topRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  async function getAccessToken() {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+  function setTodayFilter() {
+    const today = toDateInputValue(new Date());
+    setDateFrom(today);
+    setDateTo(today);
+    setPage(1);
+  }
 
-    if (!session?.access_token) throw new Error("No tienes una sesión activa de administrador.");
-    return session.access_token;
+  function setCurrentMonthFilter() {
+    const now = new Date();
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+    setDateFrom(toDateInputValue(firstDay));
+    setDateTo(toDateInputValue(now));
+    setPage(1);
+  }
+
+  function clearDateFilter() {
+    setDateFrom("");
+    setDateTo("");
+    setPage(1);
   }
 
   async function postAdminAction(url: string, body: Record<string, unknown>) {
@@ -774,86 +858,139 @@ export default function RecargasAutomaticasPage() {
         </div>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">En proceso</p>
-          <p className="mt-2 text-3xl font-extrabold text-amber-600">{pendingCount}</p>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">En proceso</p>
+          <p className="mt-2 text-2xl font-extrabold leading-none text-amber-600">{pendingCount}</p>
         </div>
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Aprobadas</p>
-          <p className="mt-2 text-3xl font-extrabold text-emerald-600">{approvedCount}</p>
+
+        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Aprobadas</p>
+          <p className="mt-2 text-2xl font-extrabold leading-none text-emerald-600">{approvedCount}</p>
         </div>
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Promos activas</p>
-          <p className="mt-2 text-3xl font-extrabold text-violet-600">{activePromotionsCount}</p>
+
+        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Total recargado</p>
+          <p className="mt-2 whitespace-nowrap text-2xl font-extrabold leading-none text-slate-900">
+            {formatMoney(totalRechargedAmount)}
+          </p>
         </div>
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Alertas abiertas</p>
-          <p className="mt-2 text-3xl font-extrabold text-rose-600">{openAlertsCount}</p>
+
+        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Alertas abiertas</p>
+          <p className="mt-2 text-2xl font-extrabold leading-none text-rose-600">{openAlertsCount}</p>
         </div>
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Pagos disponibles</p>
-          <p className="mt-2 text-3xl font-extrabold text-blue-600">{availableBankPaymentsCount}</p>
+
+        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Pagos disponibles</p>
+          <p className="mt-2 text-2xl font-extrabold leading-none text-blue-600">{availableBankPaymentsCount}</p>
         </div>
       </div>
 
       <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-2xl font-extrabold text-slate-900">Control Bre-B / Llaves</h2>
+
+          <button
+            type="button"
+            onClick={() => void loadData(true)}
+            className="inline-flex h-11 items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+          >
+            Actualizar
+          </button>
+        </div>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(260px,1.5fr)_180px_150px_150px_auto] xl:items-end">
           <div>
-            <h2 className="text-2xl font-extrabold text-slate-900">Control Bre-B / Llaves</h2>
-            <p className="mt-2 text-sm text-slate-500">
-              Las recargas manuales quedan fuera de este panel y se manejan únicamente desde Wallet.
-            </p>
+            <label className="mb-2 block text-sm font-semibold text-slate-700">Buscar</label>
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(event) => {
+                setSearchTerm(event.target.value);
+                setPage(1);
+              }}
+              placeholder="correo, nombre, referencia..."
+              className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white"
+            />
           </div>
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          {mainTab === "HISTORIAL" ? (
             <div>
-              <label className="mb-2 block text-sm font-semibold text-slate-700">Buscar</label>
-              <input
-                type="text"
-                value={searchTerm}
+              <label className="mb-2 block text-sm font-semibold text-slate-700">Estado</label>
+              <select
+                value={statusFilter}
                 onChange={(event) => {
-                  setSearchTerm(event.target.value);
+                  setStatusFilter(event.target.value);
                   setPage(1);
                 }}
-                placeholder="correo, nombre, referencia..."
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white sm:w-72"
-              />
+                className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm font-semibold text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white"
+              >
+                <option value="ALL">Todos</option>
+                <option value="PENDING">En proceso</option>
+                <option value="APPROVED">Aprobadas</option>
+                <option value="REJECTED">Declinadas</option>
+                <option value="EXPIRED">Expiradas</option>
+              </select>
             </div>
+          ) : (
+            <div className="hidden xl:block" />
+          )}
 
-            {mainTab === "HISTORIAL" && (
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-slate-700">Estado</label>
-                <select
-                  value={statusFilter}
-                  onChange={(event) => {
-                    setStatusFilter(event.target.value);
-                    setPage(1);
-                  }}
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white sm:w-48"
-                >
-                  <option value="ALL">Todos</option>
-                  <option value="PENDING">En proceso</option>
-                  <option value="APPROVED">Aprobadas</option>
-                  <option value="REJECTED">Declinadas</option>
-                  <option value="EXPIRED">Expiradas</option>
-                </select>
-              </div>
-            )}
+          <div>
+            <label className="mb-2 block text-sm font-semibold text-slate-700">Desde</label>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(event) => {
+                setDateFrom(event.target.value);
+                setPage(1);
+              }}
+              className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-slate-400 focus:bg-white"
+            />
+          </div>
 
+          <div>
+            <label className="mb-2 block text-sm font-semibold text-slate-700">Hasta</label>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(event) => {
+                setDateTo(event.target.value);
+                setPage(1);
+              }}
+              className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-slate-400 focus:bg-white"
+            />
+          </div>
+
+          <div className="flex flex-wrap gap-2 md:col-span-2 xl:col-span-1 xl:flex-nowrap xl:justify-end">
             <button
               type="button"
-              onClick={() => void loadData(true)}
-              className="inline-flex items-center justify-center rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              onClick={setTodayFilter}
+              className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
             >
-              Actualizar
+              Hoy
+            </button>
+            <button
+              type="button"
+              onClick={setCurrentMonthFilter}
+              className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
+              Mes
+            </button>
+            <button
+              type="button"
+              onClick={clearDateFilter}
+              className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
+              Limpiar
             </button>
           </div>
         </div>
 
-        <div className="mt-6 flex flex-wrap gap-2">
+        <div className="mt-5 flex flex-wrap gap-2 border-t border-slate-100 pt-5">
           {[
-            { key: "HISTORIAL", label: `Historial (${topups.length})` },
+            { key: "HISTORIAL", label: `Historial (${filteredTopups.length})` },
             { key: "ALERTAS", label: `Alertas (${openAlertsCount})` },
             { key: "BANCO", label: `Pagos del banco (${availableBankPaymentsCount})` },
           ].map((tab) => (

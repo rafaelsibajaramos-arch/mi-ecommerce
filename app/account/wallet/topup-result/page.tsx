@@ -35,8 +35,10 @@ function WalletTopupResultContent() {
   const searchParams = useSearchParams();
   const reference = searchParams.get("reference") || "";
 
-  const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState("Validando tu recarga...");
+  const [loading, setLoading] = useState(Boolean(reference));
+  const [message, setMessage] = useState(
+    reference ? "Validando recarga..." : "No encontramos la referencia de la recarga."
+  );
   const [topup, setTopup] = useState<TopupRow | null>(null);
 
   useEffect(() => {
@@ -73,33 +75,33 @@ function WalletTopupResultContent() {
         const normalizedStatus = normalizeStatus(currentTopup?.status);
 
         if (normalizedStatus === "APPROVED") {
-          setMessage("Tu recarga fue aprobada y ya quedó abonada en tu billetera.");
+          setMessage("Saldo acreditado correctamente.");
           setLoading(false);
           if (intervalId) window.clearInterval(intervalId);
           return;
         }
 
-        if (normalizedStatus === "REJECTED" || normalizedStatus === "DECLINED" || normalizedStatus === "ERROR") {
+        if (
+          normalizedStatus === "REJECTED" ||
+          normalizedStatus === "DECLINED" ||
+          normalizedStatus === "ERROR"
+        ) {
           setMessage(currentTopup?.error_message || "La recarga no fue aprobada.");
           setLoading(false);
           if (intervalId) window.clearInterval(intervalId);
           return;
         }
 
-        setMessage("Tu reporte quedó pendiente. Seguimos cruzando contra el correo oficial de Bre-B / Llaves; si el correo llega tarde, se aprobará automáticamente o por revisión manual.");
+        setMessage("Pendiente de validación.");
         setLoading(false);
       } catch (error) {
         if (cancelled) return;
-        setMessage(error instanceof Error ? error.message : "Ocurrió un error validando la recarga.");
+        setMessage(error instanceof Error ? error.message : "No se pudo validar la recarga.");
         setLoading(false);
       }
     };
 
-    if (!reference) {
-      setMessage("No encontramos la referencia de la recarga.");
-      setLoading(false);
-      return;
-    }
+    if (!reference) return;
 
     void syncStatus();
     intervalId = window.setInterval(() => void syncStatus(), 5000);
@@ -111,69 +113,85 @@ function WalletTopupResultContent() {
   }, [reference, router]);
 
   const status = useMemo(() => normalizeStatus(topup?.status), [topup?.status]);
-  const badgeClass =
-    status === "APPROVED"
-      ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-300"
-      : status === "REJECTED" || status === "DECLINED" || status === "ERROR"
-      ? "border-red-400/20 bg-red-400/10 text-red-300"
-      : "border-amber-400/20 bg-amber-400/10 text-amber-300";
+  const isApproved = status === "APPROVED";
+  const isRejected = status === "REJECTED" || status === "DECLINED" || status === "ERROR";
+
+  const statusLabel = isApproved ? "Aprobada" : isRejected ? "No aprobada" : "Pendiente";
+  const title = isApproved ? "Recarga aprobada" : isRejected ? "Recarga no aprobada" : "Recarga pendiente";
+
+  const badgeClass = isApproved
+    ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-300"
+    : isRejected
+    ? "border-red-400/20 bg-red-400/10 text-red-300"
+    : "border-amber-400/20 bg-amber-400/10 text-amber-300";
 
   return (
-    <main className="min-h-screen bg-transparent px-6 py-10 text-white">
-      <section className="mx-auto max-w-3xl">
-        <div className="rounded-[28px] border border-white/10 bg-slate-800/80 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-md md:p-8">
-          <p className="text-sm uppercase tracking-[0.2em] text-white/45">Wallet</p>
-          <h1 className="mt-2 text-3xl font-extrabold md:text-4xl">Estado de tu recarga</h1>
-          <p className="mt-3 text-white/65">{message}</p>
+    <main className="bg-transparent px-4 py-4 text-white sm:px-6 sm:py-7">
+      <section className="mx-auto max-w-xl">
+        <div className="rounded-[24px] border border-white/10 bg-slate-800/90 p-4 shadow-[0_16px_45px_rgba(0,0,0,0.32)] backdrop-blur-md sm:p-6">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h1 className="text-2xl font-extrabold leading-tight sm:text-3xl">{title}</h1>
+              {(loading || isRejected || !topup) && (
+                <p className={`mt-1.5 text-sm ${isRejected ? "text-red-300" : "text-white/55"}`}>
+                  {loading ? "Consultando estado..." : message}
+                </p>
+              )}
+            </div>
 
-          <div className="mt-6 flex flex-wrap items-center gap-3">
-            <span className={`rounded-full px-4 py-2 text-sm font-semibold ${badgeClass}`}>
-              {status === "APPROVED" ? "Aprobada" : status === "REJECTED" || status === "DECLINED" || status === "ERROR" ? "No aprobada" : "Pendiente"}
+            <span className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold ${badgeClass}`}>
+              {statusLabel}
             </span>
-            <span className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white/75">
-              Transferencia bancaria
-            </span>
           </div>
 
-          <div className="mt-8 grid gap-4 md:grid-cols-2">
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-              <p className="text-xs uppercase tracking-[0.18em] text-white/35">Referencia</p>
-              <p className="mt-2 break-all text-sm font-semibold text-white/90">{reference || "Sin referencia"}</p>
-            </div>
-            <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-5">
-              <p className="text-xs uppercase tracking-[0.18em] text-emerald-300/70">Saldo a acreditar</p>
-              <p className="mt-2 text-2xl font-black text-emerald-300">{formatMoney(topup?.amount)}</p>
-            </div>
+          <div className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3.5">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-300/70">
+              Saldo a acreditar
+            </p>
+            <p className="mt-1 text-3xl font-black leading-none text-emerald-300">
+              {formatMoney(topup?.amount)}
+            </p>
           </div>
 
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-              <p className="text-xs uppercase tracking-[0.18em] text-white/35">Origen reportado</p>
-              <p className="mt-2 text-xl font-black text-white">{topup?.payer_origin || "-"}</p>
+          <div className="mt-3 divide-y divide-white/10 overflow-hidden rounded-2xl border border-white/10 bg-white/5">
+            <div className="px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/35">Origen</p>
+              <p className="mt-1 truncate text-base font-bold text-white">{topup?.payer_origin || "-"}</p>
             </div>
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-              <p className="text-xs uppercase tracking-[0.18em] text-white/35">Cuenta destino</p>
-              <p className="mt-2 text-sm font-semibold text-white/85">{topup?.destination_account || "-"}</p>
+
+            <div className="px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/35">Referencia</p>
+              <p className="mt-1 break-all text-xs font-semibold leading-5 text-white/85">
+                {reference || "Sin referencia"}
+              </p>
             </div>
+
+            {topup?.matched_bank_reference && (
+              <div className="px-4 py-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-300/60">
+                  Referencia bancaria
+                </p>
+                <p className="mt-1 break-all text-xs font-semibold leading-5 text-emerald-100">
+                  {topup.matched_bank_reference}
+                </p>
+              </div>
+            )}
           </div>
 
-          {topup?.matched_bank_reference && (
-            <div className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-5">
-              <p className="text-xs uppercase tracking-[0.18em] text-emerald-300/70">Referencia bancaria validada</p>
-              <p className="mt-2 break-all text-sm font-semibold text-emerald-100">{topup.matched_bank_reference}</p>
-            </div>
-          )}
-
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <Link href="/account/wallet" className="inline-flex items-center justify-center rounded-2xl bg-[#050816] px-5 py-3 text-sm font-semibold text-white transition hover:opacity-95">
-              Volver a mi billetera
+          <div className="mt-4 grid grid-cols-2 gap-2.5">
+            <Link
+              href="/account/wallet"
+              className="inline-flex min-h-11 items-center justify-center rounded-xl bg-[#050816] px-3 py-2.5 text-center text-sm font-semibold text-white transition hover:opacity-95"
+            >
+              Mi billetera
             </Link>
-            <Link href="/recargas-automaticas" className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-white/80 transition hover:bg-white/10">
-              Reportar otra recarga
+            <Link
+              href="/recargas-automaticas"
+              className="inline-flex min-h-11 items-center justify-center rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-center text-sm font-semibold text-white/85 transition hover:bg-white/10"
+            >
+              Nueva recarga
             </Link>
           </div>
-
-          {loading && <p className="mt-4 text-sm text-white/45">Estamos consultando el estado más reciente...</p>}
         </div>
       </section>
     </main>
@@ -182,12 +200,11 @@ function WalletTopupResultContent() {
 
 function WalletTopupResultFallback() {
   return (
-    <main className="min-h-screen bg-transparent px-6 py-10 text-white">
-      <section className="mx-auto max-w-3xl">
-        <div className="rounded-[28px] border border-white/10 bg-slate-800/80 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-md md:p-8">
-          <p className="text-sm uppercase tracking-[0.2em] text-white/45">Wallet</p>
-          <h1 className="mt-2 text-3xl font-extrabold md:text-4xl">Estado de tu recarga</h1>
-          <p className="mt-3 text-white/65">Cargando información de la recarga...</p>
+    <main className="bg-transparent px-4 py-4 text-white sm:px-6 sm:py-7">
+      <section className="mx-auto max-w-xl">
+        <div className="rounded-[24px] border border-white/10 bg-slate-800/90 p-4 shadow-[0_16px_45px_rgba(0,0,0,0.32)] backdrop-blur-md sm:p-6">
+          <h1 className="text-2xl font-extrabold">Estado de tu recarga</h1>
+          <p className="mt-2 text-sm text-white/55">Consultando estado...</p>
         </div>
       </section>
     </main>
