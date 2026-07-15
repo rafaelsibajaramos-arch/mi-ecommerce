@@ -15,6 +15,8 @@ type Product = {
   is_active: boolean;
   created_at?: string;
   sort_order?: number | null;
+  product_type?: "simple" | "variable" | "composite";
+  combo_stock?: number | null;
 };
 
 export default function AdminProductsPage() {
@@ -281,6 +283,30 @@ export default function AdminProductsPage() {
   const normalizedSearch = searchTerm.trim().toLowerCase();
   const canManuallyOrder = !normalizedSearch && !onlyOutOfStock;
 
+  const isProductOutOfStock = (product: Product) => {
+    if (product.product_type === "composite") {
+      if (product.combo_stock === null || product.combo_stock === undefined) {
+        return false;
+      }
+
+      return Number(product.combo_stock || 0) <= 0;
+    }
+
+    return Number(product.stock || 0) <= 0;
+  };
+
+  const getStockLabel = (product: Product) => {
+    if (product.product_type !== "composite") {
+      return String(product.stock ?? 0);
+    }
+
+    if (product.combo_stock === null || product.combo_stock === undefined) {
+      return "Según componentes";
+    }
+
+    return `${Math.max(0, Number(product.combo_stock || 0))} disponibles`;
+  };
+
   const filteredProducts = products.filter((product) => {
     const matchesSearch =
       !normalizedSearch ||
@@ -288,7 +314,7 @@ export default function AdminProductsPage() {
       (product.description || "").toLowerCase().includes(normalizedSearch) ||
       (product.category || "").toLowerCase().includes(normalizedSearch);
 
-    const matchesStock = !onlyOutOfStock || (product.stock ?? 0) <= 0;
+    const matchesStock = !onlyOutOfStock || isProductOutOfStock(product);
 
     return matchesSearch && matchesStock;
   });
@@ -349,7 +375,7 @@ export default function AdminProductsPage() {
             Sin stock
           </p>
           <p className="mt-2 text-2xl font-extrabold text-rose-600">
-            {products.filter((product) => (product.stock ?? 0) <= 0).length}
+            {products.filter(isProductOutOfStock).length}
           </p>
         </div>
       </div>
@@ -509,7 +535,7 @@ export default function AdminProductsPage() {
                           Stock
                         </p>
                         <p className="mt-1 font-medium text-slate-700">
-                          {product.stock ?? 0}
+                          {getStockLabel(product)}
                         </p>
                       </div>
 
@@ -654,7 +680,9 @@ export default function AdminProductsPage() {
                           {formatPrice(product.price)}
                         </td>
 
-                        <td className="px-5 py-4">{product.stock ?? 0}</td>
+                        <td className="px-5 py-4">
+                          {getStockLabel(product)}
+                        </td>
 
                         <td className="px-5 py-4">
                           <span

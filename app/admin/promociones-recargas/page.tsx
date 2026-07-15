@@ -1,8 +1,24 @@
 "use client";
 
-import type { FormEvent } from "react";
+import type { FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  CalendarClock,
+  Edit3,
+  Pause,
+  Play,
+  Plus,
+  RefreshCw,
+  Save,
+  Search,
+  Trash2,
+} from "lucide-react";
 import { supabase } from "../../../lib/supabase";
+import {
+  getPromotionRuntimeStatus,
+  normalizePromotionScheduleType,
+  type TopupPromotionRow,
+} from "../../../lib/topupPromotions";
 
 type PromotionRow = {
   id: string;
@@ -13,6 +29,12 @@ type PromotionRow = {
   bonus_value: number | null;
   starts_at: string | null;
   ends_at: string | null;
+  schedule_type: string | null;
+  weekdays: number[] | null;
+  daily_start_time: string | null;
+  daily_end_time: string | null;
+  schedule_timezone: string | null;
+  deleted_at: string | null;
   created_at: string | null;
   updated_at: string | null;
   used_count?: number | null;
@@ -36,8 +58,14 @@ type PromotionFormState = {
   minAmount: string;
   bonusType: "PERCENTAGE" | "FIXED";
   bonusValue: string;
+  scheduleType: "ONE_TIME" | "WEEKLY";
   startsAt: string;
   endsAt: string;
+  startDate: string;
+  endDate: string;
+  weekdays: number[];
+  dailyStartTime: string;
+  dailyEndTime: string;
   status: "ACTIVE" | "PAUSED";
 };
 
@@ -50,32 +78,59 @@ type PromotionsResponse = {
   error?: string;
 };
 
+const WEEKDAYS = [
+  { value: 1, short: "Lun", long: "lunes" },
+  { value: 2, short: "Mar", long: "martes" },
+  { value: 3, short: "Mié", long: "miércoles" },
+  { value: 4, short: "Jue", long: "jueves" },
+  { value: 5, short: "Vie", long: "viernes" },
+  { value: 6, short: "Sáb", long: "sábado" },
+  { value: 0, short: "Dom", long: "domingo" },
+];
+
 function formatMoney(value: number | null | undefined) {
   return `$ ${Number(Math.abs(Number(value || 0))).toLocaleString("es-CO")}`;
 }
 
-function formatDate(value: string | null | undefined) {
-  if (!value) return "Sin fecha";
+function formatDate(value: string | null | undefined, withTime = true) {
+  if (!value) return "Sin límite";
 
   try {
     return new Date(value).toLocaleString("es-CO", {
+      timeZone: "America/Bogota",
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
-      hour: "numeric",
-      minute: "2-digit",
+      ...(withTime ? { hour: "numeric", minute: "2-digit" } : {}),
     });
   } catch {
     return "Sin fecha";
   }
 }
 
-function toLocalDateTimeInput(value: string | null | undefined) {
+function datePartsInBogota(value: string | Date | null | undefined) {
   const date = value ? new Date(value) : new Date();
-  if (!Number.isFinite(date.getTime())) return "";
+  if (!Number.isFinite(date.getTime())) return { date: "", dateTime: "" };
 
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 16);
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Bogota",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+
+  const parts = Object.fromEntries(formatter.formatToParts(date).map((part) => [part.type, part.value]));
+  const dateText = `${parts.year}-${parts.month}-${parts.day}`;
+  return { date: dateText, dateTime: `${dateText}T${parts.hour}:${parts.minute}` };
+}
+
+function toBogotaBoundaryIso(value: string, endOfDay: boolean) {
+  const date = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  return new Date(`${date}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}-05:00`).toISOString();
 }
 
 function dateTimeInputToIso(value: string) {
@@ -91,52 +146,66 @@ function normalizeStatus(status: string | null | undefined) {
   return String(status || "ACTIVE").trim().toUpperCase();
 }
 
+function normalizeTimeInput(value: string | null | undefined, fallback: string) {
+  const match = String(value || "").match(/^(\d{2}):(\d{2})/);
+  return match ? `${match[1]}:${match[2]}` : fallback;
+}
+
 function buildDefaultPromotionForm(): PromotionFormState {
+  const today = datePartsInBogota(new Date());
+
   return {
     name: "Aumento de recarga 10%",
     minAmount: "30000",
     bonusType: "PERCENTAGE",
     bonusValue: "10",
-    startsAt: toLocalDateTimeInput(new Date().toISOString()),
+    scheduleType: "ONE_TIME",
+    startsAt: today.dateTime,
     endsAt: "",
+    startDate: today.date,
+    endDate: "",
+    weekdays: [6],
+    dailyStartTime: "00:00",
+    dailyEndTime: "23:59",
     status: "ACTIVE",
   };
 }
 
 function promotionRuntimeStatus(promotion: PromotionRow) {
-  const status = normalizeStatus(promotion.status);
-  const now = Date.now();
-  const startsAt = promotion.starts_at ? new Date(promotion.starts_at).getTime() : 0;
-  const endsAt = promotion.ends_at ? new Date(promotion.ends_at).getTime() : null;
+  const runtime = getPromotionRuntimeStatus(promotion as unknown as TopupPromotionRow);
 
-  if (status === "PAUSED") {
+  if (runtime === "PAUSED") {
     return {
+      key: runtime,
       label: "Pausada",
-      shortLabel: "Pausada",
-      cls: "border border-slate-200 bg-slate-50 text-slate-600",
+      filterLabel: "PAUSADA",
+      cls: "border-slate-200 bg-slate-100 text-slate-700",
     };
   }
 
-  if (Number.isFinite(startsAt) && startsAt > now) {
+  if (runtime === "SCHEDULED") {
     return {
-      label: "Programada",
-      shortLabel: "Programada",
-      cls: "border border-blue-200 bg-blue-50 text-blue-700",
+      key: runtime,
+      label: normalizePromotionScheduleType(promotion.schedule_type) === "WEEKLY" ? "En espera del horario" : "Programada",
+      filterLabel: "PROGRAMADA",
+      cls: "border-blue-200 bg-blue-50 text-blue-700",
     };
   }
 
-  if (endsAt && Number.isFinite(endsAt) && endsAt < now) {
+  if (runtime === "EXPIRED") {
     return {
+      key: runtime,
       label: "Vencida",
-      shortLabel: "Vencida",
-      cls: "border border-zinc-200 bg-zinc-50 text-zinc-600",
+      filterLabel: "VENCIDA",
+      cls: "border-zinc-200 bg-zinc-50 text-zinc-600",
     };
   }
 
   return {
+    key: runtime,
     label: "Activa ahora",
-    shortLabel: "Activa",
-    cls: "border border-emerald-200 bg-emerald-50 text-emerald-700",
+    filterLabel: "ACTIVA",
+    cls: "border-emerald-200 bg-emerald-50 text-emerald-700",
   };
 }
 
@@ -154,6 +223,60 @@ function calculateBonus(amount: number, bonusType: "PERCENTAGE" | "FIXED", bonus
   return Math.round(amount * (bonusValue / 100));
 }
 
+function weekdayText(days: number[] | null | undefined) {
+  const normalized = Array.isArray(days) ? days : [];
+  if (normalized.length === 7) return "Todos los días";
+  if (normalized.length === 0) return "Sin días seleccionados";
+
+  return WEEKDAYS.filter((day) => normalized.includes(day.value))
+    .map((day) => day.long)
+    .join(", ");
+}
+
+function scheduleLabel(promotion: PromotionRow) {
+  if (normalizePromotionScheduleType(promotion.schedule_type) !== "WEEKLY") {
+    return `Una sola vigencia · ${formatDate(promotion.starts_at)} a ${formatDate(promotion.ends_at)}`;
+  }
+
+  return `Cada ${weekdayText(promotion.weekdays)} · ${normalizeTimeInput(promotion.daily_start_time, "00:00")} a ${normalizeTimeInput(
+    promotion.daily_end_time,
+    "23:59"
+  )}`;
+}
+
+function Panel({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return <section className={`rounded-[28px] border border-slate-200 bg-white shadow-sm ${className}`}>{children}</section>;
+}
+
+function Label({ children }: { children: ReactNode }) {
+  return <label className="mb-2 block text-sm font-semibold text-slate-700">{children}</label>;
+}
+
+function FieldSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-slate-50/70 p-4 sm:p-5">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">{title}</p>
+      <div className="mt-4 space-y-4">{children}</div>
+    </div>
+  );
+}
+
+function MetricCard({ title, value, tone }: { title: string; value: string | number; tone: "emerald" | "blue" | "violet" | "slate" }) {
+  const toneMap = {
+    emerald: "text-emerald-600",
+    blue: "text-blue-600",
+    violet: "text-violet-600",
+    slate: "text-slate-900",
+  } as const;
+
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{title}</p>
+      <p className={`mt-2 text-2xl font-extrabold sm:text-3xl ${toneMap[tone]}`}>{value}</p>
+    </div>
+  );
+}
+
 export default function PromocionesRecargasPage() {
   const [promotions, setPromotions] = useState<PromotionRow[]>([]);
   const [counts, setCounts] = useState<PromotionCounts>({});
@@ -161,7 +284,7 @@ export default function PromocionesRecargasPage() {
   const [banner, setBanner] = useState<BannerState>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
-  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [workingId, setWorkingId] = useState<string | null>(null);
   const [savingPromotion, setSavingPromotion] = useState(false);
   const [editingPromotionId, setEditingPromotionId] = useState<string | null>(null);
   const [promotionForm, setPromotionForm] = useState<PromotionFormState>(() => buildDefaultPromotionForm());
@@ -214,7 +337,12 @@ export default function PromocionesRecargasPage() {
   }, []);
 
   useEffect(() => {
-    void loadPromotions(true);
+    const initialTimer = window.setTimeout(() => void loadPromotions(true), 0);
+    const interval = window.setInterval(() => void loadPromotions(false), 60_000);
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(interval);
+    };
   }, [loadPromotions]);
 
   useEffect(() => {
@@ -249,25 +377,67 @@ export default function PromocionesRecargasPage() {
     setPromotionForm(buildDefaultPromotionForm());
   }
 
+  function applySaturdayTemplate() {
+    setPromotionForm((current) => ({
+      ...current,
+      name: current.name || "Promoción de sábados",
+      scheduleType: "WEEKLY",
+      weekdays: [6],
+      dailyStartTime: "00:00",
+      dailyEndTime: "23:59",
+      startDate: current.startDate || datePartsInBogota(new Date()).date,
+      endDate: "",
+    }));
+  }
+
   function editPromotion(promotion: PromotionRow) {
+    const scheduleType = normalizePromotionScheduleType(promotion.schedule_type);
+    const startParts = datePartsInBogota(promotion.starts_at);
+    const endParts = promotion.ends_at ? datePartsInBogota(promotion.ends_at) : { date: "", dateTime: "" };
+
     setEditingPromotionId(promotion.id);
     setPromotionForm({
       name: promotion.name || "",
       minAmount: String(Math.round(Number(promotion.min_amount || 0))),
       bonusType: String(promotion.bonus_type || "PERCENTAGE").toUpperCase() === "FIXED" ? "FIXED" : "PERCENTAGE",
       bonusValue: String(Math.round(Number(promotion.bonus_value || 0))),
-      startsAt: toLocalDateTimeInput(promotion.starts_at),
-      endsAt: promotion.ends_at ? toLocalDateTimeInput(promotion.ends_at) : "",
+      scheduleType,
+      startsAt: startParts.dateTime,
+      endsAt: endParts.dateTime,
+      startDate: startParts.date,
+      endDate: endParts.date,
+      weekdays: Array.isArray(promotion.weekdays) && promotion.weekdays.length > 0 ? promotion.weekdays : [6],
+      dailyStartTime: normalizeTimeInput(promotion.daily_start_time, "00:00"),
+      dailyEndTime: normalizeTimeInput(promotion.daily_end_time, "23:59"),
       status: normalizeStatus(promotion.status) === "PAUSED" ? "PAUSED" : "ACTIVE",
     });
 
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  function toggleWeekday(day: number) {
+    setPromotionForm((current) => ({
+      ...current,
+      weekdays: current.weekdays.includes(day)
+        ? current.weekdays.filter((item) => item !== day)
+        : [...current.weekdays, day].sort((left, right) => left - right),
+    }));
+  }
+
   async function savePromotion(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSavingPromotion(true);
     setBanner(null);
+
+    const isWeekly = promotionForm.scheduleType === "WEEKLY";
+    const startsAt = isWeekly
+      ? toBogotaBoundaryIso(promotionForm.startDate, false)
+      : dateTimeInputToIso(promotionForm.startsAt);
+    const endsAt = isWeekly
+      ? promotionForm.endDate
+        ? toBogotaBoundaryIso(promotionForm.endDate, true)
+        : null
+      : dateTimeInputToIso(promotionForm.endsAt);
 
     try {
       await postAdminAction({
@@ -277,12 +447,17 @@ export default function PromocionesRecargasPage() {
         minAmount: Number(promotionForm.minAmount),
         bonusType: promotionForm.bonusType,
         bonusValue: Number(promotionForm.bonusValue),
-        startsAt: dateTimeInputToIso(promotionForm.startsAt),
-        endsAt: dateTimeInputToIso(promotionForm.endsAt),
+        scheduleType: promotionForm.scheduleType,
+        weekdays: isWeekly ? promotionForm.weekdays : [],
+        dailyStartTime: isWeekly ? promotionForm.dailyStartTime : null,
+        dailyEndTime: isWeekly ? promotionForm.dailyEndTime : null,
+        scheduleTimezone: "America/Bogota",
+        startsAt,
+        endsAt,
         status: promotionForm.status,
       });
 
-      setBanner({ kind: "success", text: editingPromotionId ? "Promoción actualizada." : "Promoción creada." });
+      setBanner({ kind: "success", text: editingPromotionId ? "Promoción actualizada correctamente." : "Promoción creada correctamente." });
       resetPromotionForm();
       await loadPromotions(false);
     } catch (error) {
@@ -293,25 +468,41 @@ export default function PromocionesRecargasPage() {
   }
 
   async function togglePromotionStatus(promotion: PromotionRow) {
-    setUpdatingId(promotion.id);
+    setWorkingId(promotion.id);
     setBanner(null);
 
     const currentStatus = normalizeStatus(promotion.status) === "PAUSED" ? "PAUSED" : "ACTIVE";
     const nextStatus = currentStatus === "ACTIVE" ? "PAUSED" : "ACTIVE";
 
     try {
-      await postAdminAction({
-        action: "status",
-        id: promotion.id,
-        status: nextStatus,
-      });
-
+      await postAdminAction({ action: "status", id: promotion.id, status: nextStatus });
       setBanner({ kind: "success", text: nextStatus === "ACTIVE" ? "Promoción activada." : "Promoción pausada." });
       await loadPromotions(false);
     } catch (error) {
       setBanner({ kind: "error", text: error instanceof Error ? error.message : "No se pudo cambiar la promoción." });
     } finally {
-      setUpdatingId(null);
+      setWorkingId(null);
+    }
+  }
+
+  async function deletePromotion(promotion: PromotionRow) {
+    const confirmed = window.confirm(
+      `¿Eliminar la promoción “${promotion.name || "Sin nombre"}”?\n\nDejará de aparecer y no volverá a aplicarse. El historial de bonos entregados se conservará.`
+    );
+    if (!confirmed) return;
+
+    setWorkingId(promotion.id);
+    setBanner(null);
+
+    try {
+      await postAdminAction({ action: "delete", id: promotion.id });
+      if (editingPromotionId === promotion.id) resetPromotionForm();
+      setBanner({ kind: "success", text: "Promoción eliminada correctamente." });
+      await loadPromotions(false);
+    } catch (error) {
+      setBanner({ kind: "error", text: error instanceof Error ? error.message : "No se pudo eliminar la promoción." });
+    } finally {
+      setWorkingId(null);
     }
   }
 
@@ -319,12 +510,13 @@ export default function PromocionesRecargasPage() {
     const term = searchTerm.trim().toLowerCase();
 
     return promotions.filter((promotion) => {
-      const runtime = promotionRuntimeStatus(promotion).shortLabel.toUpperCase();
+      const runtime = promotionRuntimeStatus(promotion).filterLabel;
       const statusMatch = statusFilter === "ALL" || runtime === statusFilter;
       const termMatch =
         !term ||
         (promotion.name || "").toLowerCase().includes(term) ||
-        promotionBonusLabel(promotion).toLowerCase().includes(term);
+        promotionBonusLabel(promotion).toLowerCase().includes(term) ||
+        scheduleLabel(promotion).toLowerCase().includes(term);
 
       return statusMatch && termMatch;
     });
@@ -335,29 +527,40 @@ export default function PromocionesRecargasPage() {
   const previewTotal = previewAmount + previewBonus;
 
   return (
-    <div className="space-y-6">
-      <div className="rounded-[32px] bg-[#050816] px-5 py-6 text-white shadow-sm sm:px-8 sm:py-8">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.26em] text-violet-300">Promociones</p>
-            <h1 className="mt-2 text-3xl font-extrabold sm:text-4xl">Promociones de recarga</h1>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-white/65">
-              Control independiente para programar aumentos automáticos. Cuando una recarga automática hace match,
-              el sistema revisa este módulo y acredita saldo base más bono si cumple las reglas.
-            </p>
+    <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-1 pb-2">
+      <Panel className="p-5 sm:p-6">
+        <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+          <div className="min-w-0">
+            <h1 className="mt-1 text-2xl font-extrabold text-slate-900 sm:text-3xl">Promociones de recarga</h1>
+            
           </div>
 
-          <button
-            type="button"
-            onClick={() => void loadPromotions(true)}
-            className="inline-flex items-center justify-center rounded-2xl bg-white px-5 py-3 text-sm font-bold text-[#050816] transition hover:bg-white/90"
-          >
-            Actualizar
-          </button>
-        </div>
-      </div>
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={applySaturdayTemplate}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm font-semibold text-violet-700 transition hover:bg-violet-100"
+            >
+              <CalendarClock size={16} />
+              Plantilla sábados
+            </button>
 
-      {banner && (
+            {editingPromotionId ? (
+              <button
+                type="button"
+                onClick={resetPromotionForm}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              >
+                <Plus size={16} />
+                Nueva promoción
+              </button>
+            ) : null}
+
+          </div>
+        </div>
+      </Panel>
+
+      {banner ? (
         <div
           className={`rounded-3xl border px-5 py-4 text-sm font-semibold ${
             banner.kind === "success"
@@ -367,163 +570,384 @@ export default function PromocionesRecargasPage() {
         >
           {banner.text}
         </div>
-      )}
+      ) : null}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Activas ahora</p>
-          <p className="mt-2 text-3xl font-extrabold text-emerald-600">{counts.active || 0}</p>
-        </div>
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Programadas</p>
-          <p className="mt-2 text-3xl font-extrabold text-blue-600">{counts.scheduled || 0}</p>
-        </div>
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Usos registrados</p>
-          <p className="mt-2 text-3xl font-extrabold text-violet-600">{counts.totalUsed || 0}</p>
-        </div>
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Bonos entregados</p>
-          <p className="mt-2 text-3xl font-extrabold text-slate-900">{formatMoney(counts.totalBonusAmount || 0)}</p>
-        </div>
+      <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-4">
+        <MetricCard title="Activas ahora" value={counts.active || 0} tone="emerald" />
+        <MetricCard title="Programadas / en espera" value={counts.scheduled || 0} tone="blue" />
+        <MetricCard title="Usos registrados" value={counts.totalUsed || 0} tone="violet" />
+        <MetricCard title="Bonos entregados" value={formatMoney(counts.totalBonusAmount || 0)} tone="slate" />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-        <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-violet-500">
-                {editingPromotionId ? "Editando" : "Nueva regla"}
-              </p>
-              <h2 className="mt-2 text-2xl font-extrabold text-slate-900">Configurar promoción</h2>
-              <p className="mt-2 text-sm text-slate-500">
-                Define monto mínimo, bono y vigencia. Las recargas ya aprobadas no se recalculan.
-              </p>
+      <div className="grid gap-6 2xl:grid-cols-[minmax(0,1.45fr)_420px]">
+        <Panel className="min-w-0 overflow-hidden p-5 sm:p-6">
+          <div className="flex flex-col gap-5 border-b border-slate-100 pb-5">
+            <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Control</p>
+                <h2 className="mt-1 text-xl font-extrabold text-slate-900 sm:text-2xl">Promociones creadas</h2>
+              </div>
+
+              <div className="text-sm text-slate-500">
+                Mostrando <span className="font-bold text-slate-900">{filteredPromotions.length}</span> de <span className="font-bold text-slate-900">{promotions.length}</span>
+              </div>
             </div>
 
-            {editingPromotionId && (
-              <button
-                type="button"
-                onClick={resetPromotionForm}
-                className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_240px]">
+              <div className="relative min-w-0">
+                <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                  placeholder="Buscar por nombre, bono o programación..."
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-3 pl-11 pr-4 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white"
+                />
+              </div>
+
+              <select
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value)}
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white"
               >
-                Nueva promoción
-              </button>
-            )}
+                <option value="ALL">Todos los estados</option>
+                <option value="ACTIVA">Activas ahora</option>
+                <option value="PROGRAMADA">Programadas / en espera</option>
+                <option value="PAUSADA">Pausadas</option>
+                <option value="VENCIDA">Vencidas</option>
+              </select>
+            </div>
+
+            
           </div>
 
-          <form onSubmit={savePromotion} className="mt-6 space-y-4">
-            <div>
-              <label className="mb-2 block text-sm font-semibold text-slate-700">Nombre</label>
-              <input
-                type="text"
-                value={promotionForm.name}
-                onChange={(event) => setPromotionForm((current) => ({ ...current, name: event.target.value }))}
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:bg-white"
-                placeholder="Aumento de recarga 10%"
-              />
-            </div>
+          <div className="mt-5 space-y-4">
+            {loading ? (
+              <div className="rounded-3xl border border-dashed border-slate-200 px-5 py-10 text-center text-sm text-slate-500">
+                Cargando promociones...
+              </div>
+            ) : filteredPromotions.length === 0 ? (
+              <div className="rounded-3xl border border-dashed border-slate-200 px-5 py-10 text-center text-sm text-slate-500">
+                No hay promociones con ese filtro.
+              </div>
+            ) : (
+              filteredPromotions.map((promotion) => {
+                const runtime = promotionRuntimeStatus(promotion);
+                const isPaused = normalizeStatus(promotion.status) === "PAUSED";
+                const isWorking = workingId === promotion.id;
+                const isWeekly = normalizePromotionScheduleType(promotion.schedule_type) === "WEEKLY";
 
-            <div className="grid gap-4 sm:grid-cols-2">
+                return (
+                  <article key={promotion.id} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-slate-300">
+                    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="truncate text-lg font-extrabold text-slate-900">{promotion.name || "Promoción sin nombre"}</h3>
+                          <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold ${runtime.cls}`}>{runtime.label}</span>
+                          <span className="inline-flex rounded-full border border-violet-100 bg-violet-50 px-3 py-1 text-xs font-bold text-violet-700">
+                            {isWeekly ? "Semanal" : "Única"}
+                          </span>
+                        </div>
+
+                        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                          <div className="rounded-2xl bg-slate-50 p-4">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Configuración</p>
+                            <p className="mt-2 text-sm font-bold text-slate-800">Desde {formatMoney(promotion.min_amount)}</p>
+                            <p className="mt-1 text-sm text-slate-600">{promotionBonusLabel(promotion)}</p>
+                          </div>
+
+                          <div className="rounded-2xl bg-slate-50 p-4">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Programación</p>
+                            <p className="mt-2 text-sm font-bold leading-6 text-slate-800">{scheduleLabel(promotion)}</p>
+                            {isWeekly ? (
+                              <p className="mt-1 text-xs text-slate-500">
+                                Vigencia general: {formatDate(promotion.starts_at, false)} a {formatDate(promotion.ends_at, false)}
+                              </p>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+                        <div className="rounded-2xl bg-slate-50 p-4">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Usos</p>
+                          <p className="mt-2 text-xl font-extrabold text-slate-800">{promotion.used_count || 0}</p>
+                        </div>
+                        <div className="rounded-2xl bg-violet-50 p-4">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-violet-400">Bonos</p>
+                          <p className="mt-2 text-sm font-extrabold text-violet-700 break-words">{formatMoney(promotion.total_bonus_amount || 0)}</p>
+                        </div>
+                        <div className="rounded-2xl bg-slate-50 p-4">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Último uso</p>
+                          <p className="mt-2 text-sm font-bold leading-6 text-slate-700">{formatDate(promotion.last_applied_at)}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
+                      <button
+                        type="button"
+                        onClick={() => editPromotion(promotion)}
+                        disabled={isWorking}
+                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+                      >
+                        <Edit3 size={16} />
+                        Editar
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => void togglePromotionStatus(promotion)}
+                        disabled={isWorking}
+                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:bg-violet-100 disabled:opacity-60"
+                      >
+                        {isPaused ? <Play size={16} /> : <Pause size={16} />}
+                        {isWorking ? "Actualizando..." : isPaused ? "Activar" : "Pausar"}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => void deletePromotion(promotion)}
+                        disabled={isWorking}
+                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-60"
+                      >
+                        <Trash2 size={16} />
+                        {isWorking ? "Procesando..." : "Eliminar"}
+                      </button>
+                    </div>
+                  </article>
+                );
+              })
+            )}
+          </div>
+        </Panel>
+
+        <Panel className="p-5 sm:p-6 2xl:sticky 2xl:top-6 2xl:self-start">
+          <div className="border-b border-slate-100 pb-5">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-violet-500">
+              {editingPromotionId ? "Editando promoción" : "Nueva promoción"}
+            </p>
+            <h2 className="mt-1 text-xl font-extrabold text-slate-900 sm:text-2xl">Configurar promoción</h2>
+           
+          </div>
+
+          <form onSubmit={savePromotion} className="mt-5 space-y-5">
+            <FieldSection title="Información básica">
               <div>
-                <label className="mb-2 block text-sm font-semibold text-slate-700">Monto mínimo</label>
+                <Label>Nombre</Label>
                 <input
-                  type="number"
-                  min="0"
-                  step="1000"
-                  value={promotionForm.minAmount}
-                  onChange={(event) => setPromotionForm((current) => ({ ...current, minAmount: event.target.value }))}
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:bg-white"
+                  type="text"
+                  required
+                  value={promotionForm.name}
+                  onChange={(event) => setPromotionForm((current) => ({ ...current, name: event.target.value }))}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300"
                 />
               </div>
 
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-slate-700">Estado</label>
-                <select
-                  value={promotionForm.status}
-                  onChange={(event) =>
-                    setPromotionForm((current) => ({
-                      ...current,
-                      status: event.target.value === "PAUSED" ? "PAUSED" : "ACTIVE",
-                    }))
-                  }
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-violet-300 focus:bg-white"
-                >
-                  <option value="ACTIVE">Activa / programable</option>
-                  <option value="PAUSED">Pausada</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-slate-700">Tipo de bono</label>
-                <select
-                  value={promotionForm.bonusType}
-                  onChange={(event) =>
-                    setPromotionForm((current) => ({
-                      ...current,
-                      bonusType: event.target.value === "FIXED" ? "FIXED" : "PERCENTAGE",
-                    }))
-                  }
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-violet-300 focus:bg-white"
-                >
-                  <option value="PERCENTAGE">Porcentaje</option>
-                  <option value="FIXED">Valor fijo</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-slate-700">
-                  {promotionForm.bonusType === "PERCENTAGE" ? "Porcentaje adicional" : "Valor fijo adicional"}
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  step={promotionForm.bonusType === "PERCENTAGE" ? "1" : "1000"}
-                  value={promotionForm.bonusValue}
-                  onChange={(event) => setPromotionForm((current) => ({ ...current, bonusValue: event.target.value }))}
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:bg-white"
-                />
-              </div>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-slate-700">Inicio</label>
-                <input
-                  type="datetime-local"
-                  value={promotionForm.startsAt}
-                  onChange={(event) => setPromotionForm((current) => ({ ...current, startsAt: event.target.value }))}
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:bg-white"
-                />
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-slate-700">Fin opcional</label>
-                <input
-                  type="datetime-local"
-                  value={promotionForm.endsAt}
-                  onChange={(event) => setPromotionForm((current) => ({ ...current, endsAt: event.target.value }))}
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:bg-white"
-                />
-              </div>
-            </div>
-
-            <div className="rounded-3xl border border-violet-100 bg-violet-50 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-500">Vista previa</p>
-              <div className="mt-3 grid gap-3 text-sm sm:grid-cols-3">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <p className="text-slate-500">Recarga base</p>
-                  <p className="mt-1 font-extrabold text-slate-900">{formatMoney(previewAmount)}</p>
+                  <Label>Recarga mínima</Label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1000"
+                    required
+                    value={promotionForm.minAmount}
+                    onChange={(event) => setPromotionForm((current) => ({ ...current, minAmount: event.target.value }))}
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300"
+                  />
                 </div>
+
                 <div>
-                  <p className="text-slate-500">Bono</p>
-                  <p className="mt-1 font-extrabold text-violet-700">{formatMoney(previewBonus)}</p>
+                  <Label>Estado administrativo</Label>
+                  <select
+                    value={promotionForm.status}
+                    onChange={(event) =>
+                      setPromotionForm((current) => ({ ...current, status: event.target.value === "PAUSED" ? "PAUSED" : "ACTIVE" }))
+                    }
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-violet-300"
+                  >
+                    <option value="ACTIVE">Activa según horario</option>
+                    <option value="PAUSED">Pausada</option>
+                  </select>
                 </div>
+              </div>
+            </FieldSection>
+
+            <FieldSection title="Bono">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <p className="text-slate-500">Total abonado</p>
-                  <p className="mt-1 font-extrabold text-emerald-700">{formatMoney(previewTotal)}</p>
+                  <Label>Tipo de bono</Label>
+                  <select
+                    value={promotionForm.bonusType}
+                    onChange={(event) =>
+                      setPromotionForm((current) => ({
+                        ...current,
+                        bonusType: event.target.value === "FIXED" ? "FIXED" : "PERCENTAGE",
+                      }))
+                    }
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-violet-300"
+                  >
+                    <option value="PERCENTAGE">Porcentaje</option>
+                    <option value="FIXED">Valor fijo</option>
+                  </select>
+                </div>
+
+                <div>
+                  <Label>{promotionForm.bonusType === "PERCENTAGE" ? "Porcentaje adicional" : "Valor fijo adicional"}</Label>
+                  <input
+                    type="number"
+                    min="1"
+                    max={promotionForm.bonusType === "PERCENTAGE" ? "100" : undefined}
+                    step={promotionForm.bonusType === "PERCENTAGE" ? "1" : "1000"}
+                    required
+                    value={promotionForm.bonusValue}
+                    onChange={(event) => setPromotionForm((current) => ({ ...current, bonusValue: event.target.value }))}
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300"
+                  />
+                </div>
+              </div>
+            </FieldSection>
+
+            <FieldSection title="Programación">
+              <div className="grid grid-cols-2 gap-2 rounded-2xl border border-slate-200 bg-white p-1.5">
+                <button
+                  type="button"
+                  onClick={() => setPromotionForm((current) => ({ ...current, scheduleType: "ONE_TIME" }))}
+                  className={`rounded-xl px-3 py-2.5 text-sm font-bold transition ${
+                    promotionForm.scheduleType === "ONE_TIME" ? "bg-slate-900 text-white shadow-sm" : "text-slate-500"
+                  }`}
+                >
+                  Una sola vez
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPromotionForm((current) => ({ ...current, scheduleType: "WEEKLY" }))}
+                  className={`rounded-xl px-3 py-2.5 text-sm font-bold transition ${
+                    promotionForm.scheduleType === "WEEKLY" ? "bg-slate-900 text-white shadow-sm" : "text-slate-500"
+                  }`}
+                >
+                  Repetir semanalmente
+                </button>
+              </div>
+
+              {promotionForm.scheduleType === "ONE_TIME" ? (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <Label>Inicio</Label>
+                    <input
+                      type="datetime-local"
+                      required
+                      value={promotionForm.startsAt}
+                      onChange={(event) => setPromotionForm((current) => ({ ...current, startsAt: event.target.value }))}
+                      className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300"
+                    />
+                  </div>
+
+                  <div>
+                    <Label>Fin opcional</Label>
+                    <input
+                      type="datetime-local"
+                      value={promotionForm.endsAt}
+                      onChange={(event) => setPromotionForm((current) => ({ ...current, endsAt: event.target.value }))}
+                      className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4 rounded-3xl border border-blue-100 bg-blue-50/70 p-4">
+                  <div>
+                    <Label>Días de activación</Label>
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7 2xl:grid-cols-4">
+                      {WEEKDAYS.map((day) => {
+                        const selected = promotionForm.weekdays.includes(day.value);
+                        return (
+                          <button
+                            key={day.value}
+                            type="button"
+                            onClick={() => toggleWeekday(day.value)}
+                            className={`rounded-2xl border px-3 py-2.5 text-sm font-bold transition ${
+                              selected
+                                ? "border-blue-500 bg-blue-600 text-white shadow-sm"
+                                : "border-blue-100 bg-white text-blue-700 hover:bg-blue-50"
+                            }`}
+                          >
+                            {day.short}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <Label>Hora de inicio</Label>
+                      <input
+                        type="time"
+                        required
+                        value={promotionForm.dailyStartTime}
+                        onChange={(event) => setPromotionForm((current) => ({ ...current, dailyStartTime: event.target.value }))}
+                        className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-blue-300"
+                      />
+                    </div>
+
+                    <div>
+                      <Label>Hora de cierre</Label>
+                      <input
+                        type="time"
+                        required
+                        value={promotionForm.dailyEndTime}
+                        onChange={(event) => setPromotionForm((current) => ({ ...current, dailyEndTime: event.target.value }))}
+                        className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-blue-300"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <Label>Empezar el</Label>
+                      <input
+                        type="date"
+                        required
+                        value={promotionForm.startDate}
+                        onChange={(event) => setPromotionForm((current) => ({ ...current, startDate: event.target.value }))}
+                        className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-blue-300"
+                      />
+                    </div>
+
+                    <div>
+                      <Label>Terminar el (opcional)</Label>
+                      <input
+                        type="date"
+                        value={promotionForm.endDate}
+                        onChange={(event) => setPromotionForm((current) => ({ ...current, endDate: event.target.value }))}
+                        className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-blue-300"
+                      />
+                    </div>
+                  </div>
+
+                  <p className="text-xs leading-5 text-blue-700">
+                    Horario de Colombia (America/Bogota). Si no defines fecha final, la promoción seguirá repitiéndose cada semana hasta
+                    que la pauses o la elimines.
+                  </p>
+                </div>
+              )}
+            </FieldSection>
+
+            <div className="rounded-3xl border border-violet-100 bg-violet-50 p-4 sm:p-5">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-violet-500">Vista previa</p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl bg-white/80 p-3">
+                  <p className="text-sm text-slate-500">Recarga base</p>
+                  <p className="mt-1 text-base font-extrabold text-slate-900">{formatMoney(previewAmount)}</p>
+                </div>
+                <div className="rounded-2xl bg-white/80 p-3">
+                  <p className="text-sm text-slate-500">Bono</p>
+                  <p className="mt-1 text-base font-extrabold text-violet-700">{formatMoney(previewBonus)}</p>
+                </div>
+                <div className="rounded-2xl bg-white/80 p-3">
+                  <p className="text-sm text-slate-500">Total abonado</p>
+                  <p className="mt-1 text-base font-extrabold text-emerald-700">{formatMoney(previewTotal)}</p>
                 </div>
               </div>
             </div>
@@ -531,111 +955,13 @@ export default function PromocionesRecargasPage() {
             <button
               type="submit"
               disabled={savingPromotion}
-              className="inline-flex w-full items-center justify-center rounded-2xl bg-slate-900 px-5 py-3 text-sm font-bold text-white transition hover:bg-slate-800 disabled:opacity-60"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-5 py-3 text-sm font-bold text-white transition hover:bg-slate-800 disabled:opacity-60"
             >
+              {savingPromotion ? <RefreshCw className="animate-spin" size={17} /> : editingPromotionId ? <Save size={17} /> : <Plus size={17} />}
               {savingPromotion ? "Guardando..." : editingPromotionId ? "Guardar cambios" : "Crear promoción"}
             </button>
           </form>
-        </div>
-
-        <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Control</p>
-              <h2 className="mt-2 text-2xl font-extrabold text-slate-900">Promociones creadas</h2>
-              <p className="mt-2 text-sm text-slate-500">
-                Pausa, activa o edita sin entrar al historial de recargas automáticas.
-              </p>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
-                placeholder="Buscar promoción..."
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white"
-              />
-              <select
-                value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value)}
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white"
-              >
-                <option value="ALL">Todos los estados</option>
-                <option value="ACTIVA">Activas</option>
-                <option value="PROGRAMADA">Programadas</option>
-                <option value="PAUSADA">Pausadas</option>
-                <option value="VENCIDA">Vencidas</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="mt-5 overflow-hidden rounded-3xl border border-slate-200 bg-white">
-            {loading ? (
-              <div className="px-5 py-8 text-sm text-slate-500">Cargando promociones...</div>
-            ) : filteredPromotions.length === 0 ? (
-              <div className="px-5 py-8 text-sm text-slate-500">No hay promociones con ese filtro.</div>
-            ) : (
-              <div className="divide-y divide-slate-200">
-                {filteredPromotions.map((promotion) => {
-                  const runtime = promotionRuntimeStatus(promotion);
-                  const isPaused = normalizeStatus(promotion.status) === "PAUSED";
-
-                  return (
-                    <div key={promotion.id} className="grid gap-4 p-5 xl:grid-cols-[1.2fr_0.7fr_0.9fr_0.8fr] xl:items-center">
-                      <div>
-                        <p className="text-sm font-extrabold text-slate-900">{promotion.name || "Promoción sin nombre"}</p>
-                        <p className="mt-1 text-xs text-slate-500">
-                          Desde {formatMoney(promotion.min_amount)} · {promotionBonusLabel(promotion)}
-                        </p>
-                        <p className="mt-2 text-xs text-slate-400">
-                          Último uso: {formatDate(promotion.last_applied_at)}
-                        </p>
-                      </div>
-
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Estado</p>
-                        <span className={`mt-2 inline-flex rounded-full px-3 py-1 text-xs font-bold ${runtime.cls}`}>
-                          {runtime.label}
-                        </span>
-                      </div>
-
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Vigencia</p>
-                        <p className="mt-1 text-xs text-slate-600">Inicio: {formatDate(promotion.starts_at)}</p>
-                        <p className="mt-1 text-xs text-slate-600">Fin: {formatDate(promotion.ends_at)}</p>
-                      </div>
-
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Resultado</p>
-                        <p className="mt-1 text-xs font-bold text-slate-700">Usos: {promotion.used_count || 0}</p>
-                        <p className="mt-1 text-xs text-violet-700">Bonos: {formatMoney(promotion.total_bonus_amount || 0)}</p>
-                      </div>
-
-                      <div className="flex flex-wrap gap-2 xl:col-span-4 xl:justify-end">
-                        <button
-                          type="button"
-                          onClick={() => editPromotion(promotion)}
-                          className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-                        >
-                          Editar
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void togglePromotionStatus(promotion)}
-                          disabled={updatingId === promotion.id}
-                          className="inline-flex items-center justify-center rounded-2xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:bg-violet-100 disabled:opacity-60"
-                        >
-                          {updatingId === promotion.id ? "Actualizando..." : isPaused ? "Activar" : "Pausar"}
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
+        </Panel>
       </div>
     </div>
   );

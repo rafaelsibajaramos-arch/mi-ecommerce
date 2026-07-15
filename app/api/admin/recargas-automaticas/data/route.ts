@@ -350,6 +350,7 @@ async function loadPromotions(supabaseAdmin: ReturnType<typeof createSupabaseAdm
   const { data, error } = await supabaseAdmin
     .from("wallet_topup_promotions")
     .select("*")
+    .is("deleted_at", null)
     .order("created_at", { ascending: false })
     .limit(200);
 

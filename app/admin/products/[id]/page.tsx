@@ -34,7 +34,6 @@ type ComponentRow = {
   tempId: string;
   child_product_id: string;
   child_variant_id: string;
-  quantity: string;
   sort_order: number;
 };
 
@@ -438,6 +437,7 @@ export default function EditProductPage() {
   const [description, setDescription] = useState("");
   const [price, setPrice] = useState("");
   const [stock, setStock] = useState("");
+  const [comboStock, setComboStock] = useState("");
   const [category, setCategory] = useState("");
   const [isActive, setIsActive] = useState(true);
   const [productType, setProductType] = useState<ProductType>("simple");
@@ -501,6 +501,11 @@ export default function EditProductPage() {
     setDescription(data.description || "");
     setPrice(String(data.price ?? ""));
     setStock(String(data.stock ?? 0));
+    setComboStock(
+      data.combo_stock === null || data.combo_stock === undefined
+        ? ""
+        : String(data.combo_stock)
+    );
     setCategory(data.category || "");
     setIsActive(Boolean(data.is_active));
     setProductType((data.product_type || "simple") as ProductType);
@@ -561,15 +566,41 @@ export default function EditProductPage() {
       return;
     }
 
+    const uniqueComponents = new Map<string, ProductComponentDbRow>();
+
+    for (const item of (data as ProductComponentDbRow[] | null) || []) {
+      const key = `${item.child_product_id || ""}__${
+        item.child_variant_id || "base"
+      }`;
+      const existing = uniqueComponents.get(key);
+
+      if (!existing) {
+        uniqueComponents.set(key, item);
+        continue;
+      }
+
+      uniqueComponents.set(key, {
+        ...existing,
+        sort_order: Math.min(
+          Number(existing.sort_order ?? Number.MAX_SAFE_INTEGER),
+          Number(item.sort_order ?? Number.MAX_SAFE_INTEGER)
+        ),
+      });
+    }
+
     setComponents(
-      ((data as ProductComponentDbRow[] | null) || []).map((item, index) => ({
-        id: item.id,
-        tempId: item.id || makeTempId(),
-        child_product_id: item.child_product_id || "",
-        child_variant_id: item.child_variant_id || "",
-        quantity: String(item.quantity ?? 1),
-        sort_order: item.sort_order ?? index,
-      }))
+      Array.from(uniqueComponents.values())
+        .sort(
+          (left, right) =>
+            Number(left.sort_order || 0) - Number(right.sort_order || 0)
+        )
+        .map((item, index) => ({
+          id: item.id,
+          tempId: item.id || makeTempId(),
+          child_product_id: item.child_product_id || "",
+          child_variant_id: item.child_variant_id || "",
+          sort_order: item.sort_order ?? index,
+        }))
     );
   };
 
@@ -760,7 +791,6 @@ export default function EditProductPage() {
         tempId: makeTempId(),
         child_product_id: "",
         child_variant_id: "",
-        quantity: "1",
         sort_order: prev.length,
       },
     ]);
@@ -962,6 +992,10 @@ export default function EditProductPage() {
     const cleanSlug = slugify(cleanName);
     const cleanCategory = category.trim();
     const numericPrice = Number(price || 0);
+    const normalizedComboStock = comboStock.trim();
+    const numericComboStock = normalizedComboStock
+      ? Number(normalizedComboStock)
+      : null;
     const effectiveGeneralLicenseRows = buildLicenseRowsFromText(
       newGeneralLicensesInput,
       generalLicenseRows
@@ -1045,11 +1079,22 @@ export default function EditProductPage() {
     }
 
     if (productType === "composite") {
+      if (
+        numericComboStock !== null &&
+        (!Number.isInteger(numericComboStock) || numericComboStock < 0)
+      ) {
+        setMessage("El stock del combo debe ser un número entero igual o mayor que 0.");
+        setSaving(false);
+        return;
+      }
+
       if (components.length < 2) {
         setMessage("Agrega al menos 2 componentes al combo.");
         setSaving(false);
         return;
       }
+
+      const uniqueComponentKeys = new Set<string>();
 
       for (const item of components) {
         if (!item.child_product_id) {
@@ -1058,17 +1103,60 @@ export default function EditProductPage() {
           return;
         }
 
+        const componentKey = `${item.child_product_id}__${
+          item.child_variant_id || "base"
+        }`;
+
+        if (uniqueComponentKeys.has(componentKey)) {
+          setMessage(
+            "No repitas el mismo producto o variante dentro del combo. Cada componente entrega una sola licencia."
+          );
+          setSaving(false);
+          return;
+        }
+
+        uniqueComponentKeys.add(componentKey);
+
         if (item.child_product_id === id) {
           setMessage("Un combo no puede incluirse a sí mismo.");
           setSaving(false);
           return;
         }
 
-        if (Number.isNaN(Number(item.quantity)) || Number(item.quantity) <= 0) {
-          setMessage("La cantidad de cada componente debe ser mayor que 0.");
+        const selectedChildProduct = allProducts.find(
+          (product) => product.id === item.child_product_id
+        );
+
+        if (
+          !selectedChildProduct ||
+          !selectedChildProduct.is_active ||
+          selectedChildProduct.product_type === "composite"
+        ) {
+          setMessage(
+            "Los componentes deben ser productos simples o variables activos."
+          );
           setSaving(false);
           return;
         }
+
+        if (item.child_variant_id) {
+          const selectedChildVariant = allVariants.find(
+            (variant) => variant.id === item.child_variant_id
+          );
+
+          if (
+            !selectedChildVariant ||
+            !selectedChildVariant.is_active ||
+            selectedChildVariant.product_id !== item.child_product_id
+          ) {
+            setMessage(
+              "Una de las variantes seleccionadas no pertenece al producto del componente."
+            );
+            setSaving(false);
+            return;
+          }
+        }
+
       }
     }
 
@@ -1121,6 +1209,8 @@ export default function EditProductPage() {
           default_license_requires_rotation_alert: enableLicenseAlerts,
           default_license_mode: "individual",
           default_max_active_users: 1,
+          combo_stock:
+            productType === "composite" ? numericComboStock : null,
         })
         .eq("id", id);
 
@@ -1249,7 +1339,7 @@ export default function EditProductPage() {
             product_id: id,
             child_product_id: item.child_product_id,
             child_variant_id: item.child_variant_id || null,
-            quantity: Number(item.quantity || 1),
+            quantity: 1,
             sort_order: index,
           }));
 
@@ -1499,8 +1589,16 @@ export default function EditProductPage() {
           </SectionCard>
 
           <SectionCard
-            title="Entrega y licencias"
-            subtitle="Opciones de entrega y carga de licencias generales."
+            title={
+              productType === "composite"
+                ? "Disponibilidad del combo"
+                : "Entrega y licencias"
+            }
+            subtitle={
+              productType === "composite"
+                ? undefined
+                : "Opciones de entrega y carga de licencias generales."
+            }
             defaultOpen={true}
           >
             <div className="space-y-4">
@@ -1514,63 +1612,86 @@ export default function EditProductPage() {
                 <span>Producto activo</span>
               </label>
 
-              <label className="flex items-center gap-3 text-base font-medium text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={avoidRepeatLicense}
-                  onChange={(e) => setAvoidRepeatLicense(e.target.checked)}
-                  className={checkboxClass}
-                />
-                <span>Evitar entregar licencias repetidas al mismo cliente</span>
-              </label>
+              {productType === "composite" ? (
+                <div className="rounded-2xl border border-violet-200 bg-violet-50 p-4 sm:p-5">
+                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.8fr)]">
+                    <div>
+                      <label className="mb-2 block text-sm font-semibold text-slate-700">
+                        Stock disponible del combo
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={comboStock}
+                        onChange={(e) => setComboStock(e.target.value)}
+                        placeholder="Según componentes"
+                        className={inputClass}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <label className="flex items-center gap-3 text-base font-medium text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={avoidRepeatLicense}
+                      onChange={(e) => setAvoidRepeatLicense(e.target.checked)}
+                      className={checkboxClass}
+                    />
+                    <span>Evitar entregar licencias repetidas al mismo cliente</span>
+                  </label>
 
-              <label className="flex items-center gap-3 text-base font-medium text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={usePriorityLicenses}
-                  onChange={(e) => setUsePriorityLicenses(e.target.checked)}
-                  className={checkboxClass}
-                />
-                <span>Usar primero licencias prioritarias</span>
-              </label>
+                  <label className="flex items-center gap-3 text-base font-medium text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={usePriorityLicenses}
+                      onChange={(e) => setUsePriorityLicenses(e.target.checked)}
+                      className={checkboxClass}
+                    />
+                    <span>Usar primero licencias prioritarias</span>
+                  </label>
 
-              <label className="flex items-center gap-3 text-base font-medium text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={enableLicenseAlerts}
-                  onChange={(e) => setEnableLicenseAlerts(e.target.checked)}
-                  className={checkboxClass}
-                />
-                <span>Activar alertas de vencimiento para este producto</span>
-              </label>
+                  <label className="flex items-center gap-3 text-base font-medium text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={enableLicenseAlerts}
+                      onChange={(e) => setEnableLicenseAlerts(e.target.checked)}
+                      className={checkboxClass}
+                    />
+                    <span>Activar alertas de vencimiento para este producto</span>
+                  </label>
 
-              <div className="pt-2">
-                <label className="mb-2 block text-sm font-semibold text-slate-700">
-                  Stock general
-                </label>
-                <input
-                  type="number"
-                  value={stock}
-                  readOnly
-                  className={inputSoftClass}
-                />
-                <p className="mt-2 text-sm text-slate-500">
-                  Licencias detectadas: {generalLicenseRows.length}
-                </p>
-              </div>
+                  <div className="pt-2">
+                    <label className="mb-2 block text-sm font-semibold text-slate-700">
+                      Stock general
+                    </label>
+                    <input
+                      type="number"
+                      value={stock}
+                      readOnly
+                      className={inputSoftClass}
+                    />
+                    <p className="mt-2 text-sm text-slate-500">
+                      Licencias detectadas: {generalLicenseRows.length}
+                    </p>
+                  </div>
 
-              <LicenseRowsEditor
-                title="Licencias generales"
-                subtitle="Cada licencia queda separada y con su propia facturación. Si dejas la facturación vacía, se guardará como 30 días."
-                rows={generalLicenseRows}
-                licensesText={newGeneralLicensesInput}
-                onLicensesTextChange={setNewGeneralLicensesInput}
-                onSyncLicensesFromText={syncGeneralLicensesFromText}
-                onRemoveLicense={removeGeneralLicenseRow}
-                onBillingDaysChange={updateGeneralLicenseBillingDays}
-                inputClassName={inputSoftClass}
-                textareaClassName={inputSoftClass}
-              />
+                  <LicenseRowsEditor
+                    title="Licencias generales"
+                    subtitle="Cada licencia queda separada y con su propia facturación. Si dejas la facturación vacía, se guardará como 30 días."
+                    rows={generalLicenseRows}
+                    licensesText={newGeneralLicensesInput}
+                    onLicensesTextChange={setNewGeneralLicensesInput}
+                    onSyncLicensesFromText={syncGeneralLicensesFromText}
+                    onRemoveLicense={removeGeneralLicenseRow}
+                    onBillingDaysChange={updateGeneralLicenseBillingDays}
+                    inputClassName={inputSoftClass}
+                    textareaClassName={inputSoftClass}
+                  />
+                </>
+              )}
             </div>
           </SectionCard>
 
@@ -1834,11 +1955,17 @@ export default function EditProductPage() {
                             className={inputClass}
                           >
                             <option value="">Selecciona un producto</option>
-                            {allProducts.map((product) => (
-                              <option key={product.id} value={product.id}>
-                                {product.name}
-                              </option>
-                            ))}
+                            {allProducts
+                              .filter(
+                                (product) =>
+                                  product.product_type !== "composite" &&
+                                  product.is_active
+                              )
+                              .map((product) => (
+                                <option key={product.id} value={product.id}>
+                                  {product.name}
+                                </option>
+                              ))}
                           </select>
                         </div>
 
@@ -1872,24 +1999,6 @@ export default function EditProductPage() {
                             </div>
                           )}
 
-                        <div>
-                          <label className="mb-2 block text-sm font-semibold text-slate-700">
-                            Cantidad
-                          </label>
-                          <input
-                            type="number"
-                            min="1"
-                            value={item.quantity}
-                            onChange={(e) =>
-                              updateComponent(
-                                item.tempId,
-                                "quantity",
-                                e.target.value
-                              )
-                            }
-                            className={inputClass}
-                          />
-                        </div>
 
                         <div className="text-sm text-slate-500">
                           {item.child_product_id ? (

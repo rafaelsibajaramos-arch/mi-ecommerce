@@ -71,6 +71,16 @@ type Product = {
   sort_order?: number | null;
   product_type?: ProductType;
   fallback_to_general_licenses?: boolean;
+  combo_stock?: number | null;
+};
+
+type ProductComponent = {
+  id: string;
+  product_id: string;
+  child_product_id: string;
+  child_variant_id: string | null;
+  quantity: number;
+  sort_order?: number | null;
 };
 
 type ProductVariant = {
@@ -531,7 +541,8 @@ export default function HomePage() {
   const buildCatalogItems = useCallback(
     (
       productRows: Product[],
-      groupedVariants: Record<string, ProductVariant[]>
+      groupedVariants: Record<string, ProductVariant[]>,
+      comboStockByProduct: Record<string, number>
     ): CatalogItem[] => {
       return productRows.flatMap<CatalogItem>((product): CatalogItem[] => {
         if (product.product_type !== "variable") {
@@ -543,7 +554,10 @@ export default function HomePage() {
               displayName: product.name,
               displayDescription: product.description,
               displayPrice: Number(product.price || 0),
-              displayStock: Number(product.stock || 0),
+              displayStock:
+                product.product_type === "composite"
+                  ? Number(comboStockByProduct[product.id] || 0)
+                  : Number(product.stock || 0),
               displayImageUrl: product.image_url,
             },
           ];
@@ -754,7 +768,196 @@ export default function HomePage() {
           });
         }
 
-        const expandedItems = buildCatalogItems(safeProducts, groupedVariants);
+        const comboStockByProduct: Record<string, number> = {};
+        const compositeProducts = safeProducts.filter(
+          (product) => product.product_type === "composite"
+        );
+
+        if (compositeProducts.length > 0) {
+          const compositeIds = compositeProducts.map((product) => product.id);
+          const { data: componentsData, error: componentsError } = await supabase
+            .from("product_components")
+            .select(
+              "id, product_id, child_product_id, child_variant_id, quantity, sort_order"
+            )
+            .in("product_id", compositeIds)
+            .order("sort_order", { ascending: true });
+
+          if (componentsError) {
+            throw componentsError;
+          }
+
+          const componentRows =
+            ((componentsData as ProductComponent[]) || []);
+          const childProductIds = Array.from(
+            new Set(
+              componentRows
+                .map((component) => component.child_product_id)
+                .filter(Boolean)
+            )
+          );
+          const childVariantIds = Array.from(
+            new Set(
+              componentRows
+                .map((component) => component.child_variant_id)
+                .filter(Boolean) as string[]
+            )
+          );
+
+          const [childProductsResult, childVariantsResult] = await Promise.all([
+            childProductIds.length
+              ? supabase
+                  .from("products")
+                  .select(
+                    "id, name, stock, is_active, product_type, fallback_to_general_licenses"
+                  )
+                  .in("id", childProductIds)
+              : Promise.resolve({ data: [], error: null }),
+            childVariantIds.length
+              ? supabase
+                  .from("product_variants")
+                  .select("id, product_id, stock, is_active")
+                  .in("id", childVariantIds)
+              : Promise.resolve({ data: [], error: null }),
+          ]);
+
+          if (childProductsResult.error) {
+            throw childProductsResult.error;
+          }
+
+          if (childVariantsResult.error) {
+            throw childVariantsResult.error;
+          }
+
+          const childProductsMap = new Map(
+            (
+              (childProductsResult.data as Array<{
+                id: string;
+                name: string;
+                stock: number | null;
+                is_active: boolean | null;
+                product_type?: ProductType;
+                fallback_to_general_licenses?: boolean | null;
+              }>) || []
+            ).map((product) => [product.id, product])
+          );
+          const childVariantsMap = new Map(
+            (
+              (childVariantsResult.data as Array<{
+                id: string;
+                product_id: string;
+                stock: number | null;
+                is_active: boolean | null;
+              }>) || []
+            ).map((variant) => [variant.id, variant])
+          );
+          const componentsByCombo = new Map<string, ProductComponent[]>();
+
+          for (const component of componentRows) {
+            const current = componentsByCombo.get(component.product_id) || [];
+            current.push(component);
+            componentsByCombo.set(component.product_id, current);
+          }
+
+          for (const combo of compositeProducts) {
+            const comboComponents = componentsByCombo.get(combo.id) || [];
+
+            if (comboComponents.length < 2) {
+              comboStockByProduct[combo.id] = 0;
+              continue;
+            }
+
+            const requirements = new Map<
+              string,
+              {
+                childProductId: string;
+                childVariantId: string | null;
+                quantity: number;
+              }
+            >();
+
+            for (const component of comboComponents) {
+              const key = `${component.child_product_id}__${
+                component.child_variant_id || "base"
+              }`;
+
+              if (!requirements.has(key)) {
+                requirements.set(key, {
+                  childProductId: component.child_product_id,
+                  childVariantId: component.child_variant_id || null,
+                  quantity: 1,
+                });
+              }
+            }
+
+            let componentCapacity = Number.MAX_SAFE_INTEGER;
+
+            for (const requirement of requirements.values()) {
+              const childProduct = childProductsMap.get(
+                requirement.childProductId
+              );
+
+              if (
+                !childProduct ||
+                childProduct.is_active !== true ||
+                childProduct.product_type === "composite" ||
+                !Number.isInteger(requirement.quantity) ||
+                requirement.quantity <= 0
+              ) {
+                componentCapacity = 0;
+                break;
+              }
+
+              let availableUnits = Number(childProduct.stock || 0);
+
+              if (requirement.childVariantId) {
+                const childVariant = childVariantsMap.get(
+                  requirement.childVariantId
+                );
+
+                if (
+                  !childVariant ||
+                  childVariant.is_active !== true ||
+                  childVariant.product_id !== childProduct.id
+                ) {
+                  componentCapacity = 0;
+                  break;
+                }
+
+                availableUnits =
+                  Number(childVariant.stock || 0) +
+                  (childProduct.fallback_to_general_licenses === false
+                    ? 0
+                    : Number(childProduct.stock || 0));
+              }
+
+              componentCapacity = Math.min(
+                componentCapacity,
+                Math.floor(availableUnits / requirement.quantity)
+              );
+            }
+
+            const configuredComboStock =
+              combo.combo_stock === null || combo.combo_stock === undefined
+                ? null
+                : Math.max(0, Number(combo.combo_stock));
+            const manualCapacity =
+              configuredComboStock === null
+                ? Number.MAX_SAFE_INTEGER
+                : configuredComboStock;
+
+            comboStockByProduct[combo.id] = Math.max(
+              0,
+              Math.min(componentCapacity, manualCapacity)
+            );
+          }
+        }
+
+        const expandedItems = buildCatalogItems(
+          safeProducts,
+          groupedVariants,
+          comboStockByProduct
+        );
         const from = (currentPage - 1) * PRODUCTS_PER_PAGE;
         const to = from + PRODUCTS_PER_PAGE;
 

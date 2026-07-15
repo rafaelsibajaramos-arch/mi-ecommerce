@@ -31,6 +31,7 @@ type ProductRow = {
   default_license_requires_rotation_alert?: boolean;
   default_license_mode?: "individual" | "shared";
   default_max_active_users?: number | null;
+  combo_stock?: number | null;
 };
 
 type VariantRow = {
@@ -42,6 +43,30 @@ type VariantRow = {
   is_active: boolean;
   access_duration_months?: number | null;
   default_license_billing_months?: number | null;
+};
+
+type ProductComponentRow = {
+  id: string;
+  product_id: string;
+  child_product_id: string;
+  child_variant_id: string | null;
+  quantity: number;
+  sort_order?: number | null;
+};
+
+type FulfillmentRequest = {
+  parentItemKey: string;
+  deliveryItemKey: string;
+  parentItemName: string;
+  product: ProductRow;
+  variant: VariantRow | null;
+  quantity: number;
+};
+
+type SelectedLicenseDelivery = {
+  license: LicenseRow;
+  product: ProductRow;
+  variant: VariantRow | null;
 };
 
 type ProfileRow = {
@@ -470,6 +495,13 @@ async function ensureSharedDurationAlertsForLicenseText({
 const buildItemKey = (productId: string, variantId?: string | null) =>
   `${productId}__${variantId ?? "base"}`;
 
+// Crea una clave única para cada componente entregable de un combo.
+const buildComboComponentKey = (
+  parentItemKey: string,
+  productId: string,
+  variantId?: string | null
+) => `${parentItemKey}__component__${productId}__${variantId ?? "base"}`;
+
 // Construye una respuesta JSON de error con el código HTTP indicado.
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
@@ -632,6 +664,7 @@ async function selectLicensesForItem({
   fallbackToGeneralLicenses,
   previouslyAssignedTexts,
   alreadySelectedTexts,
+  reservedLicenseIds,
 }: {
   supabaseAdmin: SupabaseClient;
   productId: string;
@@ -642,6 +675,7 @@ async function selectLicensesForItem({
   fallbackToGeneralLicenses: boolean;
   previouslyAssignedTexts: Set<string>;
   alreadySelectedTexts: Set<string>;
+  reservedLicenseIds: Set<string>;
 }) {
   const pools: { variantId: string | null; isPriority: boolean }[] = [];
 
@@ -679,7 +713,7 @@ async function selectLicensesForItem({
     });
 
     for (const license of poolLicenses) {
-      if (selectedIds.has(license.id)) continue;
+      if (selectedIds.has(license.id) || reservedLicenseIds.has(license.id)) continue;
 
       const normalizedText = normalizeLicenseText(license.license_text);
       if (!normalizedText) continue;
@@ -845,26 +879,26 @@ export async function POST(request: NextRequest) {
 
     const checkoutProfile = await resolveCheckoutProfile(supabaseAdmin, user);
 
-    const productIds = Array.from(new Set(cart.map((item) => item.id)));
-    const variantIds = Array.from(
+    const cartProductIds = Array.from(new Set(cart.map((item) => item.id)));
+    const cartVariantIds = Array.from(
       new Set(cart.map((item) => item.variantId).filter(Boolean) as string[])
     );
+
+    const productSelect =
+      "id, name, description, category, price, stock, is_active, product_type, avoid_repeat_license, use_priority_licenses, fallback_to_general_licenses, enable_license_alerts, access_duration_months, default_license_billing_months, default_license_requires_rotation_alert, default_license_mode, default_max_active_users, combo_stock";
+    const variantSelect =
+      "id, product_id, name, price, stock, is_active, access_duration_months, default_license_billing_months";
 
     const [
       { data: productsData, error: productsError },
       { data: variantsData, error: variantsError },
     ] = await Promise.all([
-      supabaseAdmin
-        .from("products")
-        .select(
-          "id, name, description, category, price, stock, is_active, product_type, avoid_repeat_license, use_priority_licenses, fallback_to_general_licenses, enable_license_alerts, access_duration_months, default_license_billing_months, default_license_requires_rotation_alert, default_license_mode, default_max_active_users"
-        )
-        .in("id", productIds),
-      variantIds.length
+      supabaseAdmin.from("products").select(productSelect).in("id", cartProductIds),
+      cartVariantIds.length
         ? supabaseAdmin
             .from("product_variants")
-            .select("id, product_id, name, price, stock, is_active, access_duration_months, default_license_billing_months")
-            .in("id", variantIds)
+            .select(variantSelect)
+            .in("id", cartVariantIds)
         : Promise.resolve({ data: [] as VariantRow[], error: null }),
     ]);
 
@@ -876,18 +910,122 @@ export async function POST(request: NextRequest) {
       return jsonError("No se pudieron validar las variantes.");
     }
 
-    const productsMap = Object.fromEntries(
-      ((productsData as ProductRow[]) || []).map((p) => [p.id, p])
+    const productsMap: Record<string, ProductRow> = Object.fromEntries(
+      ((productsData as ProductRow[]) || []).map((product) => [product.id, product])
     );
 
-    const variantsMap = Object.fromEntries(
-      ((variantsData as VariantRow[]) || []).map((v) => [v.id, v])
+    const variantsMap: Record<string, VariantRow> = Object.fromEntries(
+      ((variantsData as VariantRow[]) || []).map((variant) => [variant.id, variant])
     );
 
+    const compositeProductIds = cartProductIds.filter(
+      (productId) => productsMap[productId]?.product_type === "composite"
+    );
+
+    const { data: componentsData, error: componentsError } =
+      compositeProductIds.length > 0
+        ? await supabaseAdmin
+            .from("product_components")
+            .select("id, product_id, child_product_id, child_variant_id, quantity, sort_order")
+            .in("product_id", compositeProductIds)
+            .order("sort_order", { ascending: true })
+        : { data: [] as ProductComponentRow[], error: null };
+
+    if (componentsError) {
+      return jsonError("No se pudieron validar los componentes de los combos.");
+    }
+
+    const components = (componentsData as ProductComponentRow[]) || [];
+    const childProductIds = Array.from(
+      new Set(components.map((component) => component.child_product_id).filter(Boolean))
+    );
+    const childVariantIds = Array.from(
+      new Set(
+        components
+          .map((component) => component.child_variant_id)
+          .filter(Boolean) as string[]
+      )
+    );
+
+    const missingChildProductIds = childProductIds.filter(
+      (productId) => !productsMap[productId]
+    );
+    const missingChildVariantIds = childVariantIds.filter(
+      (variantId) => !variantsMap[variantId]
+    );
+
+    const [childProductsResult, childVariantsResult] = await Promise.all([
+      missingChildProductIds.length
+        ? supabaseAdmin
+            .from("products")
+            .select(productSelect)
+            .in("id", missingChildProductIds)
+        : Promise.resolve({ data: [] as ProductRow[], error: null }),
+      missingChildVariantIds.length
+        ? supabaseAdmin
+            .from("product_variants")
+            .select(variantSelect)
+            .in("id", missingChildVariantIds)
+        : Promise.resolve({ data: [] as VariantRow[], error: null }),
+    ]);
+
+    if (childProductsResult.error) {
+      return jsonError("No se pudieron validar los productos incluidos en los combos.");
+    }
+
+    if (childVariantsResult.error) {
+      return jsonError("No se pudieron validar las variantes incluidas en los combos.");
+    }
+
+    for (const product of (childProductsResult.data as ProductRow[]) || []) {
+      productsMap[product.id] = product;
+    }
+
+    for (const variant of (childVariantsResult.data as VariantRow[]) || []) {
+      variantsMap[variant.id] = variant;
+    }
+
+    const componentsByProduct = new Map<string, ProductComponentRow[]>();
+
+    // Cada componente del combo representa exactamente una entrega. También se
+    // eliminan duplicados antiguos para impedir que un mismo producto entregue
+    // más de una licencia por una sola unidad del combo.
+    for (const component of components) {
+      const current = componentsByProduct.get(component.product_id) || [];
+      const duplicateIndex = current.findIndex(
+        (item) =>
+          item.child_product_id === component.child_product_id &&
+          (item.child_variant_id || null) === (component.child_variant_id || null)
+      );
+
+      if (duplicateIndex >= 0) {
+        const previous = current[duplicateIndex];
+        current[duplicateIndex] = {
+          ...previous,
+          quantity: 1,
+          sort_order: Math.min(
+            Number(previous.sort_order ?? Number.MAX_SAFE_INTEGER),
+            Number(component.sort_order ?? Number.MAX_SAFE_INTEGER)
+          ),
+        };
+      } else {
+        current.push({ ...component, quantity: 1 });
+      }
+
+      current.sort(
+        (left, right) => Number(left.sort_order || 0) - Number(right.sort_order || 0)
+      );
+      componentsByProduct.set(component.product_id, current);
+    }
+
+    const fulfillmentRequests: FulfillmentRequest[] = [];
+    const comboRequestedUnits = new Map<string, number>();
     let validatedTotal = 0;
 
     for (const item of cart) {
-      if (!item?.id || !item?.name || Number(item.quantity) <= 0) {
+      const itemQuantity = Number(item.quantity);
+
+      if (!item?.id || !item?.name || !Number.isInteger(itemQuantity) || itemQuantity <= 0) {
         return jsonError("Hay un producto inválido en el carrito.");
       }
 
@@ -897,10 +1035,104 @@ export async function POST(request: NextRequest) {
         return jsonError(`El producto "${item.name}" ya no está disponible.`);
       }
 
+      const parentItemKey = buildItemKey(item.id, item.variantId || null);
+
+      if (product.product_type === "composite") {
+        if (item.variantId) {
+          return jsonError(`El combo "${item.name}" no admite una variante directa.`);
+        }
+
+        const requestedComboUnits =
+          (comboRequestedUnits.get(product.id) || 0) + itemQuantity;
+        comboRequestedUnits.set(product.id, requestedComboUnits);
+
+        const configuredComboStock =
+          product.combo_stock === null || product.combo_stock === undefined
+            ? null
+            : Number(product.combo_stock);
+
+        if (
+          configuredComboStock !== null &&
+          Number.isFinite(configuredComboStock) &&
+          requestedComboUnits > configuredComboStock
+        ) {
+          return jsonError(`No hay suficiente stock disponible del combo "${item.name}".`);
+        }
+
+        const comboComponents = componentsByProduct.get(product.id) || [];
+
+        if (comboComponents.length < 2) {
+          return jsonError(`El combo "${item.name}" no tiene componentes válidos.`);
+        }
+
+        for (const component of comboComponents) {
+          const childProduct = productsMap[component.child_product_id];
+
+          if (
+            !childProduct ||
+            !childProduct.is_active ||
+            childProduct.product_type === "composite"
+          ) {
+            return jsonError(
+              `Uno de los productos incluidos en "${item.name}" ya no está disponible.`
+            );
+          }
+
+          const childVariant = component.child_variant_id
+            ? variantsMap[component.child_variant_id]
+            : null;
+
+          if (
+            component.child_variant_id &&
+            (!childVariant ||
+              !childVariant.is_active ||
+              childVariant.product_id !== childProduct.id)
+          ) {
+            return jsonError(
+              `Una variante incluida en "${item.name}" ya no está disponible.`
+            );
+          }
+
+          const requiredQuantity = itemQuantity;
+          const effectiveComponentStock = childVariant
+            ? Number(childVariant.stock || 0) +
+              (childProduct.fallback_to_general_licenses === false
+                ? 0
+                : Number(childProduct.stock || 0))
+            : Number(childProduct.stock || 0);
+
+          if (effectiveComponentStock < requiredQuantity) {
+            return jsonError(
+              `No hay stock suficiente de "${childProduct.name}" para completar "${item.name}".`
+            );
+          }
+
+          fulfillmentRequests.push({
+            parentItemKey,
+            deliveryItemKey: buildComboComponentKey(
+              parentItemKey,
+              childProduct.id,
+              childVariant?.id || null
+            ),
+            parentItemName: item.name,
+            product: childProduct,
+            variant: childVariant,
+            quantity: requiredQuantity,
+          });
+        }
+
+        validatedTotal += Number(product.price) * itemQuantity;
+        continue;
+      }
+
       if (item.variantId) {
         const variant = variantsMap[item.variantId];
 
-        if (!variant || !variant.is_active) {
+        if (
+          !variant ||
+          !variant.is_active ||
+          variant.product_id !== product.id
+        ) {
           return jsonError(
             `La variante de "${item.name}" ya no está disponible.`
           );
@@ -908,22 +1140,37 @@ export async function POST(request: NextRequest) {
 
         const fallbackEnabled =
           product.fallback_to_general_licenses !== false;
-
         const effectiveStock =
-          Number(variant.stock) +
-          (fallbackEnabled ? Number(product.stock) : 0);
+          Number(variant.stock || 0) +
+          (fallbackEnabled ? Number(product.stock || 0) : 0);
 
-        if (effectiveStock < item.quantity) {
+        if (effectiveStock < itemQuantity) {
           return jsonError(`No hay stock suficiente para "${item.name}".`);
         }
 
-        validatedTotal += Number(variant.price) * item.quantity;
+        fulfillmentRequests.push({
+          parentItemKey,
+          deliveryItemKey: parentItemKey,
+          parentItemName: item.name,
+          product,
+          variant,
+          quantity: itemQuantity,
+        });
+        validatedTotal += Number(variant.price) * itemQuantity;
       } else {
-        if (Number(product.stock) < item.quantity) {
+        if (Number(product.stock || 0) < itemQuantity) {
           return jsonError(`No hay stock suficiente para "${item.name}".`);
         }
 
-        validatedTotal += Number(product.price) * item.quantity;
+        fulfillmentRequests.push({
+          parentItemKey,
+          deliveryItemKey: parentItemKey,
+          parentItemName: item.name,
+          product,
+          variant: null,
+          quantity: itemQuantity,
+        });
+        validatedTotal += Number(product.price) * itemQuantity;
       }
     }
 
@@ -935,13 +1182,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const fulfillmentProductIds = Array.from(
+      new Set(fulfillmentRequests.map((requestItem) => requestItem.product.id))
+    );
+
     const { data: assignedHistoryData, error: assignedHistoryError } =
       await supabaseAdmin
         .from("product_licenses")
         .select("product_id, license_text")
         .eq("assigned_user_id", checkoutProfile.id)
         .eq("status", "assigned")
-        .in("product_id", productIds);
+        .in("product_id", fulfillmentProductIds);
 
     if (assignedHistoryError) {
       return jsonError(
@@ -963,7 +1214,11 @@ export async function POST(request: NextRequest) {
     }
 
     const orderSelectedTextsByProduct = new Map<string, Set<string>>();
-    const selectedLicensesByItemKey = new Map<string, LicenseRow[]>();
+    const selectedDeliveriesByItemKey = new Map<
+      string,
+      SelectedLicenseDelivery[]
+    >();
+    const reservedLicenseIds = new Set<string>();
 
     const productStockDeltas = new Map<
       string,
@@ -975,45 +1230,77 @@ export async function POST(request: NextRequest) {
       { original: number; decrement: number }
     >();
 
-    for (const item of cart) {
-      const product = productsMap[item.id];
-      const variant = item.variantId ? variantsMap[item.variantId] : null;
-      const itemKey = buildItemKey(item.id, item.variantId || null);
+    const addProductStockDecrement = (product: ProductRow, decrement: number) => {
+      if (decrement <= 0) return;
+      const current = productStockDeltas.get(product.id);
 
-      if (!product) {
-        return jsonError(`No se pudo preparar la compra de "${item.name}".`);
+      if (current) {
+        current.decrement += decrement;
+      } else {
+        productStockDeltas.set(product.id, {
+          original: Number(product.stock || 0),
+          decrement,
+        });
       }
+    };
 
+    const addVariantStockDecrement = (variant: VariantRow, decrement: number) => {
+      if (decrement <= 0) return;
+      const current = variantStockDeltas.get(variant.id);
+
+      if (current) {
+        current.decrement += decrement;
+      } else {
+        variantStockDeltas.set(variant.id, {
+          original: Number(variant.stock || 0),
+          decrement,
+        });
+      }
+    };
+
+    for (const requestItem of fulfillmentRequests) {
+      const product = requestItem.product;
+      const variant = requestItem.variant;
       const avoidRepeat = Boolean(product.avoid_repeat_license);
       const usePriority = Boolean(product.use_priority_licenses);
       const fallbackToGeneral =
         product.fallback_to_general_licenses !== false;
-
       const previouslyAssignedTexts =
-        assignedHistoryMap.get(item.id) || new Set<string>();
-
+        assignedHistoryMap.get(product.id) || new Set<string>();
       const alreadySelectedTexts =
-        orderSelectedTextsByProduct.get(item.id) || new Set<string>();
+        orderSelectedTextsByProduct.get(product.id) || new Set<string>();
 
       const selectedLicenses = await selectLicensesForItem({
         supabaseAdmin,
-        productId: item.id,
-        variantId: item.variantId || null,
-        quantity: item.quantity,
+        productId: product.id,
+        variantId: variant?.id || null,
+        quantity: requestItem.quantity,
         avoidRepeatLicense: avoidRepeat,
         usePriorityLicenses: usePriority,
         fallbackToGeneralLicenses: fallbackToGeneral,
         previouslyAssignedTexts,
         alreadySelectedTexts,
+        reservedLicenseIds,
       });
 
-      if (selectedLicenses.length < item.quantity) {
+      if (selectedLicenses.length < requestItem.quantity) {
         return jsonError(
-          `No hay suficientes licencias disponibles para "${item.name}" con la configuración actual.`
+          `No hay suficientes licencias de "${product.name}" para completar "${requestItem.parentItemName}" respetando la configuración actual.`
         );
       }
 
-      selectedLicensesByItemKey.set(itemKey, selectedLicenses);
+      const currentDeliveries =
+        selectedDeliveriesByItemKey.get(requestItem.deliveryItemKey) || [];
+
+      for (const license of selectedLicenses) {
+        reservedLicenseIds.add(license.id);
+        currentDeliveries.push({ license, product, variant });
+      }
+
+      selectedDeliveriesByItemKey.set(
+        requestItem.deliveryItemKey,
+        currentDeliveries
+      );
 
       if (avoidRepeat) {
         const updatedSelectedTexts = new Set<string>(alreadySelectedTexts);
@@ -1022,52 +1309,21 @@ export async function POST(request: NextRequest) {
           updatedSelectedTexts.add(normalizeLicenseText(license.license_text));
         }
 
-        orderSelectedTextsByProduct.set(item.id, updatedSelectedTexts);
+        orderSelectedTextsByProduct.set(product.id, updatedSelectedTexts);
       }
 
-      if (item.variantId && variant) {
+      if (variant) {
         const priorityCount = selectedLicenses.filter(
-          (license) => license.variant_id === item.variantId
+          (license) => license.variant_id === variant.id
         ).length;
-
         const generalCount = selectedLicenses.filter(
           (license) => license.variant_id === null
         ).length;
 
-        if (priorityCount > 0) {
-          const currentVariantDelta = variantStockDeltas.get(variant.id);
-          if (currentVariantDelta) {
-            currentVariantDelta.decrement += priorityCount;
-          } else {
-            variantStockDeltas.set(variant.id, {
-              original: Number(variant.stock),
-              decrement: priorityCount,
-            });
-          }
-        }
-
-        if (generalCount > 0) {
-          const currentProductDelta = productStockDeltas.get(product.id);
-          if (currentProductDelta) {
-            currentProductDelta.decrement += generalCount;
-          } else {
-            productStockDeltas.set(product.id, {
-              original: Number(product.stock),
-              decrement: generalCount,
-            });
-          }
-        }
+        addVariantStockDecrement(variant, priorityCount);
+        addProductStockDecrement(product, generalCount);
       } else {
-        const currentProductDelta = productStockDeltas.get(product.id);
-
-        if (currentProductDelta) {
-          currentProductDelta.decrement += selectedLicenses.length;
-        } else {
-          productStockDeltas.set(product.id, {
-            original: Number(product.stock),
-            decrement: selectedLicenses.length,
-          });
-        }
+        addProductStockDecrement(product, selectedLicenses.length);
       }
     }
 
@@ -1099,6 +1355,7 @@ export async function POST(request: NextRequest) {
     const createdAlertIds: string[] = [];
     const updatedVariantStockIds = new Set<string>();
     const updatedProductStockIds = new Set<string>();
+    const reservedComboStock = new Map<string, number>();
 
     const rollbackPurchase = async () => {
       for (const variantId of Array.from(updatedVariantStockIds)) {
@@ -1119,6 +1376,13 @@ export async function POST(request: NextRequest) {
           .from("products")
           .update({ stock: restore.original })
           .eq("id", productId);
+      }
+
+      for (const [comboProductId, quantity] of reservedComboStock.entries()) {
+        await supabaseAdmin.rpc("release_combo_stock", {
+          p_product_id: comboProductId,
+          p_quantity: quantity,
+        });
       }
 
       if (createdAlertIds.length > 0) {
@@ -1161,6 +1425,28 @@ export async function POST(request: NextRequest) {
       }
     };
 
+    for (const [comboProductId, quantity] of comboRequestedUnits.entries()) {
+      const { data: reserved, error: reserveError } = await supabaseAdmin.rpc(
+        "reserve_combo_stock",
+        {
+          p_product_id: comboProductId,
+          p_quantity: quantity,
+        }
+      );
+
+      if (reserveError || reserved !== true) {
+        await rollbackPurchase();
+        const comboName = productsMap[comboProductId]?.name || "El combo";
+        return jsonError(
+          reserveError
+            ? `No se pudo reservar el stock de "${comboName}". Revisa que la migración de combos esté aplicada.`
+            : `"${comboName}" no tiene suficiente stock disponible.`
+        );
+      }
+
+      reservedComboStock.set(comboProductId, quantity);
+    }
+
     const newBalance = Number(checkoutProfile.balance) - validatedTotal;
 
     const { data: updatedProfile, error: balanceUpdateError } =
@@ -1172,7 +1458,7 @@ export async function POST(request: NextRequest) {
         .single();
 
     if (balanceUpdateError || !updatedProfile) {
-      await supabaseAdmin.from("orders").delete().eq("id", orderData.id);
+      await rollbackPurchase();
       return jsonError("No se pudo descontar el saldo.");
     }
 
@@ -1216,8 +1502,79 @@ export async function POST(request: NextRequest) {
     for (const item of cart) {
       const product = productsMap[item.id];
       const variant = item.variantId ? variantsMap[item.variantId] : null;
-      const unitPrice = Number(variant?.price ?? product?.price ?? item.price);
+      const parentItemKey = buildItemKey(item.id, item.variantId || null);
 
+      if (product?.product_type === "composite") {
+        const comboComponents = componentsByProduct.get(product.id) || [];
+        const totalComponentUnits = comboComponents.length;
+
+        if (totalComponentUnits <= 0) {
+          await rollbackPurchase();
+          return jsonError(`El combo "${item.name}" no tiene componentes válidos.`);
+        }
+
+        // El precio del combo se distribuye entre las unidades de sus componentes.
+        // Así el pedido queda con Netflix y Prime como líneas independientes,
+        // pero la suma sigue siendo exactamente el valor comercial del combo.
+        const componentUnitPrice = Number(product.price || item.price || 0) / totalComponentUnits;
+
+        for (const component of comboComponents) {
+          const childProduct = productsMap[component.child_product_id];
+          const childVariant = component.child_variant_id
+            ? variantsMap[component.child_variant_id]
+            : null;
+          const requiredQuantity = Number(item.quantity || 0);
+          const deliveryItemKey = buildComboComponentKey(
+            parentItemKey,
+            component.child_product_id,
+            component.child_variant_id || null
+          );
+
+          if (!childProduct || requiredQuantity <= 0) {
+            await rollbackPurchase();
+            return jsonError(`No se pudo preparar un componente de "${item.name}".`);
+          }
+
+          const { data: orderItemData, error: orderItemError } =
+            await supabaseAdmin
+              .from("order_items")
+              .insert([
+                {
+                  order_id: orderData.id,
+                  product_id: childProduct.id,
+                  variant_id: childVariant?.id || null,
+                  quantity: requiredQuantity,
+                  unit_price: componentUnitPrice,
+                  item_type: childVariant ? "variant" : "simple",
+                  product_name: childProduct.name,
+                  variant_name: childVariant?.name || null,
+                },
+              ])
+              .select()
+              .single();
+
+          if (orderItemError || !orderItemData) {
+            console.error("Error guardando componente del combo:", {
+              orderId: orderData.id,
+              comboProductId: product.id,
+              childProductId: childProduct.id,
+              childVariantId: childVariant?.id || null,
+              message: orderItemError?.message || "Sin detalle de Supabase",
+            });
+            await rollbackPurchase();
+            return jsonError("No se pudo guardar el detalle del combo.");
+          }
+
+          orderItemsByKey.set(
+            deliveryItemKey,
+            orderItemData as CreatedOrderItemRow
+          );
+        }
+
+        continue;
+      }
+
+      const unitPrice = Number(variant?.price ?? product?.price ?? item.price);
       const { data: orderItemData, error: orderItemError } =
         await supabaseAdmin
           .from("order_items")
@@ -1237,28 +1594,34 @@ export async function POST(request: NextRequest) {
           .single();
 
       if (orderItemError || !orderItemData) {
+        console.error("Error guardando order_item del checkout:", {
+          orderId: orderData.id,
+          productId: item.id,
+          variantId: item.variantId || null,
+          productType: product?.product_type || null,
+          message: orderItemError?.message || "Sin detalle de Supabase",
+        });
         await rollbackPurchase();
         return jsonError("No se pudo guardar el detalle del pedido.");
       }
 
-      const createdItem = orderItemData as CreatedOrderItemRow;
-      orderItemsByKey.set(
-        buildItemKey(item.id, item.variantId || null),
-        createdItem
-      );
+      orderItemsByKey.set(parentItemKey, orderItemData as CreatedOrderItemRow);
     }
 
-    for (const item of cart) {
-      const itemKey = buildItemKey(item.id, item.variantId || null);
-      const matchingOrderItem = orderItemsByKey.get(itemKey);
-      const selectedLicenses = selectedLicensesByItemKey.get(itemKey) || [];
+    for (const [deliveryItemKey, deliveries] of selectedDeliveriesByItemKey.entries()) {
+      const matchingOrderItem = orderItemsByKey.get(deliveryItemKey);
+      const firstDelivery = deliveries[0];
+      const deliveryLabel = firstDelivery?.variant?.name
+        ? `${firstDelivery.product.name} - ${firstDelivery.variant.name}`
+        : firstDelivery?.product.name || "producto";
 
       if (!matchingOrderItem) {
         await rollbackPurchase();
-        return jsonError(`No se pudo completar la entrega de "${item.name}".`);
+        return jsonError(`No se pudo completar la entrega de "${deliveryLabel}".`);
       }
 
-      for (const license of selectedLicenses) {
+      for (const delivery of deliveries) {
+        const { license, product, variant } = delivery;
         const { data: assignedRow, error: assignError } = await supabaseAdmin
           .from("product_licenses")
           .update({
@@ -1274,18 +1637,10 @@ export async function POST(request: NextRequest) {
 
         if (assignError || !assignedRow) {
           await rollbackPurchase();
-          return jsonError(`No se pudo completar la entrega de "${item.name}".`);
+          return jsonError(`No se pudo completar la entrega de "${deliveryLabel}".`);
         }
 
         assignedLicenseIds.push(license.id);
-
-        const product = productsMap[item.id];
-        const variant = item.variantId ? variantsMap[item.variantId] : null;
-
-        if (!product) {
-          await rollbackPurchase();
-          return jsonError(`No se pudo preparar la alerta de "${item.name}".`);
-        }
 
         const accessDurationMonths = resolveAccessDurationMonths({
           product,
@@ -1310,8 +1665,8 @@ export async function POST(request: NextRequest) {
                 order_id: orderData.id,
                 order_item_id: matchingOrderItem.id,
                 user_id: checkoutProfile.id,
-                product_id: item.id,
-                variant_id: item.variantId || null,
+                product_id: product.id,
+                variant_id: variant?.id || null,
                 starts_at: startsAt.toISOString(),
                 expires_at: expiresAt.toISOString(),
                 status: "active",
@@ -1328,7 +1683,7 @@ export async function POST(request: NextRequest) {
           if (accessError || !accessData) {
             await rollbackPurchase();
             return jsonError(
-              `No se pudo crear el vencimiento de "${item.name}".`
+              `No se pudo crear el vencimiento de "${product.name}".`
             );
           }
 
@@ -1344,8 +1699,8 @@ export async function POST(request: NextRequest) {
             order_id: orderData.id,
             order_item_id: matchingOrderItem.id,
             user_id: checkoutProfile.id,
-            product_id: item.id,
-            variant_id: item.variantId || null,
+            product_id: product.id,
+            variant_id: variant?.id || null,
             starts_at: startsAt.toISOString(),
             expires_at: expiresAt.toISOString(),
             status: "active",
@@ -1373,14 +1728,14 @@ export async function POST(request: NextRequest) {
               if (alertId) createdAlertIds.push(alertId);
             } catch {
               await rollbackPurchase();
-              return jsonError(`No se pudo crear la alerta de "${item.name}".`);
+              return jsonError(`No se pudo crear la alerta de "${product.name}".`);
             }
           }
 
           try {
             const sharedAlertIds = await ensureSharedDurationAlertsForLicenseText({
               supabaseAdmin,
-              productId: item.id,
+              productId: product.id,
               licenseText: license.license_text,
             });
 
@@ -1388,7 +1743,7 @@ export async function POST(request: NextRequest) {
           } catch {
             await rollbackPurchase();
             return jsonError(
-              `No se pudieron revisar alertas compartidas de "${item.name}".`
+              `No se pudieron revisar alertas compartidas de "${product.name}".`
             );
           }
         }
@@ -1423,28 +1778,29 @@ export async function POST(request: NextRequest) {
       updatedProductStockIds.add(productId);
     }
 
-    const receiptItems = cart.map((item) => {
-      const itemKey = buildItemKey(item.id, item.variantId || null);
-      const matchingOrderItem = orderItemsByKey.get(itemKey);
-      const product = productsMap[item.id];
-      const selectedLicenses = selectedLicensesByItemKey.get(itemKey) || [];
+    const receiptItems = Array.from(orderItemsByKey.entries()).map(
+      ([deliveryItemKey, matchingOrderItem]) => {
+        const product = productsMap[matchingOrderItem.product_id];
+        const selectedDeliveries =
+          selectedDeliveriesByItemKey.get(deliveryItemKey) || [];
 
-      return {
-        id: matchingOrderItem?.id || itemKey,
-        quantity: Number(item.quantity || 0),
-        price: Number(matchingOrderItem?.unit_price ?? item.price ?? 0),
-        product_id: item.id,
-        product_name: matchingOrderItem?.product_name || product?.name || item.name,
-        variant_name:
-          matchingOrderItem?.variant_name || item.variantName || null,
-        product_description: product?.description || null,
-        product_category: product?.category || null,
-        licenses: selectedLicenses.map((license) => ({
-          id: license.id,
-          license_text: license.license_text,
-        })),
-      };
-    });
+        return {
+          id: matchingOrderItem.id,
+          quantity: Number(matchingOrderItem.quantity || 0),
+          price: Number(matchingOrderItem.unit_price || 0),
+          product_id: matchingOrderItem.product_id,
+          product_name:
+            matchingOrderItem.product_name || product?.name || "Producto",
+          variant_name: matchingOrderItem.variant_name || null,
+          product_description: product?.description || null,
+          product_category: product?.category || null,
+          licenses: selectedDeliveries.map(({ license }) => ({
+            id: license.id,
+            license_text: license.license_text,
+          })),
+        };
+      }
+    );
 
     return NextResponse.json({
       ok: true,
