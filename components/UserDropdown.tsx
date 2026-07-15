@@ -257,7 +257,7 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
                 <span>Mi billetera</span>
               </Link>
 
-              <Link href="/recargas-automaticas" onClick={() => setOpen(false)} className={itemClass}>
+<Link href="/recargas-automaticas" onClick={() => setOpen(false)} className={itemClass}>
                 <span className={iconWrapClass}>
                   <svg viewBox="0 0 24 24" className="h-4 w-4 min-[390px]:h-5 min-[390px]:w-5 md:h-4 md:w-4" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" />

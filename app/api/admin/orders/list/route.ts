@@ -21,6 +21,9 @@ type OrderRow = {
   total: number | null;
   status: string | null;
   created_at: string;
+  is_reverted: boolean;
+  reverted_at: string | null;
+  reverted_by: string | null;
 };
 
 type OrderItemRow = {
@@ -55,6 +58,11 @@ type CustomerProfileRow = {
   id: string;
   email: string | null;
   full_name: string | null;
+};
+
+type OrderReversalRow = {
+  order_id: string;
+  released_license_ids: string[] | null;
 };
 
 function jsonError(message: string, status = 400) {
@@ -209,7 +217,7 @@ export async function GET(request: NextRequest) {
       queryBuilder: async (from, to) => {
         const { data, error } = await supabaseAdmin
           .from("orders")
-          .select("id, order_number, user_id, total, status, created_at")
+          .select("id, order_number, user_id, total, status, created_at, is_reverted, reverted_at, reverted_by")
           .order("created_at", { ascending: false })
           .range(from, to);
 
@@ -322,6 +330,26 @@ export async function GET(request: NextRequest) {
       },
     });
 
+    const reversalRows = await fetchAllRowsInChunks<OrderReversalRow>({
+      ids: orderIds,
+      chunkSize: 100,
+      queryBuilder: async (chunk, from, to) => {
+        const { data, error } = await supabaseAdmin
+          .from("order_reversals")
+          .select("order_id, released_license_ids")
+          .in("order_id", chunk)
+          .range(from, to);
+
+        return {
+          data: (data as OrderReversalRow[]) || [],
+          error: error ? { message: error.message } : null,
+        };
+      },
+    });
+
+    const reversalsMap = new Map<string, OrderReversalRow>();
+    reversalRows.forEach((row) => reversalsMap.set(row.order_id, row));
+
     const profilesMap = new Map<string, CustomerProfileRow>();
 
     profilesData.forEach((profile) => {
@@ -348,6 +376,7 @@ export async function GET(request: NextRequest) {
       const customer = profilesMap.get(order.user_id);
       const orderItems = itemsByOrderId.get(order.id) || [];
       const orderLicenses = licensesByOrderId.get(order.id) || [];
+      const reversal = reversalsMap.get(order.id);
 
       const items = orderItems.map((item) => {
         const product = productsMap.get(item.product_id);
@@ -380,8 +409,12 @@ export async function GET(request: NextRequest) {
         id: order.id,
         order_number: order.order_number,
         total: Number(order.total || 0),
-        status: order.status || "completed",
+        status: order.is_reverted ? "reverted" : order.status || "completed",
         created_at: order.created_at,
+        is_reverted: Boolean(order.is_reverted),
+        reverted_at: order.reverted_at,
+        reverted_by: order.reverted_by,
+        released_license_count: reversal?.released_license_ids?.length || 0,
         customer_email: customer?.email || "Sin correo",
         customer_full_name: customer?.full_name || "Sin nombre",
         items,
@@ -394,7 +427,8 @@ export async function GET(request: NextRequest) {
       stats: {
         totalOrders: mergedOrders.length,
         totalRevenue: mergedOrders.reduce(
-          (sum, order) => sum + Number(order.total || 0),
+          (sum, order) =>
+            order.is_reverted ? sum : sum + Number(order.total || 0),
           0
         ),
         totalLicenses: mergedOrders.reduce((sum, order) => {

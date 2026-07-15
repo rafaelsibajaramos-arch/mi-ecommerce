@@ -2,6 +2,15 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  ArrowDownLeft,
+  ArrowUpRight,
+  ChevronLeft,
+  ChevronRight,
+  CreditCard,
+  History,
+  RefreshCw,
+} from "lucide-react";
 import { supabase } from "../../../lib/supabase";
 
 type WalletTransaction = {
@@ -12,529 +21,524 @@ type WalletTransaction = {
   created_at: string;
 };
 
-type ProfileBalanceRow = {
-  balance: number | null;
-};
-
 type FilterType = "all" | "credit" | "debit";
 
-const PAGE_SIZE = 10;
+type DateRange = {
+  from: string;
+  to: string;
+};
 
-function buildPagination(current: number, total: number): Array<number | "..."> {
-  if (total <= 7) {
-    return Array.from({ length: total }, (_, i) => i + 1);
+const PAGE_SIZE = 8;
+const BOGOTA_TIME_ZONE = "America/Bogota";
+
+function getBogotaDateParts(date = new Date()) {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: BOGOTA_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+
+  const parts = Object.fromEntries(
+    formatter.formatToParts(date).map((part) => [part.type, part.value])
+  );
+
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+  };
+}
+
+function buildMonthRange(year: number, month: number): DateRange {
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const monthText = String(month).padStart(2, "0");
+
+  return {
+    from: `${year}-${monthText}-01`,
+    to: `${year}-${monthText}-${String(lastDay).padStart(2, "0")}`,
+  };
+}
+
+function getCurrentMonthRange(): DateRange {
+  const { year, month } = getBogotaDateParts();
+  return buildMonthRange(year, month);
+}
+
+function getPreviousMonthRange(): DateRange {
+  const { year, month } = getBogotaDateParts();
+  const previous = new Date(Date.UTC(year, month - 2, 1));
+  return buildMonthRange(previous.getUTCFullYear(), previous.getUTCMonth() + 1);
+}
+
+function dateInputToStart(value: string) {
+  if (!value) return null;
+  const date = new Date(`${value}T00:00:00.000-05:00`);
+  return Number.isFinite(date.getTime()) ? date.getTime() : null;
+}
+
+function dateInputToEnd(value: string) {
+  if (!value) return null;
+  const date = new Date(`${value}T23:59:59.999-05:00`);
+  return Number.isFinite(date.getTime()) ? date.getTime() : null;
+}
+
+function formatInputDate(value: string) {
+  if (!value) return "Sin fecha";
+
+  try {
+    return new Date(`${value}T12:00:00.000-05:00`).toLocaleDateString("es-CO", {
+      timeZone: BOGOTA_TIME_ZONE,
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+  } catch {
+    return value;
+  }
+}
+
+function getTransactionKind(tx: WalletTransaction): "credit" | "debit" {
+  const txType = (tx.type || "").toLowerCase().trim();
+
+  if (
+    txType === "debit" ||
+    txType === "purchase" ||
+    txType === "order" ||
+    txType.includes("debito") ||
+    txType.includes("débito") ||
+    txType.includes("compra")
+  ) {
+    return "debit";
   }
 
-  if (current <= 4) {
-    return [1, 2, 3, 4, "...", total];
+  if (
+    txType === "credit" ||
+    txType === "deposit" ||
+    txType.includes("credito") ||
+    txType.includes("crédito") ||
+    txType.includes("deposito") ||
+    txType.includes("depósito") ||
+    txType.includes("recarga")
+  ) {
+    return "credit";
   }
 
-  if (current >= total - 3) {
-    return [1, "...", total - 3, total - 2, total - 1, total];
+  return "debit";
+}
+
+function formatMoney(value: number) {
+  return Number(value || 0).toLocaleString("es-CO");
+}
+
+function formatSignedMoney(tx: WalletTransaction) {
+  const amount = Number(tx.amount || 0);
+  const kind = getTransactionKind(tx);
+  return `${kind === "credit" ? "+" : "-"}$ ${formatMoney(amount)}`;
+}
+
+function formatDate(date: string) {
+  try {
+    return new Date(date).toLocaleString("es-CO", {
+      timeZone: BOGOTA_TIME_ZONE,
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return "Sin fecha";
+  }
+}
+
+function formatTransactionNote(tx: WalletTransaction) {
+  const note = tx.note || "";
+
+  return note
+    .replace(/Recarga Wompi aprobada/gi, "Recarga Bre-B / Llaves aprobada")
+    .replace(/Wompi/gi, "Bre-B / Llaves")
+    .trim();
+}
+
+function getTransactionTitle(tx: WalletTransaction) {
+  const txType = (tx.type || "").toLowerCase().trim();
+  const txNote = (tx.note || "").toLowerCase().trim();
+
+  if (
+    txNote.includes("compra") ||
+    txNote.includes("pedido") ||
+    txType === "purchase" ||
+    txType === "order"
+  ) {
+    return "Venta";
   }
 
-  return [1, "...", current - 1, current, current + 1, "...", total];
+  if (
+    txType === "debit" ||
+    txType.includes("debito") ||
+    txType.includes("débito")
+  ) {
+    return "Débito";
+  }
+
+  return "Recarga";
 }
 
 export default function WalletPage() {
   const router = useRouter();
   const historySectionRef = useRef<HTMLDivElement | null>(null);
+  const initialRange = useMemo(() => getCurrentMonthRange(), []);
 
-  const [balance, setBalance] = useState(0);
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<FilterType>("all");
   const [currentPage, setCurrentPage] = useState(1);
+  const [dateFrom, setDateFrom] = useState(initialRange.from);
+  const [dateTo, setDateTo] = useState(initialRange.to);
+
+  const loadWallet = async (showRefreshing = false) => {
+    if (showRefreshing) setRefreshing(true);
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      router.push("/login");
+      return;
+    }
+
+    const { data: txData } = await supabase
+      .from("wallet_transactions")
+      .select("id, type, amount, note, created_at")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false });
+
+    setTransactions((txData as WalletTransaction[]) || []);
+    setLoading(false);
+    setRefreshing(false);
+  };
 
   useEffect(() => {
-    const loadWallet = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+    const timer = window.setTimeout(() => {
+      void loadWallet();
+    }, 0);
 
-      if (!user) {
-        router.push("/login");
-        return;
-      }
-
-      const { data: profileData } = await supabase
-        .from("profiles")
-        .select("balance")
-        .eq("id", user.id)
-        .single();
-
-      const { data: txData } = await supabase
-        .from("wallet_transactions")
-        .select("id, type, amount, note, created_at")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false });
-
-      if (profileData) {
-        const profile = profileData as ProfileBalanceRow;
-        setBalance(Number(profile.balance || 0));
-      }
-
-      if (txData) {
-        setTransactions(txData as WalletTransaction[]);
-      }
-
-      setLoading(false);
-    };
-
-    void loadWallet();
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
-  const getTransactionKind = (tx: WalletTransaction): "credit" | "debit" => {
-    const txType = (tx.type || "").toLowerCase().trim();
+  const rangeIsValid = !dateFrom || !dateTo || dateFrom <= dateTo;
 
-    if (
-      txType === "debit" ||
-      txType === "purchase" ||
-      txType === "order" ||
-      txType.includes("debito") ||
-      txType.includes("débito") ||
-      txType.includes("compra")
-    ) {
-      return "debit";
-    }
+  const periodTransactions = useMemo(() => {
+    if (!rangeIsValid) return [];
 
-    if (
-      txType === "credit" ||
-      txType === "deposit" ||
-      txType.includes("credito") ||
-      txType.includes("crédito") ||
-      txType.includes("deposito") ||
-      txType.includes("depósito") ||
-      txType.includes("recarga")
-    ) {
-      return "credit";
-    }
-
-    return "debit";
-  };
-
-  const filteredTransactions = useMemo(() => {
-    if (filter === "all") return transactions;
+    const start = dateInputToStart(dateFrom);
+    const end = dateInputToEnd(dateTo);
 
     return transactions.filter((tx) => {
-      const kind = getTransactionKind(tx);
-      return filter === kind;
+      const txTime = new Date(tx.created_at).getTime();
+      if (!Number.isFinite(txTime)) return false;
+      if (start !== null && txTime < start) return false;
+      if (end !== null && txTime > end) return false;
+      return true;
     });
-  }, [transactions, filter]);
+  }, [dateFrom, dateTo, rangeIsValid, transactions]);
 
-  const totalPages = useMemo(() => {
-    return Math.max(1, Math.ceil(filteredTransactions.length / PAGE_SIZE));
-  }, [filteredTransactions.length]);
+  const filteredTransactions = useMemo(() => {
+    if (filter === "all") return periodTransactions;
+    return periodTransactions.filter((tx) => getTransactionKind(tx) === filter);
+  }, [filter, periodTransactions]);
 
-  const effectiveCurrentPage = Math.min(currentPage, totalPages);
+  const periodSales = useMemo(() => {
+    return periodTransactions.reduce((sum, tx) => {
+      return getTransactionKind(tx) === "debit"
+        ? sum + Number(tx.amount || 0)
+        : sum;
+    }, 0);
+  }, [periodTransactions]);
 
-  const paginatedTransactions = useMemo(() => {
-    const start = (effectiveCurrentPage - 1) * PAGE_SIZE;
-    const end = start + PAGE_SIZE;
-    return filteredTransactions.slice(start, end);
-  }, [effectiveCurrentPage, filteredTransactions]);
-
-  const paginationItems = useMemo(() => {
-    return buildPagination(effectiveCurrentPage, totalPages);
-  }, [effectiveCurrentPage, totalPages]);
-
-  const pageStart =
-    filteredTransactions.length === 0
-      ? 0
-      : (effectiveCurrentPage - 1) * PAGE_SIZE + 1;
-
-  const pageEnd = Math.min(
-    effectiveCurrentPage * PAGE_SIZE,
-    filteredTransactions.length
-  );
-
-  const handlePageChange = (page: number) => {
-    setCurrentPage(page);
-    historySectionRef.current?.scrollIntoView({
-      behavior: "smooth",
-      block: "start",
-    });
-  };
-
-  const latestTransaction = transactions.length > 0 ? transactions[0] : null;
-
-  const totalCredits = useMemo(() => {
-    return transactions.reduce((sum, tx) => {
+  const periodCredits = useMemo(() => {
+    return periodTransactions.reduce((sum, tx) => {
       return getTransactionKind(tx) === "credit"
         ? sum + Number(tx.amount || 0)
         : sum;
     }, 0);
-  }, [transactions]);
+  }, [periodTransactions]);
 
-  const formatMoney = (value: number) => {
-    return Number(value || 0).toLocaleString("es-CO");
+  const totalPages = Math.max(1, Math.ceil(filteredTransactions.length / PAGE_SIZE));
+  const effectiveCurrentPage = Math.min(currentPage, totalPages);
+
+  const paginatedTransactions = useMemo(() => {
+    const start = (effectiveCurrentPage - 1) * PAGE_SIZE;
+    return filteredTransactions.slice(start, start + PAGE_SIZE);
+  }, [effectiveCurrentPage, filteredTransactions]);
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+    historySectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  const formatSignedMoney = (tx: WalletTransaction) => {
-    const amount = Number(tx.amount || 0);
-    const kind = getTransactionKind(tx);
-
-    return `${kind === "credit" ? "+" : "-"}$ ${formatMoney(amount)}`;
+  const applyRange = (range: DateRange) => {
+    setDateFrom(range.from);
+    setDateTo(range.to);
+    setCurrentPage(1);
   };
 
-  const formatDate = (date: string) => {
-    try {
-      return new Date(date).toLocaleString("es-CO", {
-        year: "numeric",
-        month: "numeric",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-    } catch {
-      return "Sin fecha";
-    }
+  const changeFilter = (nextFilter: FilterType) => {
+    setFilter(nextFilter);
+    setCurrentPage(1);
   };
 
-  const formatTransactionNote = (tx: WalletTransaction) => {
-    const note = tx.note || "";
-
-    return note
-      .replace(/Recarga Wompi aprobada/gi, "Recarga Bre-B / Llaves aprobada")
-      .replace(/Wompi/gi, "Bre-B / Llaves")
-      .trim();
-  };
-
-  const getTransactionTitle = (tx: WalletTransaction) => {
-    const txType = (tx.type || "").toLowerCase().trim();
-    const txNote = (tx.note || "").toLowerCase().trim();
-
-    if (
-      txNote.includes("compra") ||
-      txNote.includes("pedido") ||
-      txType === "purchase" ||
-      txType === "order"
-    ) {
-      return "Compra";
-    }
-
-    if (
-      txType === "debit" ||
-      txType.includes("debito") ||
-      txType.includes("débito")
-    ) {
-      return "Débito";
-    }
-
-    return "Recarga";
-  };
+  const periodLabel = `${formatInputDate(dateFrom)} — ${formatInputDate(dateTo)}`;
+  const creditCount = periodTransactions.filter(
+    (tx) => getTransactionKind(tx) === "credit"
+  ).length;
 
   if (loading) {
     return (
-      <main className="min-h-screen flex items-center justify-center bg-black text-white">
-        <p className="text-white/70">Cargando wallet...</p>
+      <main className="flex min-h-screen items-center justify-center bg-black text-white">
+        <div className="flex items-center gap-3 text-sm text-white/60">
+          <RefreshCw className="h-4 w-4 animate-spin" />
+          Cargando billetera...
+        </div>
       </main>
     );
   }
 
   return (
     <main className="min-h-screen bg-transparent text-white">
-      <section className="max-w-7xl mx-auto px-6 py-10 md:px-10">
-        <div className="mb-8">
-          <p className="text-sm uppercase tracking-[0.2em] text-white/45">
-            Wallet
-          </p>
-          <h1 className="mt-2 text-4xl font-extrabold md:text-5xl">
-            Mi billetera
-          </h1>
-          <p className="mt-3 text-white/65">
-            Consulta tu saldo disponible y revisa el historial de tus transacciones.
-          </p>
-          <p className="mt-2 text-sm text-white/40">
-            Mostrando {filteredTransactions.length} transacción(es)
-          </p>
-        </div>
+      <section className="mx-auto w-full max-w-5xl px-3 py-5 sm:px-5 sm:py-7 lg:px-8">
+        <header className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-violet-300/70">
+              Billetera
+            </p>
+            <h1 className="mt-1 text-2xl font-black sm:text-3xl">Resumen de ventas</h1>
+          </div>
 
-        <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)_minmax(0,1fr)]">
-          <div className="rounded-[28px] border border-white/10 bg-slate-800/80 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-md">
-            <div className="flex items-start justify-between">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-500 text-white shadow-[0_0_30px_rgba(14,165,233,0.25)]">
-                <svg
-                  viewBox="0 0 24 24"
-                  className="h-6 w-6"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M3 7h18" />
-                  <path d="M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" />
-                  <path d="M16 13h.01" />
-                </svg>
+          <button
+            type="button"
+            onClick={() => void loadWallet(true)}
+            disabled={refreshing}
+            aria-label="Actualizar billetera"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white/75 transition hover:bg-white/10 disabled:opacity-50"
+          >
+            <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+          </button>
+        </header>
+
+        <section className="mt-5 overflow-hidden rounded-[24px] border border-violet-400/20 bg-gradient-to-br from-violet-500/20 via-slate-900/90 to-slate-950/90 shadow-[0_18px_50px_rgba(0,0,0,0.28)] backdrop-blur-xl">
+          <div className="p-4 sm:p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-violet-200/75">Vendido en el período</p>
+                <p className="mt-1 break-words text-3xl font-black text-white sm:text-4xl">
+                  $ {formatMoney(periodSales)}
+                </p>
+                <p className="mt-1 truncate text-xs text-white/45 sm:text-sm">{periodLabel}</p>
               </div>
 
-              <div className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-300">
-                Disponible
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-violet-400/15 text-violet-200">
+                <CreditCard className="h-5 w-5" />
               </div>
             </div>
 
-            <div className="mt-6">
-              <p className="text-4xl font-black text-white">
-                $ {formatMoney(balance)}
-              </p>
-              <p className="mt-2 text-base text-white/60">Saldo actual</p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="min-w-0">
+                <label className="mb-1.5 block text-xs font-semibold text-white/55">Desde</label>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  max={dateTo || undefined}
+                  onChange={(event) => {
+                    setDateFrom(event.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="w-full min-w-0 rounded-xl border border-white/10 bg-black/25 px-3 py-2.5 text-sm text-white outline-none [color-scheme:dark] focus:border-violet-400/50"
+                />
+              </div>
+
+              <div className="min-w-0">
+                <label className="mb-1.5 block text-xs font-semibold text-white/55">Hasta</label>
+                <input
+                  type="date"
+                  value={dateTo}
+                  min={dateFrom || undefined}
+                  onChange={(event) => {
+                    setDateTo(event.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="w-full min-w-0 rounded-xl border border-white/10 bg-black/25 px-3 py-2.5 text-sm text-white outline-none [color-scheme:dark] focus:border-violet-400/50"
+                />
+              </div>
             </div>
-          </div>
 
-          <div className="rounded-[28px] border border-white/10 bg-slate-800/80 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-md">
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-white/35">
-              Total acreditado
-            </p>
-            <p className="mt-4 text-4xl font-black text-emerald-300">
-              $ {formatMoney(totalCredits)}
-            </p>
-            <p className="mt-3 text-sm text-white/60">
-              Suma acumulada de todas tus recargas y abonos registrados en la billetera.
-            </p>
-          </div>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={() => applyRange(getCurrentMonthRange())}
+                className="flex-1 rounded-xl border border-violet-300/20 bg-violet-400/10 px-3 py-2 text-xs font-bold text-violet-100 transition hover:bg-violet-400/20"
+              >
+                Este mes
+              </button>
+              <button
+                type="button"
+                onClick={() => applyRange(getPreviousMonthRange())}
+                className="flex-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-white/65 transition hover:bg-white/10 hover:text-white"
+              >
+                Mes anterior
+              </button>
+            </div>
 
-          <div className="rounded-[28px] border border-white/10 bg-slate-800/80 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-md">
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-white/35">
-              Último movimiento
-            </p>
-            {latestTransaction ? (
-              <>
-                <p className="mt-4 text-2xl font-black text-white">
-                  {getTransactionTitle(latestTransaction)}
-                </p>
-                <p className="mt-2 text-lg font-bold text-sky-300">
-                  {formatSignedMoney(latestTransaction)}
-                </p>
-                <p className="mt-3 text-sm text-white/60">
-                  {formatTransactionNote(latestTransaction) || "Movimiento registrado"}
-                </p>
-                <p className="mt-2 text-sm text-white/40">
-                  {formatDate(latestTransaction.created_at)}
-                </p>
-              </>
-            ) : (
-              <p className="mt-4 text-sm text-white/60">
-                Aún no hay movimientos registrados.
+            {!rangeIsValid ? (
+              <p className="mt-3 rounded-xl border border-red-400/20 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200">
+                La fecha inicial no puede ser posterior a la fecha final.
               </p>
-            )}
+            ) : null}
+          </div>
+        </section>
+
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4 backdrop-blur-xl">
+            <div className="flex items-center gap-2 text-emerald-300">
+              <ArrowUpRight className="h-4 w-4" />
+              <p className="text-xs font-semibold">Recargas</p>
+            </div>
+            <p className="mt-2 break-words text-xl font-black text-white">
+              $ {formatMoney(periodCredits)}
+            </p>
+            <p className="mt-1 text-[11px] text-white/35">{creditCount} movimiento(s)</p>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4 backdrop-blur-xl">
+            <div className="flex items-center gap-2 text-sky-300">
+              <History className="h-4 w-4" />
+              <p className="text-xs font-semibold">Movimientos</p>
+            </div>
+            <p className="mt-2 text-xl font-black text-white">{periodTransactions.length}</p>
+            <p className="mt-1 text-[11px] text-white/35">En el período</p>
           </div>
         </div>
 
-        <div className="mt-8 rounded-[28px] border border-white/10 bg-slate-800/80 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-md">
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-white/35">
-            Filtrar movimientos
-          </p>
-
-          <div className="mt-5 flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={() => setFilter("all")}
-              className={
-                filter === "all"
-                  ? "rounded-2xl border border-blue-400/30 bg-blue-500/15 px-5 py-3 text-sm font-semibold text-blue-300 shadow-[0_0_14px_rgba(59,130,246,0.18)]"
-                  : "rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-white/70 transition hover:bg-white/10 hover:text-white"
-              }
-            >
-              Todas
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setFilter("credit")}
-              className={
-                filter === "credit"
-                  ? "rounded-2xl border border-emerald-400/30 bg-emerald-500/15 px-5 py-3 text-sm font-semibold text-emerald-300 shadow-[0_0_14px_rgba(16,185,129,0.18)]"
-                  : "rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-white/70 transition hover:bg-white/10 hover:text-white"
-              }
-            >
-              Créditos
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setFilter("debit")}
-              className={
-                filter === "debit"
-                  ? "rounded-2xl border border-red-400/30 bg-red-500/15 px-5 py-3 text-sm font-semibold text-red-300 shadow-[0_0_14px_rgba(239,68,68,0.18)]"
-                  : "rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-white/70 transition hover:bg-white/10 hover:text-white"
-              }
-            >
-              Débitos
-            </button>
-          </div>
-        </div>
-
-        <div
+        <section
           ref={historySectionRef}
-          className="mt-8 rounded-[28px] border border-white/10 bg-slate-800/80 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-md"
+          className="mt-4 overflow-hidden rounded-[24px] border border-white/10 bg-slate-900/75 shadow-[0_18px_50px_rgba(0,0,0,0.25)] backdrop-blur-xl"
         >
-          <div className="border-b border-white/10 px-6 py-5">
-            <h3 className="text-2xl font-extrabold">
-              Historial de transacciones
-            </h3>
+          <div className="border-b border-white/10 p-4 sm:p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/35">
+                  Historial
+                </p>
+                <h2 className="mt-1 text-lg font-extrabold">Movimientos</h2>
+              </div>
+              <span className="text-xs text-white/40">{filteredTransactions.length}</span>
+            </div>
+
+            <div className="mt-3 grid grid-cols-3 gap-2 rounded-2xl bg-black/20 p-1">
+              {(
+                [
+                  ["all", "Todos"],
+                  ["credit", "Recargas"],
+                  ["debit", "Ventas"],
+                ] as Array<[FilterType, string]>
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => changeFilter(value)}
+                  className={`rounded-xl px-2 py-2 text-xs font-bold transition ${
+                    filter === value
+                      ? "bg-white text-slate-950 shadow-sm"
+                      : "text-white/50 hover:text-white"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {filteredTransactions.length === 0 ? (
-            <div className="px-6 py-10 text-white/60">
-              Aún no hay movimientos registrados para este filtro.
+            <div className="px-4 py-10 text-center text-sm text-white/45">
+              No hay movimientos en el período seleccionado.
             </div>
           ) : (
-            <div className="divide-y divide-white/10">
+            <div className="divide-y divide-white/8">
               {paginatedTransactions.map((tx) => {
                 const kind = getTransactionKind(tx);
 
                 return (
-                  <div
-                    key={tx.id}
-                    className="flex flex-col gap-4 px-6 py-5 md:flex-row md:items-center md:justify-between"
-                  >
-                    <div className="flex items-start gap-4">
-                      <div
-                        className={`flex h-12 w-12 items-center justify-center rounded-2xl ${
-                          kind === "credit"
-                            ? "bg-emerald-500/15 text-emerald-300"
-                            : "bg-red-500/15 text-red-300"
-                        }`}
-                      >
-                        {kind === "credit" ? (
-                          <svg
-                            viewBox="0 0 24 24"
-                            className="h-6 w-6"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          >
-                            <path d="M7 17 17 7" />
-                            <path d="M8 7h9v9" />
-                          </svg>
-                        ) : (
-                          <svg
-                            viewBox="0 0 24 24"
-                            className="h-6 w-6"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          >
-                            <path d="M7 7 17 17" />
-                            <path d="M17 8v9H8" />
-                          </svg>
-                        )}
-                      </div>
-
-                      <div>
-                        <div className="flex flex-wrap items-center gap-3">
-                          <p className="text-lg font-bold text-white">
-                            {getTransactionTitle(tx)}
-                          </p>
-
-                          <span
-                            className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                              kind === "credit"
-                                ? "border border-emerald-400/20 bg-emerald-400/10 text-emerald-300"
-                                : "border border-red-400/20 bg-red-400/10 text-red-300"
-                            }`}
-                          >
-                            {kind === "credit" ? "Crédito" : "Débito"}
-                          </span>
-                        </div>
-
-                        <p className="mt-2 text-sm text-white/55">
-                          {formatTransactionNote(tx) || "Registrado"}
-                        </p>
-
-                        <p className="mt-1 text-sm text-white/35">
-                          {formatDate(tx.created_at)}
-                        </p>
-                      </div>
+                  <article key={tx.id} className="flex items-center gap-3 px-4 py-3.5 sm:px-5">
+                    <div
+                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+                        kind === "credit"
+                          ? "bg-emerald-500/12 text-emerald-300"
+                          : "bg-red-500/12 text-red-300"
+                      }`}
+                    >
+                      {kind === "credit" ? (
+                        <ArrowUpRight className="h-4 w-4" />
+                      ) : (
+                        <ArrowDownLeft className="h-4 w-4" />
+                      )}
                     </div>
 
-                    <div className="text-left md:text-right">
-                      <p
-                        className={`text-3xl font-black ${
-                          kind === "credit"
-                            ? "text-emerald-400"
-                            : "text-red-400"
-                        }`}
-                      >
-                        {formatSignedMoney(tx)}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="truncate text-sm font-bold text-white">
+                          {getTransactionTitle(tx)}
+                        </p>
+                        <p
+                          className={`shrink-0 text-sm font-black ${
+                            kind === "credit" ? "text-emerald-300" : "text-red-300"
+                          }`}
+                        >
+                          {formatSignedMoney(tx)}
+                        </p>
+                      </div>
+
+                      <p className="mt-0.5 truncate text-xs text-white/40">
+                        {formatTransactionNote(tx) || "Movimiento registrado"}
                       </p>
+                      <p className="mt-0.5 text-[11px] text-white/25">{formatDate(tx.created_at)}</p>
                     </div>
-                  </div>
+                  </article>
                 );
               })}
             </div>
           )}
-        </div>
 
-        {filteredTransactions.length > 0 && (
-          <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <p className="text-sm text-white/60">
-              Mostrando <span className="font-semibold text-white">{pageStart}</span>{" "}
-              - <span className="font-semibold text-white">{pageEnd}</span> de{" "}
-              <span className="font-semibold text-white">
-                {filteredTransactions.length}
-              </span>{" "}
-              transacciones
-            </p>
+          {filteredTransactions.length > PAGE_SIZE ? (
+            <div className="flex items-center justify-between border-t border-white/10 px-4 py-3 sm:px-5">
+              <button
+                type="button"
+                onClick={() => handlePageChange(Math.max(effectiveCurrentPage - 1, 1))}
+                disabled={effectiveCurrentPage === 1}
+                aria-label="Página anterior"
+                className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/70 disabled:opacity-30"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
 
-            {totalPages > 1 && (
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    handlePageChange(Math.max(effectiveCurrentPage - 1, 1))
-                  }
-                  disabled={effectiveCurrentPage === 1}
-                  className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3 text-sm font-semibold text-white/80 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  ‹
-                </button>
+              <p className="text-xs font-semibold text-white/45">
+                Página <span className="text-white">{effectiveCurrentPage}</span> de {totalPages}
+              </p>
 
-                {paginationItems.map((item, index) =>
-                  item === "..." ? (
-                    <span
-                      key={`wallet-ellipsis-${index}`}
-                      className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-transparent px-3 text-sm font-semibold text-white/35"
-                    >
-                      ...
-                    </span>
-                  ) : (
-                    <button
-                      key={item}
-                      type="button"
-                      onClick={() => handlePageChange(item)}
-                      className={`flex h-11 min-w-[44px] items-center justify-center rounded-2xl border px-3 text-sm font-semibold transition ${
-                        effectiveCurrentPage === item
-                          ? "border-blue-400/40 bg-blue-500/15 text-blue-300"
-                          : "border-white/10 bg-white/5 text-white/80 hover:bg-white/10"
-                      }`}
-                    >
-                      {item}
-                    </button>
-                  )
-                )}
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    handlePageChange(
-                      Math.min(effectiveCurrentPage + 1, totalPages)
-                    )
-                  }
-                  disabled={effectiveCurrentPage === totalPages}
-                  className="flex h-11 min-w-[44px] items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3 text-sm font-semibold text-white/80 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  ›
-                </button>
-              </div>
-            )}
-          </div>
-        )}
+              <button
+                type="button"
+                onClick={() => handlePageChange(Math.min(effectiveCurrentPage + 1, totalPages))}
+                disabled={effectiveCurrentPage === totalPages}
+                aria-label="Página siguiente"
+                className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/70 disabled:opacity-30"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          ) : null}
+        </section>
       </section>
     </main>
   );

@@ -70,6 +70,7 @@ export default function OrderDetailPage() {
         .select("id, order_number, total, status, created_at, user_id")
         .eq("id", orderId)
         .eq("user_id", user.id)
+        .eq("is_reverted", false)
         .maybeSingle();
 
       if (!mounted) return;

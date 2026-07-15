@@ -9,6 +9,10 @@ import OrderReceiptModal, {
 type AdminOrder = ReceiptOrder & {
   customer_email: string;
   customer_full_name: string;
+  is_reverted: boolean;
+  reverted_at: string | null;
+  reverted_by: string | null;
+  released_license_count: number;
 };
 
 type BannerState = {
@@ -63,6 +67,7 @@ function getStatusLabel(status: string | null | undefined) {
   if (normalized === "pending") return "Pendiente";
   if (normalized === "cancelled") return "Cancelado";
   if (normalized === "completed") return "Completado";
+  if (normalized === "reverted") return "Revertido";
 
   return status || "Completado";
 }
@@ -78,11 +83,11 @@ function getStatusClasses(status: string | null | undefined) {
     return "border border-amber-400/20 bg-amber-400/10 text-amber-300";
   }
 
-  if (normalized === "cancelled") {
-    return "border border-red-400/20 bg-red-400/10 text-red-300";
+  if (normalized === "cancelled" || normalized === "reverted") {
+    return "border border-rose-200 bg-rose-50 text-rose-700";
   }
 
-  return "border border-white/10 bg-white/5 text-white/75";
+  return "border border-slate-200 bg-slate-50 text-slate-700";
 }
 
 export default function AdminOrdersPage() {
@@ -92,8 +97,10 @@ export default function AdminOrdersPage() {
   const [loading, setLoading] = useState(true);
   const [banner, setBanner] = useState<BannerState>(null);
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"ACTIVE" | "REVERTED" | "ALL">("ACTIVE");
   const [selectedOrder, setSelectedOrder] = useState<ReceiptOrder | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [reversingOrderId, setReversingOrderId] = useState<string | null>(null);
 
   const loadOrders = useCallback(async () => {
     setLoading(true);
@@ -152,12 +159,73 @@ export default function AdminOrdersPage() {
     };
   }, [loadOrders]);
 
+  const reverseOrder = async (order: AdminOrder) => {
+    if (order.is_reverted || reversingOrderId) return;
+
+    const confirmed = window.confirm(
+      `¿Revertir el pedido ${formatOrderNumber(order.order_number)}?\n\nSe devolverán ${formatMoney(order.total)} al cliente, las licencias volverán al stock y el pedido desaparecerá de su historial.`
+    );
+
+    if (!confirmed) return;
+
+    setReversingOrderId(order.id);
+    setBanner(null);
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        throw new Error("Tu sesión expiró. Inicia sesión de nuevo.");
+      }
+
+      const response = await fetch("/api/admin/orders/reverse", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ orderId: order.id }),
+      });
+
+      const result = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(result?.error || "No se pudo revertir el pedido.");
+      }
+
+      if (selectedOrder?.id === order.id) {
+        setSelectedOrder(null);
+      }
+
+      await loadOrders();
+      setStatusFilter("REVERTED");
+      setBanner({
+        kind: "success",
+        text: `Pedido revertido. Se devolvieron ${formatMoney(result?.refundAmount || order.total)} y se liberaron ${Number(result?.releasedLicenses || 0)} licencia(s).`,
+      });
+    } catch (error) {
+      setBanner({
+        kind: "error",
+        text: error instanceof Error ? error.message : "No se pudo revertir el pedido.",
+      });
+    } finally {
+      setReversingOrderId(null);
+    }
+  };
+
   const filteredOrders = useMemo(() => {
     const term = search.trim().toLowerCase();
 
-    if (!term) return orders;
-
     return orders.filter((order) => {
+      const matchesStatus =
+        statusFilter === "ALL" ||
+        (statusFilter === "REVERTED" ? order.is_reverted : !order.is_reverted);
+
+      if (!matchesStatus) return false;
+      if (!term) return true;
+
       const orderNumber = String(order.order_number || "").toLowerCase();
       const email = (order.customer_email || "").toLowerCase();
       const fullName = (order.customer_full_name || "").toLowerCase();
@@ -174,17 +242,24 @@ export default function AdminOrdersPage() {
         licensesText.includes(term)
       );
     });
-  }, [orders, search]);
+  }, [orders, search, statusFilter]);
 
   const totalRevenue = useMemo(() => {
-    return filteredOrders.reduce(
-      (sum, order) => sum + Number(order.total || 0),
-      0
-    );
-  }, [filteredOrders]);
+    return filteredOrders.reduce((sum, order) => {
+      if (statusFilter === "REVERTED") {
+        return sum + Number(order.total || 0);
+      }
+
+      return order.is_reverted ? sum : sum + Number(order.total || 0);
+    }, 0);
+  }, [filteredOrders, statusFilter]);
 
   const totalLicenses = useMemo(() => {
     return filteredOrders.reduce((sum, order) => {
+      if (order.is_reverted) {
+        return sum + Number(order.released_license_count || 0);
+      }
+
       return (
         sum +
         order.items.reduce((itemAcc, item) => itemAcc + item.licenses.length, 0)
@@ -247,17 +322,37 @@ export default function AdminOrdersPage() {
             </p>
           </div>
 
-          <div className="w-full lg:max-w-md">
-            <label className="mb-2 block text-sm font-semibold text-slate-700">
-              Buscar pedido
-            </label>
-            <input
-              type="text"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Buscar por ID, número, correo o licencia"
-              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400"
-            />
+          <div className="grid w-full gap-3 sm:grid-cols-[minmax(0,1fr)_180px] lg:max-w-2xl">
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">
+                Buscar pedido
+              </label>
+              <input
+                type="text"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Número, correo o licencia"
+                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">
+                Mostrar
+              </label>
+              <select
+                value={statusFilter}
+                onChange={(event) => {
+                  setStatusFilter(event.target.value as "ACTIVE" | "REVERTED" | "ALL");
+                  setCurrentPage(1);
+                }}
+                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-slate-400"
+              >
+                <option value="ACTIVE">Pedidos activos</option>
+                <option value="REVERTED">Revertidos</option>
+                <option value="ALL">Todos</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -285,7 +380,7 @@ export default function AdminOrdersPage() {
 
           <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
-              Facturación
+              {statusFilter === "REVERTED" ? "Monto devuelto" : "Facturación"}
             </p>
             <p className="mt-4 text-4xl font-extrabold text-slate-900">
               {formatMoney(totalRevenue)}
@@ -294,7 +389,7 @@ export default function AdminOrdersPage() {
 
           <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
-              Licencias entregadas
+              {statusFilter === "REVERTED" ? "Licencias restauradas" : "Licencias entregadas"}
             </p>
             <p className="mt-4 text-4xl font-extrabold text-slate-900">
               {totalLicenses}
@@ -325,10 +420,12 @@ export default function AdminOrdersPage() {
 
               <div className="divide-y divide-slate-200">
                 {paginatedOrders.map((order) => {
-                  const licensesCount = order.items.reduce(
-                    (sum, item) => sum + item.licenses.length,
-                    0
-                  );
+                  const licensesCount = order.is_reverted
+                    ? Number(order.released_license_count || 0)
+                    : order.items.reduce(
+                        (sum, item) => sum + item.licenses.length,
+                        0
+                      );
 
                   const licensesPreview = getLicensesPreview(order);
 
@@ -361,7 +458,7 @@ export default function AdminOrdersPage() {
                             </p>
                             <p className="mt-1 text-sm font-medium text-slate-700">
                               {licensesCount > 0
-                                ? `${licensesCount} licencia(s)`
+                                ? `${licensesCount} licencia(s) ${order.is_reverted ? "restaurada(s)" : ""}`
                                 : "Sin licencias"}
                             </p>
 
@@ -405,7 +502,7 @@ export default function AdminOrdersPage() {
                           </p>
                         </div>
 
-                        <div className="xl:text-right">
+                        <div className="flex flex-col gap-2 xl:items-end">
                           <button
                             type="button"
                             onClick={() => setSelectedOrder(order)}
@@ -413,6 +510,21 @@ export default function AdminOrdersPage() {
                           >
                             Ver comprobante
                           </button>
+
+                          {!order.is_reverted ? (
+                            <button
+                              type="button"
+                              onClick={() => void reverseOrder(order)}
+                              disabled={Boolean(reversingOrderId)}
+                              className="inline-flex w-full items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 px-5 py-3 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60 xl:w-auto"
+                            >
+                              {reversingOrderId === order.id ? "Revirtiendo..." : "Revertir pedido"}
+                            </button>
+                          ) : (
+                            <p className="text-xs font-semibold text-rose-600">
+                              Revertido {order.reverted_at ? formatDate(order.reverted_at) : ""}
+                            </p>
+                          )}
                         </div>
                       </div>
                     </div>

@@ -95,6 +95,7 @@ function OrderReceiptModalContent({
     if (normalized === "pending") return "Pendiente";
     if (normalized === "processing") return "Procesando";
     if (normalized === "cancelled") return "Cancelado";
+    if (normalized === "reverted") return "Revertido";
 
     return status || "Completado";
   };
@@ -114,7 +115,7 @@ function OrderReceiptModalContent({
       return "border border-blue-400/20 bg-blue-400/10 text-blue-300";
     }
 
-    if (normalized === "cancelled") {
+    if (normalized === "cancelled" || normalized === "reverted") {
       return "border border-red-400/20 bg-red-400/10 text-red-300";
     }
 

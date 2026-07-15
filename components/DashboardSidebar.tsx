@@ -34,7 +34,8 @@ export default function DashboardSidebar() {
           <Link href="/account/wallet" className="block hover:text-blue-400">
             Mi saldo
           </Link>
-        </nav>
+
+</nav>
       </div>
 
       <div className="border-t border-white/10 my-6"></div>
@@ -61,7 +62,7 @@ export default function DashboardSidebar() {
             Usuarios
           </Link>
 
-          <Link href="/admin/wallet" className="block hover:text-blue-400">
+<Link href="/admin/wallet" className="block hover:text-blue-400">
             Wallet
           </Link>
         </nav>

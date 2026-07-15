@@ -100,6 +100,7 @@ export default function AccountOrdersPage() {
       .from("orders")
       .select("id, order_number, user_id, total, status, created_at")
       .eq("user_id", user.id)
+      .eq("is_reverted", false)
       .order("created_at", { ascending: false });
 
     if (ordersError) {
