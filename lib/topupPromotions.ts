@@ -29,21 +29,13 @@ export type TopupPromotionCalculation = {
   totalAmount: number;
 };
 
-type ZonedDateParts = {
+type BogotaDateParts = {
   weekday: number;
   hour: number;
   minute: number;
 };
 
-const WEEKDAY_MAP: Record<string, number> = {
-  Sun: 0,
-  Mon: 1,
-  Tue: 2,
-  Wed: 3,
-  Thu: 4,
-  Fri: 5,
-  Sat: 6,
-};
+const BOGOTA_UTC_OFFSET_MINUTES = -5 * 60;
 
 function toNumber(value: number | string | null | undefined) {
   const numeric = Number(value || 0);
@@ -63,22 +55,18 @@ function parseTimeToMinutes(value: string | null | undefined, fallback: number) 
   return hour * 60 + minute;
 }
 
-function getZonedDateParts(date: Date, timeZone: string): ZonedDateParts {
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  });
-
-  const parts = formatter.formatToParts(date);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+/**
+ * Colombia uses UTC-5 throughout the year and does not use daylight-saving time.
+ * Calculating the local parts arithmetically avoids browser/server Intl differences
+ * and removes any dependency on a dynamically named timezone variable.
+ */
+function getBogotaDateParts(date: Date): BogotaDateParts {
+  const shifted = new Date(date.getTime() + BOGOTA_UTC_OFFSET_MINUTES * 60_000);
 
   return {
-    weekday: WEEKDAY_MAP[values.weekday] ?? date.getUTCDay(),
-    hour: Number(values.hour || 0),
-    minute: Number(values.minute || 0),
+    weekday: shifted.getUTCDay(),
+    hour: shifted.getUTCHours(),
+    minute: shifted.getUTCMinutes(),
   };
 }
 
@@ -124,11 +112,10 @@ export function getPromotionRuntimeStatus(
   const weekdays = normalizeWeekdays(promotion.weekdays);
   if (weekdays.length === 0) return "SCHEDULED";
 
-  const timeZone = String(promotion.schedule_timezone || "America/Bogota").trim() || "America/Bogota";
-  const zoned = getZonedDateParts(new Date(referenceTime), timeZone);
-  if (!weekdays.includes(zoned.weekday)) return "SCHEDULED";
+  const bogota = getBogotaDateParts(new Date(referenceTime));
+  if (!weekdays.includes(bogota.weekday)) return "SCHEDULED";
 
-  const currentMinutes = zoned.hour * 60 + zoned.minute;
+  const currentMinutes = bogota.hour * 60 + bogota.minute;
   const startMinutes = parseTimeToMinutes(promotion.daily_start_time, 0);
   const endMinutes = parseTimeToMinutes(promotion.daily_end_time, 23 * 60 + 59);
 

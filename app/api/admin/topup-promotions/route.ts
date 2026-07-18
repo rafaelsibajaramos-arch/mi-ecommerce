@@ -158,7 +158,8 @@ function timeToMinutes(value: string) {
   return hour * 60 + minute;
 }
 
-function normalizeTimezone(_value: unknown) {
+function normalizeTimezone(value: unknown) {
+  void value;
   // La plataforma opera con horario de Colombia. Mantenerlo fijo evita
   // referencias indefinidas y diferencias entre navegador, servidor y Supabase.
   return PROMOTION_TIME_ZONE;
