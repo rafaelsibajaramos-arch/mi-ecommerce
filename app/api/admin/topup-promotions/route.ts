@@ -10,6 +10,8 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const PROMOTION_TIME_ZONE = "America/Bogota";
+
 type AnyRow = Record<string, unknown>;
 
 type PromotionPayload = {
@@ -156,15 +158,10 @@ function timeToMinutes(value: string) {
   return hour * 60 + minute;
 }
 
-function normalizeTimezone(value: unknown) {
-  const timezone = normalizeText(value, "America/Bogota") || "America/Bogota";
-
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: timezone }).format(new Date());
-    return timezone;
-  } catch {
-    throw new Error("La zona horaria seleccionada no es válida.");
-  }
+function normalizeTimezone(_value: unknown) {
+  // La plataforma opera con horario de Colombia. Mantenerlo fijo evita
+  // referencias indefinidas y diferencias entre navegador, servidor y Supabase.
+  return PROMOTION_TIME_ZONE;
 }
 
 function normalizePromotionPayload(body: PromotionPayload) {
