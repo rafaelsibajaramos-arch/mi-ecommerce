@@ -223,20 +223,53 @@ export async function creditWalletTopup(
 ) {
     const startedAt = new Date(Date.now() - 2 * 60 * 1000).toISOString();
 
+    // Esta RPC es la operación principal y transaccional que acredita el saldo.
+    // Si falla, sí debemos detener el flujo para que el pago bancario pueda liberarse.
     const { error } = await supabaseAdmin.rpc("credit_wallet_topup", {
         p_topup_id: topupId,
     });
 
     if (error) throw new Error(error.message);
 
-    const creditedTopup = await getWalletTopupById(supabaseAdmin, topupId);
+    // Todo lo que ocurre después es mantenimiento auxiliar. Nunca debe hacer que una
+    // acreditación ya confirmada parezca fallida ni que el pago del banco se libere.
+    try {
+        const creditedTopup = await getWalletTopupById(supabaseAdmin, topupId);
 
-    if (creditedTopup && normalizeTopupStatus(creditedTopup.status) === "APPROVED") {
-        await repairLegacyWompiTransactionLabel(supabaseAdmin, creditedTopup, startedAt);
-        await ensureWalletTransactionForTopup(supabaseAdmin, creditedTopup);
+        if (!creditedTopup || normalizeTopupStatus(creditedTopup.status) !== "APPROVED") return;
+
+        try {
+            await repairLegacyWompiTransactionLabel(supabaseAdmin, creditedTopup, startedAt);
+        } catch (maintenanceError) {
+            console.warn(
+                "No se pudo reparar la etiqueta de la transacción de billetera:",
+                maintenanceError instanceof Error ? maintenanceError.message : maintenanceError
+            );
+        }
+
+        try {
+            await ensureWalletTransactionForTopup(supabaseAdmin, creditedTopup);
+        } catch (maintenanceError) {
+            console.warn(
+                "No se pudo asegurar el movimiento de billetera de la recarga:",
+                maintenanceError instanceof Error ? maintenanceError.message : maintenanceError
+            );
+        }
 
         if (Number(creditedTopup.promotion_bonus_amount || 0) > 0 && !creditedTopup.promotion_applied_at) {
-            await applyTopupPromotionBonus(supabaseAdmin, creditedTopup.id);
+            try {
+                await applyTopupPromotionBonus(supabaseAdmin, creditedTopup.id);
+            } catch (maintenanceError) {
+                console.warn(
+                    "No se pudo aplicar el bono promocional después de acreditar la recarga:",
+                    maintenanceError instanceof Error ? maintenanceError.message : maintenanceError
+                );
+            }
         }
+    } catch (maintenanceError) {
+        console.warn(
+            "La recarga fue acreditada, pero no se pudo completar el mantenimiento posterior:",
+            maintenanceError instanceof Error ? maintenanceError.message : maintenanceError
+        );
     }
 }

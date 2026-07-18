@@ -3,6 +3,7 @@ import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { createSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { approveTopupWithBankPayment, payerNamesMatch } from "../../../../lib/bankTopups";
+import { creditWalletTopup, getWalletTopupById } from "../../../../lib/walletTopups";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -113,8 +114,13 @@ async function matchPendingTopups(
             bankPaymentId: payment.id,
         });
         return true;
-    } catch {
-        return false; // el lock is_used=false protege contra carreras
+    } catch (error) {
+        console.error("No se pudo acreditar automáticamente la transferencia:", {
+            paymentId: payment.id,
+            topupId: pendingTopup.id,
+            error: error instanceof Error ? error.message : error,
+        });
+        return false;
     }
 }
 
@@ -124,6 +130,7 @@ async function reconcileUnusedBankPayments(supabaseAdmin: ReturnType<typeof crea
         .select("id, amount, payer_origin, normalized_payer_origin")
         .eq("provider", PROVIDER)
         .eq("is_used", false)
+        .is("matched_topup_id", null)
         .order("paid_at", { ascending: false, nullsFirst: false })
         .order("created_at", { ascending: false })
         .limit(100);
@@ -155,6 +162,116 @@ async function reconcileUnusedBankPayments(supabaseAdmin: ReturnType<typeof crea
     }
 
     return matchedCount;
+}
+
+
+function isOlderThanTwoMinutes(value: string | null | undefined) {
+    if (!value) return true;
+    const timestamp = new Date(value).getTime();
+    if (!Number.isFinite(timestamp)) return true;
+    return Date.now() - timestamp > 2 * 60 * 1000;
+}
+
+async function repairIncompleteBankMatches(supabaseAdmin: ReturnType<typeof createSupabaseAdmin>) {
+    const { data: payments, error } = await supabaseAdmin
+        .from("bank_payment_notifications")
+        .select("id, is_used, matched_topup_id, used_at, updated_at")
+        .not("matched_topup_id", "is", null)
+        .order("updated_at", { ascending: true })
+        .limit(250);
+
+    if (error) throw new Error(error.message);
+    if (!payments || payments.length === 0) {
+        return { finalized: 0, released: 0, credited: 0, errors: [] as string[] };
+    }
+
+    let finalized = 0;
+    let released = 0;
+    let credited = 0;
+    const errors: string[] = [];
+
+    for (const payment of payments as Array<{
+        id: string;
+        is_used: boolean | null;
+        matched_topup_id: string | null;
+        used_at: string | null;
+        updated_at: string | null;
+    }>) {
+        if (!payment.matched_topup_id || !isOlderThanTwoMinutes(payment.updated_at || payment.used_at)) continue;
+
+        try {
+            const topup = await getWalletTopupById(supabaseAdmin, payment.matched_topup_id);
+
+            if (!topup) {
+                errors.push(`Pago ${payment.id}: la recarga asociada no existe.`);
+                continue;
+            }
+
+            const status = String(topup.status || "PENDING").toUpperCase();
+
+            if (topup.credited_at) {
+                if (!payment.is_used) {
+                    const usedAt = new Date().toISOString();
+                    const { error: finalizeError } = await supabaseAdmin
+                        .from("bank_payment_notifications")
+                        .update({ is_used: true, used_at: usedAt, updated_at: usedAt })
+                        .eq("id", payment.id)
+                        .eq("matched_topup_id", topup.id);
+
+                    if (finalizeError) throw new Error(finalizeError.message);
+                    finalized += 1;
+                }
+                continue;
+            }
+
+            if (status === "APPROVED") {
+                await creditWalletTopup(supabaseAdmin, topup.id);
+                const refreshed = await getWalletTopupById(supabaseAdmin, topup.id);
+
+                if (!refreshed?.credited_at) {
+                    throw new Error("La recarga aprobada no confirmó credited_at después del reintento.");
+                }
+
+                const usedAt = new Date().toISOString();
+                const { error: finalizeError } = await supabaseAdmin
+                    .from("bank_payment_notifications")
+                    .update({ is_used: true, used_at: usedAt, updated_at: usedAt })
+                    .eq("id", payment.id)
+                    .eq("matched_topup_id", topup.id);
+
+                if (finalizeError) throw new Error(finalizeError.message);
+                credited += 1;
+                continue;
+            }
+
+            if (["PENDING", "REJECTED", "EXPIRED", "VOIDED", "ERROR"].includes(status)) {
+                const releasedAt = new Date().toISOString();
+                const { error: releaseError } = await supabaseAdmin
+                    .from("bank_payment_notifications")
+                    .update({
+                        is_used: false,
+                        matched_topup_id: null,
+                        used_at: null,
+                        updated_at: releasedAt,
+                    })
+                    .eq("id", payment.id)
+                    .eq("matched_topup_id", topup.id);
+
+                if (releaseError) throw new Error(releaseError.message);
+                released += 1;
+            }
+        } catch (repairError) {
+            const detail = repairError instanceof Error ? repairError.message : String(repairError);
+            errors.push(`Pago ${payment.id}: ${detail}`);
+            console.error("No se pudo reparar una transferencia incompleta:", {
+                paymentId: payment.id,
+                topupId: payment.matched_topup_id,
+                error: detail,
+            });
+        }
+    }
+
+    return { finalized, released, credited, errors };
 }
 
 // ===== Handler principal =====
@@ -271,11 +388,13 @@ export async function GET(request: NextRequest) {
             lock.release();
         }
 
+        const repairedMatches = await repairIncompleteBankMatches(supabaseAdmin);
         const reconciledMatches = await reconcileUnusedBankPayments(supabaseAdmin);
 
         return NextResponse.json({
             ok: true,
             processed: results.length,
+            repairedMatches,
             reconciledMatches,
             results,
         });

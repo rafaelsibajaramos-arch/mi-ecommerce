@@ -75,6 +75,7 @@ type BankPaymentRow = {
   matched_topup_id: string | null;
   used_at: string | null;
   created_at: string | null;
+  updated_at: string | null;
 };
 
 const BANK_PAYMENT_SELECT = [
@@ -93,6 +94,7 @@ const BANK_PAYMENT_SELECT = [
   "matched_topup_id",
   "used_at",
   "created_at",
+  "updated_at",
 ].join(", ");
 
 function jsonError(message: string, status = 400) {
@@ -248,6 +250,7 @@ function normalizeBankPayment(row: AnyRow): BankPaymentRow {
     matched_topup_id: textValue(row, "matched_topup_id"),
     used_at: textValue(row, "used_at"),
     created_at: textValue(row, "created_at"),
+    updated_at: textValue(row, "updated_at"),
   };
 }
 
@@ -286,6 +289,47 @@ async function loadBankPayments(supabaseAdmin: ReturnType<typeof createSupabaseA
   }
 
   return ((((data || []) as unknown) as AnyRow[]).map(normalizeBankPayment).sort(sortByNewest).slice(0, 1000));
+}
+
+
+function getBogotaTodayRange() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Bogota",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const date = `${values.year}-${values.month}-${values.day}`;
+  const start = new Date(`${date}T00:00:00.000-05:00`);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+
+  return {
+    date,
+    startIso: start.toISOString(),
+    endIso: end.toISOString(),
+  };
+}
+
+async function loadBankHistoryToday(supabaseAdmin: ReturnType<typeof createSupabaseAdmin>) {
+  const range = getBogotaTodayRange();
+  const { data, error } = await supabaseAdmin
+    .from("bank_payment_notifications")
+    .select(BANK_PAYMENT_SELECT)
+    .gte("created_at", range.startIso)
+    .lt("created_at", range.endIso)
+    .order("created_at", { ascending: false })
+    .limit(2000);
+
+  if (error) {
+    throw new Error(`No se pudo cargar el historial del banco de hoy: ${error.message}`);
+  }
+
+  return {
+    date: range.date,
+    rows: ((((data || []) as unknown) as AnyRow[]).map(normalizeBankPayment).sort(sortByNewest)),
+  };
 }
 
 async function loadTopups(supabaseAdmin: ReturnType<typeof createSupabaseAdmin>, partialErrors: string[]) {
@@ -350,7 +394,6 @@ async function loadPromotions(supabaseAdmin: ReturnType<typeof createSupabaseAdm
   const { data, error } = await supabaseAdmin
     .from("wallet_topup_promotions")
     .select("*")
-    .is("deleted_at", null)
     .order("created_at", { ascending: false })
     .limit(200);
 
@@ -367,8 +410,9 @@ export async function GET(request: NextRequest) {
     const { supabaseAdmin } = await requireAdmin(request);
     const partialErrors: string[] = [];
 
-    const bankPayments = await loadBankPayments(supabaseAdmin);
-    const [topups, alerts, promotions] = await Promise.all([
+    const [bankPayments, bankHistoryToday, topups, alerts, promotions] = await Promise.all([
+      loadBankPayments(supabaseAdmin),
+      loadBankHistoryToday(supabaseAdmin),
       loadTopups(supabaseAdmin, partialErrors),
       loadAlerts(supabaseAdmin, partialErrors),
       loadPromotions(supabaseAdmin, partialErrors),
@@ -379,6 +423,8 @@ export async function GET(request: NextRequest) {
       alerts,
       promotions,
       bankPayments,
+      bankHistoryToday: bankHistoryToday.rows,
+      bankHistoryDate: bankHistoryToday.date,
       partialErrors,
       counts: {
         topups: topups.length,
@@ -386,6 +432,7 @@ export async function GET(request: NextRequest) {
         promotions: promotions.length,
         bankPayments: bankPayments.length,
         availableBankPayments: bankPayments.length,
+        bankHistoryToday: bankHistoryToday.rows.length,
       },
     });
   } catch (error) {

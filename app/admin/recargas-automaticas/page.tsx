@@ -83,6 +83,7 @@ type BankPaymentRow = {
   matched_topup_id: string | null;
   used_at: string | null;
   created_at: string | null;
+  updated_at: string | null;
 };
 
 type PromotionRow = {
@@ -109,7 +110,7 @@ type PromotionFormState = {
 };
 
 type BannerState = { kind: "success" | "error"; text: string } | null;
-type MainTab = "HISTORIAL" | "ALERTAS" | "BANCO";
+type MainTab = "HISTORIAL" | "ALERTAS" | "BANCO" | "BANCO_HISTORIAL";
 
 type RecargasDataResponse = {
   ok?: boolean;
@@ -117,6 +118,8 @@ type RecargasDataResponse = {
   alerts?: AlertRow[];
   promotions?: PromotionRow[];
   bankPayments?: BankPaymentRow[];
+  bankHistoryToday?: BankPaymentRow[];
+  bankHistoryDate?: string;
   partialErrors?: string[];
   error?: string;
 };
@@ -332,8 +335,15 @@ function statusBadge(status: string | null | undefined) {
 function bankPaymentStatus(payment: BankPaymentRow) {
   if (payment.is_used && payment.matched_topup_id) {
     return {
-      label: "Usado",
+      label: "Acreditado",
       cls: "border border-emerald-200 bg-emerald-50 text-emerald-700",
+    };
+  }
+
+  if (!payment.is_used && payment.matched_topup_id) {
+    return {
+      label: "En proceso",
+      cls: "border border-blue-200 bg-blue-50 text-blue-700",
     };
   }
 
@@ -360,6 +370,8 @@ export default function RecargasAutomaticasPage() {
   const [alerts, setAlerts] = useState<AlertRow[]>([]);
   const [promotions, setPromotions] = useState<PromotionRow[]>([]);
   const [bankPayments, setBankPayments] = useState<BankPaymentRow[]>([]);
+  const [bankHistoryToday, setBankHistoryToday] = useState<BankPaymentRow[]>([]);
+  const [bankHistoryDate, setBankHistoryDate] = useState("");
   const [loading, setLoading] = useState(true);
 
   const [searchTerm, setSearchTerm] = useState("");
@@ -416,6 +428,8 @@ export default function RecargasAutomaticasPage() {
       setAlerts(result?.alerts || []);
       setPromotions(result?.promotions || []);
       setBankPayments((result?.bankPayments || []).filter((payment) => !payment.is_used && !payment.matched_topup_id));
+      setBankHistoryToday(result?.bankHistoryToday || []);
+      setBankHistoryDate(result?.bankHistoryDate || "");
       setLoading(false);
 
       if (result?.partialErrors?.length) {
@@ -428,6 +442,8 @@ export default function RecargasAutomaticasPage() {
       setAlerts([]);
       setPromotions([]);
       setBankPayments([]);
+      setBankHistoryToday([]);
+      setBankHistoryDate("");
       setLoading(false);
       setBanner({
         kind: "error",
@@ -552,12 +568,28 @@ export default function RecargasAutomaticasPage() {
     });
   }, [availableBankPaymentsInScope, searchTerm]);
 
+  const filteredBankHistoryToday = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+
+    return bankHistoryToday.filter((payment) => {
+      return (
+        !term ||
+        (payment.payer_origin || "").toLowerCase().includes(term) ||
+        (payment.transaction_reference || "").toLowerCase().includes(term) ||
+        (payment.sender_email || "").toLowerCase().includes(term) ||
+        (payment.subject || "").toLowerCase().includes(term)
+      );
+    });
+  }, [bankHistoryToday, searchTerm]);
+
   const activeLength =
     mainTab === "HISTORIAL"
       ? filteredTopups.length
       : mainTab === "ALERTAS"
       ? filteredAlerts.length
-      : filteredBankPayments.length;
+      : mainTab === "BANCO"
+      ? filteredBankPayments.length
+      : filteredBankHistoryToday.length;
 
   const totalPages = Math.max(1, Math.ceil(activeLength / PAGE_SIZE));
   const effectivePage = Math.min(page, totalPages);
@@ -579,6 +611,11 @@ export default function RecargasAutomaticasPage() {
     [filteredBankPayments, effectivePage]
   );
 
+  const paginatedBankHistoryToday = useMemo(
+    () => filteredBankHistoryToday.slice((effectivePage - 1) * PAGE_SIZE, effectivePage * PAGE_SIZE),
+    [filteredBankHistoryToday, effectivePage]
+  );
+
   const paginationItems = useMemo(
     () => buildPagination(effectivePage, totalPages),
     [effectivePage, totalPages]
@@ -588,6 +625,12 @@ export default function RecargasAutomaticasPage() {
     setMainTab(tab);
     setPage(1);
     setExpandedId(null);
+
+    if (tab === "BANCO_HISTORIAL") {
+      const today = toDateInputValue(new Date());
+      setDateFrom(today);
+      setDateTo(today);
+    }
   }
 
   function handlePageChange(next: number) {
@@ -858,7 +901,7 @@ export default function RecargasAutomaticasPage() {
         </div>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
         <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">En proceso</p>
           <p className="mt-2 text-2xl font-extrabold leading-none text-amber-600">{pendingCount}</p>
@@ -884,6 +927,11 @@ export default function RecargasAutomaticasPage() {
         <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Pagos disponibles</p>
           <p className="mt-2 text-2xl font-extrabold leading-none text-blue-600">{availableBankPaymentsCount}</p>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Llegaron hoy</p>
+          <p className="mt-2 text-2xl font-extrabold leading-none text-violet-600">{bankHistoryToday.length}</p>
         </div>
       </div>
 
@@ -993,6 +1041,7 @@ export default function RecargasAutomaticasPage() {
             { key: "HISTORIAL", label: `Historial (${filteredTopups.length})` },
             { key: "ALERTAS", label: `Alertas (${openAlertsCount})` },
             { key: "BANCO", label: `Pagos del banco (${availableBankPaymentsCount})` },
+            { key: "BANCO_HISTORIAL", label: `Historial del banco hoy (${bankHistoryToday.length})` },
           ].map((tab) => (
             <button
               key={tab.key}
@@ -1299,6 +1348,78 @@ export default function RecargasAutomaticasPage() {
                       </div>
 
                       {payment.subject && <p className="mt-3 text-xs text-slate-500">Asunto: {payment.subject}</p>}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {mainTab === "BANCO_HISTORIAL" && (
+          <div className="mt-6 overflow-hidden rounded-[24px] border border-slate-200 bg-white">
+            <div className="border-b border-slate-100 bg-slate-50 px-5 py-4 md:px-6">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-extrabold text-slate-900">Transferencias recibidas hoy</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Aquí aparecen todas las transferencias que sí llegaron a la página, estén disponibles, en proceso, acreditadas o invalidadas.
+                  </p>
+                </div>
+                <span className="mt-2 inline-flex w-fit rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-bold text-violet-700 sm:mt-0">
+                  {bankHistoryDate || toDateInputValue(new Date())}
+                </span>
+              </div>
+            </div>
+
+            {loading ? (
+              <div className="px-5 py-8 text-sm text-slate-500">Cargando historial del banco...</div>
+            ) : filteredBankHistoryToday.length === 0 ? (
+              <div className="px-5 py-8 text-sm text-slate-500">Hoy todavía no han llegado transferencias al banco de la página.</div>
+            ) : (
+              <div className="divide-y divide-slate-200">
+                {paginatedBankHistoryToday.map((payment) => {
+                  const status = bankPaymentStatus(payment);
+
+                  return (
+                    <div key={payment.id} className="p-5 md:p-6">
+                      <div className="grid gap-5 lg:grid-cols-[1.15fr_0.7fr_0.75fr_1fr] lg:items-center">
+                        <div className="min-w-0">
+                          <p className="text-sm font-bold text-slate-900">{payment.payer_origin || "Sin pagador"}</p>
+                          <p className="mt-1 break-all text-xs text-slate-500">{payment.transaction_reference || "Sin referencia"}</p>
+                          {payment.sender_email && (
+                            <p className="mt-1 break-all text-xs text-slate-500">{payment.sender_email}</p>
+                          )}
+                        </div>
+
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Monto</p>
+                          <p className="mt-1 text-lg font-extrabold text-slate-900">{formatMoney(payment.amount)}</p>
+                        </div>
+
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Estado</p>
+                          <span className={`mt-2 inline-flex rounded-full px-3 py-1 text-xs font-bold ${status.cls}`}>
+                            {status.label}
+                          </span>
+                          {payment.matched_topup_id && (
+                            <p className="mt-2 text-xs font-semibold text-blue-600">Asociada a una recarga</p>
+                          )}
+                        </div>
+
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Registro en la página</p>
+                          <p className="mt-1 text-sm font-semibold text-slate-700">{formatDate(payment.created_at)}</p>
+                          <p className="mt-2 text-xs text-slate-500">Fecha reportada por el correo: {formatDate(payment.paid_at)}</p>
+                          {payment.used_at && (
+                            <p className="mt-1 text-xs text-slate-500">Procesada: {formatDate(payment.used_at)}</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {payment.subject && (
+                        <p className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-xs text-slate-500">Asunto: {payment.subject}</p>
+                      )}
                     </div>
                   );
                 })}

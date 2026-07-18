@@ -240,6 +240,7 @@ export async function findUnusedBankPaymentForTopup(
     .eq("provider", "BREB_LLAVES")
     .eq("amount", Number(topup.amount || 0))
     .eq("is_used", false)
+    .is("matched_topup_id", null)
     .order("paid_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
     .limit(50);
@@ -253,6 +254,148 @@ export async function findUnusedBankPaymentForTopup(
   );
 
   return match || null;
+}
+
+async function reserveBankPayment({
+  supabaseAdmin,
+  bankPaymentId,
+  topupId,
+  reservedAt,
+}: {
+  supabaseAdmin: SupabaseClient;
+  bankPaymentId: string;
+  topupId: string;
+  reservedAt: string;
+}) {
+  const { data, error } = await supabaseAdmin
+    .from("bank_payment_notifications")
+    .update({
+      matched_topup_id: topupId,
+      used_at: null,
+      updated_at: reservedAt,
+    })
+    .eq("id", bankPaymentId)
+    .eq("is_used", false)
+    .is("matched_topup_id", null)
+    .select("id, transaction_reference, paid_at, created_at")
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("Ese pago bancario ya fue tomado por otra recarga.");
+
+  return data as {
+    id: string;
+    transaction_reference: string | null;
+    paid_at: string | null;
+    created_at: string | null;
+  };
+}
+
+async function finalizeBankPayment({
+  supabaseAdmin,
+  bankPaymentId,
+  topupId,
+  usedAt,
+}: {
+  supabaseAdmin: SupabaseClient;
+  bankPaymentId: string;
+  topupId: string;
+  usedAt: string;
+}) {
+  const { data, error } = await supabaseAdmin
+    .from("bank_payment_notifications")
+    .update({
+      is_used: true,
+      matched_topup_id: topupId,
+      used_at: usedAt,
+      updated_at: usedAt,
+    })
+    .eq("id", bankPaymentId)
+    .eq("is_used", false)
+    .eq("matched_topup_id", topupId)
+    .select("id")
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  if (!data) {
+    const { data: current, error: currentError } = await supabaseAdmin
+      .from("bank_payment_notifications")
+      .select("id, is_used, matched_topup_id")
+      .eq("id", bankPaymentId)
+      .maybeSingle();
+
+    if (currentError) throw new Error(currentError.message);
+    if (current?.is_used && current?.matched_topup_id === topupId) return;
+    throw new Error("No se pudo finalizar el uso del pago bancario.");
+  }
+}
+
+async function releaseBankPaymentReservation({
+  supabaseAdmin,
+  bankPaymentId,
+  topupId,
+  releasedAt,
+}: {
+  supabaseAdmin: SupabaseClient;
+  bankPaymentId: string;
+  topupId: string;
+  releasedAt: string;
+}) {
+  const { error } = await supabaseAdmin
+    .from("bank_payment_notifications")
+    .update({
+      is_used: false,
+      matched_topup_id: null,
+      used_at: null,
+      updated_at: releasedAt,
+    })
+    .eq("id", bankPaymentId)
+    .eq("is_used", false)
+    .eq("matched_topup_id", topupId);
+
+  if (error) {
+    console.error("No se pudo liberar la reserva del pago bancario:", error.message);
+  }
+}
+
+async function restoreTopupAfterFailedCredit({
+  supabaseAdmin,
+  topup,
+  failedAt,
+  errorMessage,
+}: {
+  supabaseAdmin: SupabaseClient;
+  topup: WalletTopupRow;
+  failedAt: string;
+  errorMessage: string;
+}) {
+  const { error } = await supabaseAdmin
+    .from("wallet_topups")
+    .update({
+      status: "PENDING",
+      approved_at: topup.approved_at || null,
+      rejected_at: topup.rejected_at || null,
+      credited_at: topup.credited_at || null,
+      matched_bank_payment_id: topup.matched_bank_payment_id || null,
+      matched_bank_reference: topup.matched_bank_reference || null,
+      approved_by: topup.approved_by || null,
+      admin_note: topup.admin_note || null,
+      promotion_id: topup.promotion_id || null,
+      promotion_name: topup.promotion_name || null,
+      promotion_bonus_type: topup.promotion_bonus_type || null,
+      promotion_bonus_value: topup.promotion_bonus_value || null,
+      promotion_bonus_amount: topup.promotion_bonus_amount || null,
+      promotion_total_amount: topup.promotion_total_amount || null,
+      promotion_applied_at: topup.promotion_applied_at || null,
+      error_message: errorMessage.slice(0, 500),
+      updated_at: failedAt,
+    })
+    .eq("id", topup.id)
+    .is("credited_at", null);
+
+  if (error) {
+    console.error("No se pudo restaurar la recarga después del fallo:", error.message);
+  }
 }
 
 export async function approveTopupWithBankPayment({
@@ -274,7 +417,7 @@ export async function approveTopupWithBankPayment({
 
   const status = String(topup.status || "PENDING").toUpperCase();
 
-  if (status === "APPROVED") return topup;
+  if (status === "APPROVED" && topup.credited_at) return topup;
   if (status !== "PENDING") throw new Error("La recarga no está pendiente.");
 
   const now = new Date().toISOString();
@@ -282,73 +425,159 @@ export async function approveTopupWithBankPayment({
   const matchedBankPaymentId = bankPaymentId || null;
   let matchedBankPaymentReference: string | null = null;
   let promotionReferenceAt: string | null = now;
+  let paymentReserved = false;
+  let creditRpcSucceeded = false;
 
-  if (matchedBankPaymentId) {
-    const { data: lockedPayment, error: lockError } = await supabaseAdmin
-      .from("bank_payment_notifications")
-      .update({
-        is_used: true,
-        matched_topup_id: topup.id,
-        used_at: now,
-        updated_at: now,
-      })
-      .eq("id", matchedBankPaymentId)
-      .eq("is_used", false)
-      .select("id, transaction_reference, paid_at, created_at")
+  try {
+    if (matchedBankPaymentId) {
+      const reservedPayment = await reserveBankPayment({
+        supabaseAdmin,
+        bankPaymentId: matchedBankPaymentId,
+        topupId: topup.id,
+        reservedAt: now,
+      });
+
+      paymentReserved = true;
+      matchedBankPaymentReference = String(reservedPayment.transaction_reference || "");
+      promotionReferenceAt = String(reservedPayment.paid_at || reservedPayment.created_at || now);
+    }
+
+    const promotionCalculation = await findActiveTopupPromotion({
+      supabaseAdmin,
+      amount: topup.amount,
+      referenceAt: promotionReferenceAt,
+    });
+
+    const patch: Record<string, unknown> = {
+      provider: "BREB_LLAVES",
+      status: "APPROVED",
+      approved_at: topup.approved_at || now,
+      rejected_at: null,
+      error_message: null,
+      matched_bank_payment_id: matchedBankPaymentId,
+      matched_bank_reference: matchedBankPaymentReference,
+      approved_by: approvedBy || null,
+      admin_note: manualNote || topup.admin_note || null,
+      ...buildPromotionTopupPatch(promotionCalculation, topup.amount),
+      updated_at: now,
+    };
+
+    const { data: approvedTopup, error: updateError } = await supabaseAdmin
+      .from("wallet_topups")
+      .update(patch)
+      .eq("id", topup.id)
+      .eq("status", "PENDING")
+      .select("id")
       .maybeSingle();
 
-    if (lockError) throw new Error(lockError.message);
-    if (!lockedPayment) throw new Error("Ese pago bancario ya fue usado por otra recarga.");
+    if (updateError) throw new Error(updateError.message);
+    if (!approvedTopup) throw new Error("La recarga cambió de estado mientras se estaba procesando.");
 
-    matchedBankPaymentReference = String(lockedPayment.transaction_reference || "");
-    promotionReferenceAt = String((lockedPayment as { paid_at?: string | null; created_at?: string | null }).paid_at || (lockedPayment as { created_at?: string | null }).created_at || now);
+    // La RPC de crédito es la única operación que determina si el saldo fue abonado.
+    await creditWalletTopup(supabaseAdmin, topup.id);
+    creditRpcSucceeded = true;
+
+    const creditedTopup = await getWalletTopupById(supabaseAdmin, topup.id);
+    if (!creditedTopup?.credited_at) {
+      throw new Error("La base de datos no confirmó la acreditación del saldo.");
+    }
+
+    if (matchedBankPaymentId) {
+      try {
+        await finalizeBankPayment({
+          supabaseAdmin,
+          bankPaymentId: matchedBankPaymentId,
+          topupId: topup.id,
+          usedAt: now,
+        });
+      } catch (finalizeError) {
+        // No liberamos el pago: el saldo ya fue acreditado. El cron reparará esta
+        // reserva y la marcará como usada en su siguiente ejecución.
+        console.error(
+          "La recarga fue acreditada, pero no se pudo finalizar el pago bancario:",
+          finalizeError instanceof Error ? finalizeError.message : finalizeError
+        );
+      }
+    }
+
+    await saveTopupExecutionTelemetry({
+      supabaseAdmin,
+      topupId: topup.id,
+      executedAt: now,
+      delaySeconds,
+    });
+    await createDelayedTopupAlertIfNeeded({
+      supabaseAdmin,
+      topup,
+      executedAt: now,
+      delaySeconds,
+      executedBy: approvedBy || null,
+    });
+
+    return creditedTopup;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Error desconocido al acreditar la recarga.";
+
+    let currentTopup: WalletTopupRow | null = null;
+    try {
+      currentTopup = await getWalletTopupById(supabaseAdmin, topup.id);
+    } catch (readError) {
+      console.error(
+        "No se pudo verificar la recarga después del fallo:",
+        readError instanceof Error ? readError.message : readError
+      );
+    }
+
+    // Si la RPC principal respondió correctamente, la operación de crédito ya fue
+    // confirmada por PostgreSQL. Aunque falle una lectura posterior, jamás liberamos
+    // el pago porque eso podría permitir una segunda acreditación.
+    if (creditRpcSucceeded || currentTopup?.credited_at) {
+      if (matchedBankPaymentId) {
+        try {
+          await finalizeBankPayment({
+            supabaseAdmin,
+            bankPaymentId: matchedBankPaymentId,
+            topupId: topup.id,
+            usedAt: now,
+          });
+        } catch (finalizeError) {
+          console.error(
+            "No se pudo finalizar el pago ya acreditado:",
+            finalizeError instanceof Error ? finalizeError.message : finalizeError
+          );
+        }
+      }
+      return (
+        currentTopup ||
+        ({
+          ...topup,
+          status: "APPROVED",
+          approved_at: topup.approved_at || now,
+          matched_bank_payment_id: matchedBankPaymentId,
+          matched_bank_reference: matchedBankPaymentReference,
+          error_message: null,
+        } as WalletTopupRow)
+      );
+    }
+
+    await restoreTopupAfterFailedCredit({
+      supabaseAdmin,
+      topup,
+      failedAt: new Date().toISOString(),
+      errorMessage: message,
+    });
+
+    if (matchedBankPaymentId && paymentReserved) {
+      await releaseBankPaymentReservation({
+        supabaseAdmin,
+        bankPaymentId: matchedBankPaymentId,
+        topupId: topup.id,
+        releasedAt: new Date().toISOString(),
+      });
+    }
+
+    throw new Error(message);
   }
-
-  const promotionCalculation = await findActiveTopupPromotion({
-    supabaseAdmin,
-    amount: topup.amount,
-    referenceAt: promotionReferenceAt,
-  });
-
-  const patch: Record<string, unknown> = {
-    provider: "BREB_LLAVES",
-    status: "APPROVED",
-    approved_at: topup.approved_at || now,
-    rejected_at: null,
-    error_message: null,
-    matched_bank_payment_id: matchedBankPaymentId,
-    matched_bank_reference: matchedBankPaymentReference,
-    approved_by: approvedBy || null,
-    admin_note: manualNote || topup.admin_note || null,
-    ...buildPromotionTopupPatch(promotionCalculation, topup.amount),
-    updated_at: now,
-  };
-
-  const { data: updatedTopup, error: updateError } = await supabaseAdmin
-    .from("wallet_topups")
-    .update(patch)
-    .eq("id", topup.id)
-    .select("*")
-    .single();
-
-  if (updateError) throw new Error(updateError.message);
-
-  await creditWalletTopup(supabaseAdmin, topup.id);
-  await saveTopupExecutionTelemetry({
-    supabaseAdmin,
-    topupId: topup.id,
-    executedAt: now,
-    delaySeconds,
-  });
-  await createDelayedTopupAlertIfNeeded({
-    supabaseAdmin,
-    topup,
-    executedAt: now,
-    delaySeconds,
-    executedBy: approvedBy || null,
-  });
-
-  return (updatedTopup as WalletTopupRow) || topup;
 }
 
 export async function tryAutoApproveBankTopup(
