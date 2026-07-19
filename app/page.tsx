@@ -142,6 +142,7 @@ type ReceiptLicenseRow = {
 
 const PRODUCTS_PER_PAGE = 12;
 const SEARCH_DEBOUNCE_MS = 350;
+const SUPABASE_QUERY_TIMEOUT_MS = 12_000;
 const ADMIN_CACHE_KEY = "streamingmayor_is_admin";
 const PHOTO_MODE_KEY = "streamingmayor_photo_mode";
 const PHOTO_MODE_EVENT = "streamingmayor:photo-mode-change";
@@ -452,43 +453,23 @@ export default function HomePage() {
     const requestId = ++roleRequestIdRef.current;
 
     try {
-      let currentUser = null;
+      // Esta comprobación solo controla elementos visuales del inicio.
+      // La seguridad real continúa en el layout y las APIs.
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-      for (let attempt = 0; attempt < 4; attempt += 1) {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
+      if (requestId !== roleRequestIdRef.current) return;
 
-        currentUser = session?.user || null;
-
-        if (!currentUser) {
-          const {
-            data: { user },
-          } = await supabase.auth.getUser();
-
-          currentUser = user || null;
-        }
-
-        if (currentUser) {
-          break;
-        }
-
-        await sleep(250);
-      }
-
-      if (requestId !== roleRequestIdRef.current) {
-        return;
-      }
+      const currentUser = session?.user || null;
 
       if (!currentUser) {
         setIsAdmin(false);
-
         try {
           window.localStorage.removeItem(ADMIN_CACHE_KEY);
         } catch {
           // Ignora errores de localStorage.
         }
-
         return;
       }
 
@@ -496,18 +477,12 @@ export default function HomePage() {
         .from("profiles")
         .select("role")
         .eq("id", currentUser.id)
+        .abortSignal(AbortSignal.timeout(SUPABASE_QUERY_TIMEOUT_MS))
         .maybeSingle();
 
-      if (requestId !== roleRequestIdRef.current) {
-        return;
-      }
-
-      if (error) {
-        return;
-      }
+      if (requestId !== roleRequestIdRef.current || error) return;
 
       const nextIsAdmin = data?.role === "admin";
-
       setIsAdmin(nextIsAdmin);
 
       try {
@@ -603,7 +578,8 @@ export default function HomePage() {
         const { data, error } = await supabase
           .from("products")
           .select("id, category, product_type")
-          .eq("is_active", true);
+          .eq("is_active", true)
+          .abortSignal(AbortSignal.timeout(SUPABASE_QUERY_TIMEOUT_MS));
 
         if (requestId !== categoryRequestIdRef.current) {
           return;
@@ -631,7 +607,8 @@ export default function HomePage() {
             .from("product_variants")
             .select("id, product_id")
             .in("product_id", variableProductIds)
-            .eq("is_active", true);
+            .eq("is_active", true)
+            .abortSignal(AbortSignal.timeout(SUPABASE_QUERY_TIMEOUT_MS));
 
           if (requestId !== categoryRequestIdRef.current) {
             return;
@@ -708,7 +685,9 @@ export default function HomePage() {
       try {
         let query = supabase
           .from("products")
-          .select("*")
+          .select(
+            "id, name, description, price, stock, image_url, category, is_active, created_at, sort_order, product_type, fallback_to_general_licenses, combo_stock"
+          )
           .eq("is_active", true)
           .order("sort_order", { ascending: true })
           .order("created_at", { ascending: false });
@@ -724,7 +703,9 @@ export default function HomePage() {
           );
         }
 
-        const { data, error } = await query;
+        const { data, error } = await query.abortSignal(
+          AbortSignal.timeout(SUPABASE_QUERY_TIMEOUT_MS)
+        );
 
         if (requestId !== catalogRequestIdRef.current) {
           return;
@@ -746,11 +727,14 @@ export default function HomePage() {
 
           const { data: variantsData, error: variantsError } = await supabase
             .from("product_variants")
-            .select("*")
+            .select(
+              "id, product_id, name, slug, description, price, stock, image_url, is_active, sort_order"
+            )
             .in("product_id", productIds)
             .eq("is_active", true)
             .order("sort_order", { ascending: true })
-            .order("created_at", { ascending: true });
+            .order("created_at", { ascending: true })
+            .abortSignal(AbortSignal.timeout(SUPABASE_QUERY_TIMEOUT_MS));
 
           if (requestId !== catalogRequestIdRef.current) {
             return;
@@ -781,7 +765,8 @@ export default function HomePage() {
               "id, product_id, child_product_id, child_variant_id, quantity, sort_order"
             )
             .in("product_id", compositeIds)
-            .order("sort_order", { ascending: true });
+            .order("sort_order", { ascending: true })
+            .abortSignal(AbortSignal.timeout(SUPABASE_QUERY_TIMEOUT_MS));
 
           if (componentsError) {
             throw componentsError;
@@ -812,12 +797,14 @@ export default function HomePage() {
                     "id, name, stock, is_active, product_type, fallback_to_general_licenses"
                   )
                   .in("id", childProductIds)
+                  .abortSignal(AbortSignal.timeout(SUPABASE_QUERY_TIMEOUT_MS))
               : Promise.resolve({ data: [], error: null }),
             childVariantIds.length
               ? supabase
                   .from("product_variants")
                   .select("id, product_id, stock, is_active")
                   .in("id", childVariantIds)
+                  .abortSignal(AbortSignal.timeout(SUPABASE_QUERY_TIMEOUT_MS))
               : Promise.resolve({ data: [], error: null }),
           ]);
 
@@ -989,22 +976,12 @@ export default function HomePage() {
 
   useEffect(() => {
     let mounted = true;
-    let retryTimeout: number | null = null;
-
-    const run = async () => {
+    const run = () => {
       if (!mounted) return;
 
-      await fetchRole();
-
-      if (!mounted) return;
-
-      await fetchCategories();
-
-      retryTimeout = window.setTimeout(() => {
-        if (mounted) {
-          void fetchRole();
-        }
-      }, 1200);
+      // No retrasar categorías ni catálogo esperando la comprobación visual del rol.
+      void fetchRole();
+      void fetchCategories();
     };
 
     void run();
@@ -1043,10 +1020,6 @@ export default function HomePage() {
 
     return () => {
       mounted = false;
-
-      if (retryTimeout) {
-        window.clearTimeout(retryTimeout);
-      }
 
       subscription.unsubscribe();
     };

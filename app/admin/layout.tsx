@@ -10,26 +10,26 @@ export default async function AdminLayout({
 }) {
   const supabase = await createClient();
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
+  // getClaims valida la sesión sin consultar siempre el servidor de Auth.
+  const { data: claimsData, error: claimsError } =
+    await supabase.auth.getClaims();
 
-  if (userError || !user) {
+  const userId = claimsData?.claims?.sub;
+
+  if (claimsError || !userId) {
     redirect("/");
   }
 
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
     .select("role")
-    .eq("id", user.id)
+    .eq("id", userId)
+    .abortSignal(AbortSignal.timeout(8_000))
     .maybeSingle();
 
   if (profileError || profile?.role !== "admin") {
     redirect("/");
   }
-
-
 
   return (
     <main className="min-h-screen bg-[#f4f6fb] text-[#0f172a]">

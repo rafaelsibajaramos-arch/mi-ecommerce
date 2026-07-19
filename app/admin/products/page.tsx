@@ -31,28 +31,48 @@ export default function AdminProductsPage() {
   const [positionInputs, setPositionInputs] = useState<Record<string, string>>({});
 
   const fetchProducts = async () => {
-    const { data, error } = await supabase
-      .from("products")
-      .select("*")
-      .order("sort_order", { ascending: true })
-      .order("created_at", { ascending: false });
+    setLoading(true);
+    setMessage("");
 
-    if (error) {
-      setMessage("No se pudieron cargar los productos: " + error.message);
-      setProducts([]);
-      setLoading(false);
-      return;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const { data, error } = await supabase
+          .from("products")
+          .select(
+            "id, name, description, price, stock, image_url, category, is_active, created_at, sort_order, product_type, combo_stock"
+          )
+          .order("sort_order", { ascending: true })
+          .order("created_at", { ascending: false })
+          .abortSignal(AbortSignal.timeout(12_000));
+
+        if (error) {
+          throw error;
+        }
+
+        setProducts(
+          ((data as Product[]) || []).map((product, index) => ({
+            ...product,
+            sort_order: product.sort_order ?? index,
+          }))
+        );
+
+        setPositionInputs({});
+        setLoading(false);
+        return;
+      } catch (error) {
+        if (attempt === 0) {
+          await new Promise((resolve) => window.setTimeout(resolve, 500));
+          continue;
+        }
+
+        setMessage(
+          "No se pudieron cargar los productos. Revisa la conexión con Supabase y pulsa Actualizar."
+        );
+        setProducts([]);
+        setLoading(false);
+        console.error("[admin/products] Error cargando productos:", error);
+      }
     }
-
-    setProducts(
-      ((data as Product[]) || []).map((product, index) => ({
-        ...product,
-        sort_order: product.sort_order ?? index,
-      }))
-    );
-
-    setPositionInputs({});
-    setLoading(false);
   };
 
   const saveProductsOrder = async (
@@ -336,12 +356,23 @@ export default function AdminProductsPage() {
           </p>
         </div>
 
+        <div className="flex w-full gap-2 sm:w-auto">
+          <button
+            type="button"
+            onClick={() => void fetchProducts()}
+            disabled={loading}
+            className="inline-flex flex-1 items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60 sm:flex-none"
+          >
+            {loading ? "Cargando..." : "Actualizar"}
+          </button>
+
         <Link
           href="/admin/products/new"
           className="inline-flex w-full sm:w-auto items-center justify-center rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:opacity-90"
         >
           Nuevo producto
         </Link>
+        </div>
       </div>
 
       {message && (
