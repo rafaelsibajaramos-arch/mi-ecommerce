@@ -123,9 +123,6 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
         if (!user) { setIsLoggedIn(false); setCheckingAuth(false); return; }
         setIsLoggedIn(true);
         setCheckingAuth(false);
-        const { profile, errorMessage } = await getOwnProfile(user.id);
-        if (!mounted) return;
-        if (errorMessage || !profile) console.warn("Perfil no disponible:", errorMessage || "Sin perfil");
       } catch {
         if (!mounted) return;
         setIsLoggedIn(false);

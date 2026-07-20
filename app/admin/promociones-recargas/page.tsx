@@ -338,10 +338,15 @@ export default function PromocionesRecargasPage() {
 
   useEffect(() => {
     const initialTimer = window.setTimeout(() => void loadPromotions(true), 0);
-    const interval = window.setInterval(() => void loadPromotions(false), 60_000);
+    const refreshIfVisible = () => {
+      if (document.visibilityState === "visible") void loadPromotions(false);
+    };
+    const interval = window.setInterval(refreshIfVisible, 180_000);
+    window.addEventListener("focus", refreshIfVisible);
     return () => {
       window.clearTimeout(initialTimer);
       window.clearInterval(interval);
+      window.removeEventListener("focus", refreshIfVisible);
     };
   }, [loadPromotions]);
 

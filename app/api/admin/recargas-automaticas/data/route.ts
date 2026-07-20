@@ -89,7 +89,6 @@ const BANK_PAYMENT_SELECT = [
   "payer_origin",
   "normalized_payer_origin",
   "paid_at",
-  "raw_body",
   "is_used",
   "matched_topup_id",
   "used_at",
@@ -245,7 +244,7 @@ function normalizeBankPayment(row: AnyRow): BankPaymentRow {
     payer_origin: textValue(row, "payer_origin"),
     normalized_payer_origin: textValue(row, "normalized_payer_origin"),
     paid_at: textValue(row, "paid_at"),
-    raw_body: textValue(row, "raw_body"),
+    raw_body: null,
     is_used: boolValue(row, "is_used") ?? false,
     matched_topup_id: textValue(row, "matched_topup_id"),
     used_at: textValue(row, "used_at"),
@@ -282,13 +281,13 @@ async function loadBankPayments(supabaseAdmin: ReturnType<typeof createSupabaseA
     .eq("is_used", false)
     .is("matched_topup_id", null)
     .order("created_at", { ascending: false })
-    .limit(3000);
+    .limit(150);
 
   if (error) {
     throw new Error(`No se pudieron cargar los pagos del banco: ${error.message}`);
   }
 
-  return ((((data || []) as unknown) as AnyRow[]).map(normalizeBankPayment).sort(sortByNewest).slice(0, 1000));
+  return ((((data || []) as unknown) as AnyRow[]).map(normalizeBankPayment).sort(sortByNewest).slice(0, 150));
 }
 
 
@@ -320,7 +319,7 @@ async function loadBankHistoryToday(supabaseAdmin: ReturnType<typeof createSupab
     .gte("created_at", range.startIso)
     .lt("created_at", range.endIso)
     .order("created_at", { ascending: false })
-    .limit(2000);
+    .limit(300);
 
   if (error) {
     throw new Error(`No se pudo cargar el historial del banco de hoy: ${error.message}`);
@@ -335,9 +334,16 @@ async function loadBankHistoryToday(supabaseAdmin: ReturnType<typeof createSupab
 async function loadTopups(supabaseAdmin: ReturnType<typeof createSupabaseAdmin>, partialErrors: string[]) {
   const { data, error } = await supabaseAdmin
     .from("wallet_topups")
-    .select("*")
+    .select([
+      "id", "user_id", "reference", "amount", "provider", "status", "payer_origin",
+      "destination_account", "receipt_url", "matched_bank_payment_id", "matched_bank_reference",
+      "admin_note", "error_message", "created_at", "approved_at", "credited_at", "executed_at",
+      "delay_seconds", "rejected_at", "expired_at", "expiration_reason", "voided_at", "void_reason",
+      "promotion_id", "promotion_name", "promotion_bonus_type", "promotion_bonus_value",
+      "promotion_bonus_amount", "promotion_total_amount", "promotion_applied_at"
+    ].join(", "))
     .order("created_at", { ascending: false })
-    .limit(5000);
+    .limit(500);
 
   if (error) {
     partialErrors.push(`wallet_topups: ${error.message}`);
@@ -378,9 +384,9 @@ async function loadTopups(supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
 async function loadAlerts(supabaseAdmin: ReturnType<typeof createSupabaseAdmin>, partialErrors: string[]) {
   const { data, error } = await supabaseAdmin
     .from("wallet_topup_alerts")
-    .select("*")
+    .select("id, topup_id, reference, amount, provider, requested_at, executed_at, delay_seconds, customer_name, customer_email, executed_by, reason, message, status, reviewed_at, created_at")
     .order("created_at", { ascending: false })
-    .limit(300);
+    .limit(100);
 
   if (error) {
     partialErrors.push(`wallet_topup_alerts: ${error.message}`);
@@ -393,9 +399,10 @@ async function loadAlerts(supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
 async function loadPromotions(supabaseAdmin: ReturnType<typeof createSupabaseAdmin>, partialErrors: string[]) {
   const { data, error } = await supabaseAdmin
     .from("wallet_topup_promotions")
-    .select("*")
+    .select("id, name, status, min_amount, bonus_type, bonus_value, starts_at, ends_at, created_at, updated_at")
+    .is("deleted_at", null)
     .order("created_at", { ascending: false })
-    .limit(200);
+    .limit(50);
 
   if (error) {
     partialErrors.push(`wallet_topup_promotions: ${error.message}`);

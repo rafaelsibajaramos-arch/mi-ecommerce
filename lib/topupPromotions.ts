@@ -164,7 +164,7 @@ const PROMOTION_SELECT = [
 export async function listActiveTopupPromotions({
   supabaseAdmin,
   referenceAt,
-  maximumRows = 200,
+  maximumRows = 50,
 }: {
   supabaseAdmin: SupabaseClient;
   referenceAt?: string | Date | null;
@@ -181,7 +181,7 @@ export async function listActiveTopupPromotions({
     .order("min_amount", { ascending: true })
     .order("bonus_value", { ascending: false })
     .order("created_at", { ascending: false })
-    .limit(Math.max(1, Math.min(500, Math.round(maximumRows))));
+    .limit(Math.max(1, Math.min(100, Math.round(maximumRows))));
 
   if (error) throw new Error(`No se pudo validar la promoción de recarga: ${error.message}`);
 
@@ -208,7 +208,7 @@ export async function findActiveTopupPromotion({
   const activePromotions = await listActiveTopupPromotions({
     supabaseAdmin,
     referenceAt,
-    maximumRows: 200,
+    maximumRows: 50,
   });
 
   const promotion =

@@ -487,7 +487,7 @@ export default function EditProductPage() {
   const fetchProduct = async () => {
     const { data, error } = await supabase
       .from("products")
-      .select("*")
+      .select("id, name, slug, description, price, stock, combo_stock, category, is_active, product_type, avoid_repeat_license, use_priority_licenses, enable_license_alerts, image_url")
       .eq("id", id)
       .single();
 
@@ -518,7 +518,7 @@ export default function EditProductPage() {
   const fetchVariants = async () => {
     const { data, error } = await supabase
       .from("product_variants")
-      .select("*")
+      .select("id, name, slug, description, price, stock, image_url, is_active, sort_order, access_duration_months, default_license_billing_months")
       .eq("product_id", id)
       .order("sort_order", { ascending: true })
       .order("created_at", { ascending: true });
@@ -556,7 +556,7 @@ export default function EditProductPage() {
   const fetchComponents = async () => {
     const { data, error } = await supabase
       .from("product_components")
-      .select("*")
+      .select("id, child_product_id, child_variant_id, quantity, sort_order")
       .eq("product_id", id)
       .order("sort_order", { ascending: true })
       .order("created_at", { ascending: true });
@@ -627,7 +627,8 @@ export default function EditProductPage() {
       .select("id, product_id, variant_id, license_text, status, assigned_order_id, assigned_order_item_id, assigned_user_id, is_priority, billing_duration_days, billing_duration_months, requires_rotation_alert, license_mode, max_active_users")
       .eq("product_id", id)
       .eq("status", "available")
-      .order("created_at", { ascending: true });
+      .order("created_at", { ascending: true })
+      .limit(1000);
 
     if (error) {
       setMessage("No se pudieron cargar las licencias.");
@@ -644,21 +645,26 @@ export default function EditProductPage() {
     let usedLicenseIds = new Set<string>();
 
     if (licenseIds.length > 0) {
-      const { data: accessesData, error: accessesError } = await supabase
-        .from("license_accesses")
-        .select("license_id")
-        .in("license_id", licenseIds);
+      const collected: string[] = [];
+      for (let index = 0; index < licenseIds.length; index += 100) {
+        const chunk = licenseIds.slice(index, index + 100);
+        const { data: accessesData, error: accessesError } = await supabase
+          .from("license_accesses")
+          .select("license_id")
+          .in("license_id", chunk);
 
-      if (accessesError) {
-        setMessage("No se pudieron validar licencias antiguas.");
-        return;
+        if (accessesError) {
+          setMessage("No se pudieron validar licencias antiguas.");
+          return;
+        }
+
+        collected.push(
+          ...(((accessesData as Array<{ license_id: string | null }> | null) || [])
+            .map((access) => access.license_id)
+            .filter(Boolean) as string[])
+        );
       }
-
-      usedLicenseIds = new Set(
-        ((accessesData as Array<{ license_id: string | null }> | null) || [])
-          .map((access) => access.license_id)
-          .filter(Boolean) as string[]
-      );
+      usedLicenseIds = new Set(collected);
     }
 
     const rows = availableRows.filter((row) => !usedLicenseIds.has(row.id));

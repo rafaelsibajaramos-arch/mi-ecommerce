@@ -206,7 +206,9 @@ export default function AdminWalletPage() {
 
     const { data, error } = await supabase
       .from("profiles")
-      .select("id, email, full_name, balance");
+      .select("id, email, full_name, balance")
+      .order("email", { ascending: true })
+      .limit(1000);
 
     if (error) {
       setProfiles([]);
@@ -224,7 +226,8 @@ export default function AdminWalletPage() {
     const transactionsResult = await supabase
       .from("wallet_transactions")
       .select("id, user_id, type, amount, created_at, note, description")
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .limit(500);
 
     if (transactionsResult.error) {
       setAllTransactions([]);

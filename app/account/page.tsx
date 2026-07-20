@@ -36,18 +36,18 @@ export default function AccountPage() {
     // Carga el usuario autenticado y recupera su perfil desde la base de datos.
     const loadUser = async () => {
       const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
+        data: { session },
+      } = await supabase.auth.getSession();
+      const user = session?.user;
 
-      if (userError || !user) {
+      if (!user) {
         router.push("/login");
         return;
       }
 
       const { data: profileData, error: profileError } = await supabase
         .from("profiles")
-        .select("*")
+        .select("id, email, full_name, role, balance, created_at")
         .eq("id", user.id)
         .single();
 

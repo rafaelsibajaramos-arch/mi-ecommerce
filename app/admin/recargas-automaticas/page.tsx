@@ -125,7 +125,7 @@ type RecargasDataResponse = {
 };
 
 const PAGE_SIZE = 10;
-const REFRESH_MS = 15000;
+const REFRESH_MS = 120000;
 
 function buildPagination(current: number, total: number): Array<number | "..."> {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
@@ -460,13 +460,21 @@ export default function RecargasAutomaticasPage() {
       void loadData(true);
     }, 0);
 
-    const interval = window.setInterval(() => {
-      void loadData(false);
-    }, REFRESH_MS);
+    const refreshIfVisible = () => {
+      if (document.visibilityState === "visible") {
+        void loadData(false);
+      }
+    };
+
+    const interval = window.setInterval(refreshIfVisible, REFRESH_MS);
+    window.addEventListener("focus", refreshIfVisible);
+    document.addEventListener("visibilitychange", refreshIfVisible);
 
     return () => {
       window.clearTimeout(initialTimer);
       window.clearInterval(interval);
+      window.removeEventListener("focus", refreshIfVisible);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
     };
   }, [loadData]);
 

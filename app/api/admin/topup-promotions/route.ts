@@ -282,7 +282,7 @@ async function loadPromotionStats(supabaseAdmin: ReturnType<typeof createSupabas
     .select("id, promotion_id, promotion_bonus_amount, promotion_total_amount, promotion_applied_at, status")
     .not("promotion_id", "is", null)
     .order("created_at", { ascending: false })
-    .limit(3000);
+    .limit(1000);
 
   if (error) return new Map<string, PromotionStats>();
 
@@ -320,7 +320,7 @@ export async function GET(request: NextRequest) {
     const [{ data, error }, statsMap] = await Promise.all([
       supabaseAdmin
         .from("wallet_topup_promotions")
-        .select("*")
+        .select("id, name, status, min_amount, bonus_type, bonus_value, starts_at, ends_at, schedule_type, weekdays, daily_start_time, daily_end_time, schedule_timezone, deleted_at, created_at, updated_at")
         .is("deleted_at", null)
         .order("created_at", { ascending: false })
         .limit(500),
@@ -379,7 +379,7 @@ export async function POST(request: NextRequest) {
         .update({ status: nextStatus, updated_by: user.id, updated_at: now })
         .eq("id", id)
         .is("deleted_at", null)
-        .select("*")
+        .select("id, name, status, min_amount, bonus_type, bonus_value, starts_at, ends_at, schedule_type, weekdays, daily_start_time, daily_end_time, schedule_timezone, deleted_at, created_at, updated_at")
         .single();
 
       if (error) return jsonError(error.message, 500);
@@ -413,7 +413,7 @@ export async function POST(request: NextRequest) {
         .update({ ...payload, updated_by: user.id, updated_at: now })
         .eq("id", id)
         .is("deleted_at", null)
-        .select("*")
+        .select("id, name, status, min_amount, bonus_type, bonus_value, starts_at, ends_at, schedule_type, weekdays, daily_start_time, daily_end_time, schedule_timezone, deleted_at, created_at, updated_at")
         .single();
 
       if (error) return jsonError(error.message, 500);
@@ -423,7 +423,7 @@ export async function POST(request: NextRequest) {
     const { data, error } = await supabaseAdmin
       .from("wallet_topup_promotions")
       .insert({ ...payload, created_by: user.id, updated_by: user.id })
-      .select("*")
+      .select("id, name, status, min_amount, bonus_type, bonus_value, starts_at, ends_at, schedule_type, weekdays, daily_start_time, daily_end_time, schedule_timezone, deleted_at, created_at, updated_at")
       .single();
 
     if (error) return jsonError(error.message, 500);

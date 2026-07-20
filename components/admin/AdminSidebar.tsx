@@ -101,14 +101,17 @@ export default function AdminSidebar() {
     void fetchPendingAlerts();
     void fetchTopupAlerts(); // 👈 NUEVO
 
-    const interval = window.setInterval(() => {
+    const refreshIfVisible = () => {
+      if (document.visibilityState !== "visible") return;
       void fetchPendingAlerts();
-      void fetchTopupAlerts(); // 👈 NUEVO
-    }, 60000);
+      void fetchTopupAlerts();
+    };
+
+    const interval = window.setInterval(refreshIfVisible, 180000);
 
     const handleFocus = () => {
       void fetchPendingAlerts();
-      void fetchTopupAlerts(); // 👈 NUEVO
+      void fetchTopupAlerts();
     };
 
     window.addEventListener("focus", handleFocus);

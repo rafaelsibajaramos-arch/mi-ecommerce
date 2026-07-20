@@ -1,36 +1,72 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# StreamingMayor optimizado para Supabase Nano / Free
 
-## Getting Started
+Proyecto completo optimizado a partir de la versión entregada el 20 de julio de 2026.
+Mantiene catálogo, combos, licencias, pedidos, billetera, recargas automáticas,
+promociones y administración.
 
-First, run the development server:
+## Instalación completa
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+1. Haz una copia de seguridad del proyecto actual.
+2. Reemplaza el proyecto completo por esta carpeta.
+3. Copia manualmente tus variables actuales a un archivo `.env.local` usando `.env.example` como guía.
+4. No copies archivos antiguos llamados `datos`, `.next`, `node_modules` ni credenciales dentro del código.
+5. En el Supabase correcto, abre SQL Editor y ejecuta una sola vez:
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+   `EJECUTAR_EN_SUPABASE.sql`
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+6. Instala dependencias:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+   ```bash
+   npm install
+   ```
 
-## Learn More
+7. Valida el proyecto:
 
-To learn more about Next.js, take a look at the following resources:
+   ```bash
+   npm run build
+   ```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+8. Inicia localmente:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+   ```bash
+   npm run dev
+   ```
 
-## Deploy on Vercel
+9. Comprueba catálogo, compra simple, combo, billetera, pedidos y recarga de prueba.
+10. Publica el proyecto y conserva el cron actual apuntando a:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+    `/api/cron/bank-parser`
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Qué reduce la carga de Supabase
+
+- Catálogo público cacheado durante 60 segundos.
+- Productos entregados por página, sin descargar todo el catálogo al navegador.
+- Pedidos del cliente y del administrador paginados desde el servidor.
+- Billetera filtrada y paginada por fecha desde el servidor.
+- Usuarios administrativos paginados desde Supabase.
+- Recargas automáticas actualizadas cada 2 minutos y solo con la pestaña visible.
+- Promociones actualizadas cada 3 minutos y solo con la pestaña visible.
+- Alertas del menú administrativo actualizadas cada 3 minutos.
+- Listados bancarios sin descargar el cuerpo completo del correo.
+- Límites estrictos en consultas administrativas.
+- Menos validaciones repetidas de sesión, perfil y rol.
+- Orden de productos guardado en una sola operación.
+- Índices específicos para productos, pedidos, billetera, banco y promociones.
+
+## Comportamiento esperado
+
+- Los cambios públicos de productos pueden tardar hasta 60 segundos en reflejarse por el caché.
+- El cron bancario sigue funcionando aunque el panel administrativo esté cerrado.
+- La página administrativa puede actualizarse manualmente cuando necesites información inmediata.
+
+## Archivos no incluidos por seguridad
+
+- `.env.local`
+- `.env.bank-parser`
+- contraseñas de Gmail
+- claves privadas de Supabase
+- secretos del cron
+- `node_modules`
+- `.next`
+
+Nunca subas esos secretos a GitHub ni los pegues dentro de archivos del proyecto.

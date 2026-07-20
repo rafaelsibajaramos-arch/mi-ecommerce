@@ -74,14 +74,7 @@ type Product = {
   combo_stock?: number | null;
 };
 
-type ProductComponent = {
-  id: string;
-  product_id: string;
-  child_product_id: string;
-  child_variant_id: string | null;
-  quantity: number;
-  sort_order?: number | null;
-};
+
 
 type ProductVariant = {
   id: string;
@@ -168,7 +161,6 @@ export default function HomePage() {
   const [totalProducts, setTotalProducts] = useState(0);
 
   const catalogRequestIdRef = useRef(0);
-  const categoryRequestIdRef = useRef(0);
   const roleRequestIdRef = useRef(0);
 
   useEffect(() => {
@@ -203,40 +195,6 @@ export default function HomePage() {
     };
   }, []);
 
-  const isAbortLikeError = (error: unknown) => {
-    if (!error) return false;
-
-    if (error instanceof DOMException && error.name === "AbortError") {
-      return true;
-    }
-
-    if (error instanceof Error) {
-      const text = `${error.name} ${error.message}`.toLowerCase();
-      return (
-        text.includes("aborterror") ||
-        text.includes("aborted") ||
-        text.includes("lock request is aborted")
-      );
-    }
-
-    if (typeof error === "object" && error !== null) {
-      const message =
-        "message" in error && typeof error.message === "string"
-          ? error.message.toLowerCase()
-          : "";
-
-      return (
-        message.includes("aborterror") ||
-        message.includes("aborted") ||
-        message.includes("lock request is aborted")
-      );
-    }
-
-    return false;
-  };
-
-  const sleep = (ms: number) =>
-    new Promise((resolve) => window.setTimeout(resolve, ms));
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -498,481 +456,55 @@ export default function HomePage() {
     }
   }, []);
 
-  const getVariantDisplayStock = (
-    product: Product,
-    variant: ProductVariant | null
-  ) => {
-    if (!variant) return Number(product.stock || 0);
-
-    const variantStock = Number(variant.stock || 0);
-    const generalStock =
-      product.fallback_to_general_licenses === false
-        ? 0
-        : Number(product.stock || 0);
-
-    return variantStock + generalStock;
-  };
-
-  const buildCatalogItems = useCallback(
-    (
-      productRows: Product[],
-      groupedVariants: Record<string, ProductVariant[]>,
-      comboStockByProduct: Record<string, number>
-    ): CatalogItem[] => {
-      return productRows.flatMap<CatalogItem>((product): CatalogItem[] => {
-        if (product.product_type !== "variable") {
-          return [
-            {
-              product,
-              variant: null,
-              catalogId: product.id,
-              displayName: product.name,
-              displayDescription: product.description,
-              displayPrice: Number(product.price || 0),
-              displayStock:
-                product.product_type === "composite"
-                  ? Number(comboStockByProduct[product.id] || 0)
-                  : Number(product.stock || 0),
-              displayImageUrl: product.image_url,
-            },
-          ];
-        }
-
-        const productVariants = groupedVariants[product.id] || [];
-
-        if (productVariants.length === 0) {
-          return [
-            {
-              product,
-              variant: null,
-              catalogId: product.id,
-              displayName: product.name,
-              displayDescription: product.description,
-              displayPrice: Number(product.price || 0),
-              displayStock: Number(product.stock || 0),
-              displayImageUrl: product.image_url,
-            },
-          ];
-        }
-
-        return productVariants.map((variant) => ({
-          product,
-          variant,
-          catalogId: `${product.id}-${variant.id}`,
-          displayName: `${product.name} - ${variant.name}`,
-          displayDescription: variant.description || product.description,
-          displayPrice: Number(variant.price || 0),
-          displayStock: getVariantDisplayStock(product, variant),
-          displayImageUrl: variant.image_url || product.image_url,
-        }));
-      });
-    },
-    []
-  );
-
-  const fetchCategories = useCallback(async () => {
-    const requestId = ++categoryRequestIdRef.current;
-
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        const { data, error } = await supabase
-          .from("products")
-          .select("id, category, product_type")
-          .eq("is_active", true)
-          .abortSignal(AbortSignal.timeout(SUPABASE_QUERY_TIMEOUT_MS));
-
-        if (requestId !== categoryRequestIdRef.current) {
-          return;
-        }
-
-        if (error) {
-          throw error;
-        }
-
-        const productRows =
-          ((data as {
-            id: string;
-            category: string | null;
-            product_type?: ProductType;
-          }[]) || []);
-
-        const variableProductIds = productRows
-          .filter((product) => product.product_type === "variable")
-          .map((product) => product.id);
-
-        const variantCounts = new Map<string, number>();
-
-        if (variableProductIds.length > 0) {
-          const { data: variantsData, error: variantsError } = await supabase
-            .from("product_variants")
-            .select("id, product_id")
-            .in("product_id", variableProductIds)
-            .eq("is_active", true)
-            .abortSignal(AbortSignal.timeout(SUPABASE_QUERY_TIMEOUT_MS));
-
-          if (requestId !== categoryRequestIdRef.current) {
-            return;
-          }
-
-          if (variantsError) {
-            throw variantsError;
-          }
-
-          ((variantsData as { product_id: string }[]) || []).forEach(
-            (variant) => {
-              variantCounts.set(
-                variant.product_id,
-                (variantCounts.get(variant.product_id) || 0) + 1
-              );
-            }
-          );
-        }
-
-        const counts = new Map<string, number>();
-        let totalVisibleItems = 0;
-
-        productRows.forEach((item) => {
-          const visibleCount =
-            item.product_type === "variable"
-              ? Math.max(variantCounts.get(item.id) || 0, 1)
-              : 1;
-
-          totalVisibleItems += visibleCount;
-
-          const category = (item.category || "").trim();
-          if (!category) return;
-
-          counts.set(category, (counts.get(category) || 0) + visibleCount);
-        });
-
-        const ordered = Array.from(counts.entries())
-          .sort((a, b) =>
-            a[0].localeCompare(b[0], "es", { sensitivity: "base" })
-          )
-          .map(([name, count]) => ({ name, count }));
-
-        setCategories([
-          {
-            name: "Todas",
-            count: totalVisibleItems,
-          },
-          ...ordered,
-        ]);
-
-        return;
-      } catch (error) {
-        if (requestId !== categoryRequestIdRef.current) {
-          return;
-        }
-
-        if (isAbortLikeError(error) && attempt === 0) {
-          await sleep(350);
-          continue;
-        }
-
-        return;
-      }
-    }
-  }, []);
-
   const fetchProductsPage = useCallback(async () => {
     const requestId = ++catalogRequestIdRef.current;
-
     setLoading(true);
     setMessage("");
 
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        let query = supabase
-          .from("products")
-          .select(
-            "id, name, description, price, stock, image_url, category, is_active, created_at, sort_order, product_type, fallback_to_general_licenses, combo_stock"
-          )
-          .eq("is_active", true)
-          .order("sort_order", { ascending: true })
-          .order("created_at", { ascending: false });
+    try {
+      const params = new URLSearchParams({
+        page: String(currentPage),
+        pageSize: String(PRODUCTS_PER_PAGE),
+        category: selectedCategory,
+      });
 
-        if (selectedCategory !== "Todas") {
-          query = query.eq("category", selectedCategory);
-        }
+      if (debouncedSearch) params.set("search", debouncedSearch);
 
-        if (debouncedSearch) {
-          const term = debouncedSearch.replace(/[%]/g, "").trim();
-          query = query.or(
-            `name.ilike.%${term}%,category.ilike.%${term}%,description.ilike.%${term}%`
-          );
-        }
-
-        const { data, error } = await query.abortSignal(
-          AbortSignal.timeout(SUPABASE_QUERY_TIMEOUT_MS)
-        );
-
-        if (requestId !== catalogRequestIdRef.current) {
-          return;
-        }
-
-        if (error) {
-          throw error;
-        }
-
-        const safeProducts = (data as Product[]) || [];
-        const variableProducts = safeProducts.filter(
-          (product) => product.product_type === "variable"
-        );
-
-        const groupedVariants: Record<string, ProductVariant[]> = {};
-
-        if (variableProducts.length > 0) {
-          const productIds = variableProducts.map((product) => product.id);
-
-          const { data: variantsData, error: variantsError } = await supabase
-            .from("product_variants")
-            .select(
-              "id, product_id, name, slug, description, price, stock, image_url, is_active, sort_order"
-            )
-            .in("product_id", productIds)
-            .eq("is_active", true)
-            .order("sort_order", { ascending: true })
-            .order("created_at", { ascending: true })
-            .abortSignal(AbortSignal.timeout(SUPABASE_QUERY_TIMEOUT_MS));
-
-          if (requestId !== catalogRequestIdRef.current) {
-            return;
+      const response = await fetch(`/api/catalog?${params.toString()}`, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      });
+      const result = (await response.json().catch(() => null)) as
+        | {
+            ok?: boolean;
+            items?: CatalogItem[];
+            categories?: CategoryItem[];
+            total?: number;
+            error?: string;
           }
+        | null;
 
-          if (variantsError) {
-            throw variantsError;
-          }
-
-          ((variantsData as ProductVariant[]) || []).forEach((variant) => {
-            if (!groupedVariants[variant.product_id]) {
-              groupedVariants[variant.product_id] = [];
-            }
-            groupedVariants[variant.product_id].push(variant);
-          });
-        }
-
-        const comboStockByProduct: Record<string, number> = {};
-        const compositeProducts = safeProducts.filter(
-          (product) => product.product_type === "composite"
-        );
-
-        if (compositeProducts.length > 0) {
-          const compositeIds = compositeProducts.map((product) => product.id);
-          const { data: componentsData, error: componentsError } = await supabase
-            .from("product_components")
-            .select(
-              "id, product_id, child_product_id, child_variant_id, quantity, sort_order"
-            )
-            .in("product_id", compositeIds)
-            .order("sort_order", { ascending: true })
-            .abortSignal(AbortSignal.timeout(SUPABASE_QUERY_TIMEOUT_MS));
-
-          if (componentsError) {
-            throw componentsError;
-          }
-
-          const componentRows =
-            ((componentsData as ProductComponent[]) || []);
-          const childProductIds = Array.from(
-            new Set(
-              componentRows
-                .map((component) => component.child_product_id)
-                .filter(Boolean)
-            )
-          );
-          const childVariantIds = Array.from(
-            new Set(
-              componentRows
-                .map((component) => component.child_variant_id)
-                .filter(Boolean) as string[]
-            )
-          );
-
-          const [childProductsResult, childVariantsResult] = await Promise.all([
-            childProductIds.length
-              ? supabase
-                  .from("products")
-                  .select(
-                    "id, name, stock, is_active, product_type, fallback_to_general_licenses"
-                  )
-                  .in("id", childProductIds)
-                  .abortSignal(AbortSignal.timeout(SUPABASE_QUERY_TIMEOUT_MS))
-              : Promise.resolve({ data: [], error: null }),
-            childVariantIds.length
-              ? supabase
-                  .from("product_variants")
-                  .select("id, product_id, stock, is_active")
-                  .in("id", childVariantIds)
-                  .abortSignal(AbortSignal.timeout(SUPABASE_QUERY_TIMEOUT_MS))
-              : Promise.resolve({ data: [], error: null }),
-          ]);
-
-          if (childProductsResult.error) {
-            throw childProductsResult.error;
-          }
-
-          if (childVariantsResult.error) {
-            throw childVariantsResult.error;
-          }
-
-          const childProductsMap = new Map(
-            (
-              (childProductsResult.data as Array<{
-                id: string;
-                name: string;
-                stock: number | null;
-                is_active: boolean | null;
-                product_type?: ProductType;
-                fallback_to_general_licenses?: boolean | null;
-              }>) || []
-            ).map((product) => [product.id, product])
-          );
-          const childVariantsMap = new Map(
-            (
-              (childVariantsResult.data as Array<{
-                id: string;
-                product_id: string;
-                stock: number | null;
-                is_active: boolean | null;
-              }>) || []
-            ).map((variant) => [variant.id, variant])
-          );
-          const componentsByCombo = new Map<string, ProductComponent[]>();
-
-          for (const component of componentRows) {
-            const current = componentsByCombo.get(component.product_id) || [];
-            current.push(component);
-            componentsByCombo.set(component.product_id, current);
-          }
-
-          for (const combo of compositeProducts) {
-            const comboComponents = componentsByCombo.get(combo.id) || [];
-
-            if (comboComponents.length < 2) {
-              comboStockByProduct[combo.id] = 0;
-              continue;
-            }
-
-            const requirements = new Map<
-              string,
-              {
-                childProductId: string;
-                childVariantId: string | null;
-                quantity: number;
-              }
-            >();
-
-            for (const component of comboComponents) {
-              const key = `${component.child_product_id}__${
-                component.child_variant_id || "base"
-              }`;
-
-              if (!requirements.has(key)) {
-                requirements.set(key, {
-                  childProductId: component.child_product_id,
-                  childVariantId: component.child_variant_id || null,
-                  quantity: 1,
-                });
-              }
-            }
-
-            let componentCapacity = Number.MAX_SAFE_INTEGER;
-
-            for (const requirement of requirements.values()) {
-              const childProduct = childProductsMap.get(
-                requirement.childProductId
-              );
-
-              if (
-                !childProduct ||
-                childProduct.is_active !== true ||
-                childProduct.product_type === "composite" ||
-                !Number.isInteger(requirement.quantity) ||
-                requirement.quantity <= 0
-              ) {
-                componentCapacity = 0;
-                break;
-              }
-
-              let availableUnits = Number(childProduct.stock || 0);
-
-              if (requirement.childVariantId) {
-                const childVariant = childVariantsMap.get(
-                  requirement.childVariantId
-                );
-
-                if (
-                  !childVariant ||
-                  childVariant.is_active !== true ||
-                  childVariant.product_id !== childProduct.id
-                ) {
-                  componentCapacity = 0;
-                  break;
-                }
-
-                availableUnits =
-                  Number(childVariant.stock || 0) +
-                  (childProduct.fallback_to_general_licenses === false
-                    ? 0
-                    : Number(childProduct.stock || 0));
-              }
-
-              componentCapacity = Math.min(
-                componentCapacity,
-                Math.floor(availableUnits / requirement.quantity)
-              );
-            }
-
-            const configuredComboStock =
-              combo.combo_stock === null || combo.combo_stock === undefined
-                ? null
-                : Math.max(0, Number(combo.combo_stock));
-            const manualCapacity =
-              configuredComboStock === null
-                ? Number.MAX_SAFE_INTEGER
-                : configuredComboStock;
-
-            comboStockByProduct[combo.id] = Math.max(
-              0,
-              Math.min(componentCapacity, manualCapacity)
-            );
-          }
-        }
-
-        const expandedItems = buildCatalogItems(
-          safeProducts,
-          groupedVariants,
-          comboStockByProduct
-        );
-        const from = (currentPage - 1) * PRODUCTS_PER_PAGE;
-        const to = from + PRODUCTS_PER_PAGE;
-
-        setCatalogItems(expandedItems.slice(from, to));
-        setTotalProducts(expandedItems.length);
-        setLoading(false);
-        return;
-      } catch (error) {
-        if (requestId !== catalogRequestIdRef.current) {
-          return;
-        }
-
-        if (isAbortLikeError(error) && attempt === 0) {
-          await sleep(400);
-          continue;
-        }
-
-        setMessage(
-          `Error cargando productos: ${error instanceof Error ? error.message : "Error desconocido"
-          }`
-        );
-        setCatalogItems([]);
-        setTotalProducts(0);
-        setLoading(false);
-        return;
+      if (requestId !== catalogRequestIdRef.current) return;
+      if (!response.ok || !result?.ok) {
+        throw new Error(result?.error || "No se pudo cargar el catálogo.");
       }
+
+      setCatalogItems(result.items || []);
+      setCategories(result.categories || [{ name: "Todas", count: 0 }]);
+      setTotalProducts(Number(result.total || 0));
+      setLoading(false);
+    } catch (error) {
+      if (requestId !== catalogRequestIdRef.current) return;
+      setCatalogItems([]);
+      setTotalProducts(0);
+      setLoading(false);
+      setMessage(
+        `Error cargando productos: ${
+          error instanceof Error ? error.message : "Error desconocido"
+        }`
+      );
     }
-  }, [buildCatalogItems, currentPage, debouncedSearch, selectedCategory]);
+  }, [currentPage, debouncedSearch, selectedCategory]);
 
   useEffect(() => {
     let mounted = true;
@@ -981,7 +513,6 @@ export default function HomePage() {
 
       // No retrasar categorías ni catálogo esperando la comprobación visual del rol.
       void fetchRole();
-      void fetchCategories();
     };
 
     void run();
@@ -1011,11 +542,6 @@ export default function HomePage() {
         }
       }, 0);
 
-      window.setTimeout(() => {
-        if (mounted) {
-          void fetchRole();
-        }
-      }, 900);
     });
 
     return () => {
@@ -1023,7 +549,7 @@ export default function HomePage() {
 
       subscription.unsubscribe();
     };
-  }, [fetchCategories, fetchRole]);
+  }, [fetchRole]);
 
   useEffect(() => {
     let mounted = true;
