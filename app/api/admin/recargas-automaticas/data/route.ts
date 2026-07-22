@@ -417,16 +417,14 @@ export async function GET(request: NextRequest) {
     const { supabaseAdmin } = await requireAdmin(request);
     const partialErrors: string[] = [];
 
-    const [bankPayments, bankHistoryToday, topups, alerts, promotions] = await Promise.all([
+    const [bankPayments, bankHistoryToday, alerts, promotions] = await Promise.all([
       loadBankPayments(supabaseAdmin),
       loadBankHistoryToday(supabaseAdmin),
-      loadTopups(supabaseAdmin, partialErrors),
       loadAlerts(supabaseAdmin, partialErrors),
       loadPromotions(supabaseAdmin, partialErrors),
     ]);
 
     return jsonOk({
-      topups,
       alerts,
       promotions,
       bankPayments,
@@ -434,7 +432,6 @@ export async function GET(request: NextRequest) {
       bankHistoryDate: bankHistoryToday.date,
       partialErrors,
       counts: {
-        topups: topups.length,
         alerts: alerts.length,
         promotions: promotions.length,
         bankPayments: bankPayments.length,

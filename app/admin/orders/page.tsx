@@ -101,11 +101,9 @@ export default function AdminOrdersPage() {
   const [selectedOrder, setSelectedOrder] = useState<ReceiptOrder | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [reversingOrderId, setReversingOrderId] = useState<string | null>(null);
-  const [stats, setStats] = useState({ totalOrders: 0, totalRevenue: 0, totalLicenses: 0 });
-  const [totalPages, setTotalPages] = useState(1);
 
-  const loadOrders = useCallback(async (showLoader = true) => {
-    if (showLoader) setLoading(true);
+  const loadOrders = useCallback(async () => {
+    setLoading(true);
     setBanner(null);
 
     try {
@@ -114,21 +112,21 @@ export default function AdminOrdersPage() {
       } = await supabase.auth.getSession();
 
       if (!session?.access_token) {
-        throw new Error("Tu sesión expiró. Inicia sesión de nuevo.");
+        setBanner({
+          kind: "error",
+          text: "Tu sesión expiró. Inicia sesión de nuevo.",
+        });
+        setLoading(false);
+        return;
       }
 
-      const params = new URLSearchParams({
-        page: String(currentPage),
-        pageSize: String(PAGE_SIZE),
-        status: statusFilter,
-        search: search.trim(),
-        includeStats: currentPage === 1 ? "true" : "false",
+      const response = await fetch("/api/admin/orders/list", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
       });
 
-      const response = await fetch(`/api/admin/orders/list?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        cache: "no-store",
-      });
       const result = await response.json().catch(() => null);
 
       if (!response.ok) {
@@ -136,30 +134,30 @@ export default function AdminOrdersPage() {
       }
 
       setOrders((result?.orders as AdminOrder[]) || []);
-      setTotalPages(Math.max(1, Number(result?.pagination?.totalPages || 1)));
-      setStats((current) => ({
-        totalOrders: Number(result?.stats?.totalOrders || 0),
-        totalRevenue:
-          typeof result?.stats?.totalRevenue === "number"
-            ? Number(result.stats.totalRevenue)
-            : current.totalRevenue,
-        totalLicenses: Number(result?.stats?.totalLicenses || 0),
-      }));
+      setCurrentPage(1);
     } catch (error) {
       setOrders([]);
       setBanner({
         kind: "error",
-        text: error instanceof Error ? error.message : "Ocurrió un error cargando los pedidos.",
+        text:
+          error instanceof Error
+            ? error.message
+            : "Ocurrió un error cargando los pedidos.",
       });
     } finally {
       setLoading(false);
     }
-  }, [currentPage, search, statusFilter]);
+  }, []);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void loadOrders(), search ? 350 : 0);
-    return () => window.clearTimeout(timer);
-  }, [loadOrders, search]);
+    const timer = window.setTimeout(() => {
+      void loadOrders();
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [loadOrders]);
 
   const reverseOrder = async (order: AdminOrder) => {
     if (order.is_reverted || reversingOrderId) return;
@@ -201,7 +199,7 @@ export default function AdminOrdersPage() {
         setSelectedOrder(null);
       }
 
-      await loadOrders(false);
+      await loadOrders();
       setStatusFilter("REVERTED");
       setBanner({
         kind: "success",
@@ -217,17 +215,78 @@ export default function AdminOrdersPage() {
     }
   };
 
-  const filteredOrders = orders;
-  const totalRevenue = stats.totalRevenue;
-  const totalLicenses = stats.totalLicenses;
+  const filteredOrders = useMemo(() => {
+    const term = search.trim().toLowerCase();
+
+    return orders.filter((order) => {
+      const matchesStatus =
+        statusFilter === "ALL" ||
+        (statusFilter === "REVERTED" ? order.is_reverted : !order.is_reverted);
+
+      if (!matchesStatus) return false;
+      if (!term) return true;
+
+      const orderNumber = String(order.order_number || "").toLowerCase();
+      const email = (order.customer_email || "").toLowerCase();
+      const fullName = (order.customer_full_name || "").toLowerCase();
+
+      const licensesText = order.items
+        .flatMap((item) => item.licenses.map((license) => license.license_text))
+        .join(" ")
+        .toLowerCase();
+
+      return (
+        orderNumber.includes(term) ||
+        email.includes(term) ||
+        fullName.includes(term) ||
+        licensesText.includes(term)
+      );
+    });
+  }, [orders, search, statusFilter]);
+
+  const totalRevenue = useMemo(() => {
+    return filteredOrders.reduce((sum, order) => {
+      if (statusFilter === "REVERTED") {
+        return sum + Number(order.total || 0);
+      }
+
+      return order.is_reverted ? sum : sum + Number(order.total || 0);
+    }, 0);
+  }, [filteredOrders, statusFilter]);
+
+  const totalLicenses = useMemo(() => {
+    return filteredOrders.reduce((sum, order) => {
+      if (order.is_reverted) {
+        return sum + Number(order.released_license_count || 0);
+      }
+
+      return (
+        sum +
+        order.items.reduce((itemAcc, item) => itemAcc + item.licenses.length, 0)
+      );
+    }, 0);
+  }, [filteredOrders]);
+
+  const totalPages = useMemo(() => {
+    return Math.max(1, Math.ceil(filteredOrders.length / PAGE_SIZE));
+  }, [filteredOrders.length]);
+
   const effectiveCurrentPage = Math.min(currentPage, totalPages);
-  const paginatedOrders = orders;
-  const paginationItems = useMemo(
-    () => buildPagination(effectiveCurrentPage, totalPages),
-    [effectiveCurrentPage, totalPages]
-  );
-  const pageStart = stats.totalOrders === 0 ? 0 : (effectiveCurrentPage - 1) * PAGE_SIZE + 1;
-  const pageEnd = Math.min(effectiveCurrentPage * PAGE_SIZE, stats.totalOrders);
+
+  const paginatedOrders = useMemo(() => {
+    const start = (effectiveCurrentPage - 1) * PAGE_SIZE;
+    const end = start + PAGE_SIZE;
+    return filteredOrders.slice(start, end);
+  }, [effectiveCurrentPage, filteredOrders]);
+
+  const paginationItems = useMemo(() => {
+    return buildPagination(effectiveCurrentPage, totalPages);
+  }, [effectiveCurrentPage, totalPages]);
+
+  const pageStart =
+    filteredOrders.length === 0 ? 0 : (effectiveCurrentPage - 1) * PAGE_SIZE + 1;
+
+  const pageEnd = Math.min(effectiveCurrentPage * PAGE_SIZE, filteredOrders.length);
 
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
@@ -271,7 +330,7 @@ export default function AdminOrdersPage() {
               <input
                 type="text"
                 value={search}
-                onChange={(event) => { setSearch(event.target.value); setCurrentPage(1); }}
+                onChange={(event) => setSearch(event.target.value)}
                 placeholder="Número, correo o licencia"
                 className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400"
               />
@@ -315,7 +374,7 @@ export default function AdminOrdersPage() {
               Pedidos
             </p>
             <p className="mt-4 text-4xl font-extrabold text-slate-900">
-              {stats.totalOrders}
+              {filteredOrders.length}
             </p>
           </div>
 
@@ -330,7 +389,7 @@ export default function AdminOrdersPage() {
 
           <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
-              {statusFilter === "REVERTED" ? "Restauradas en esta página" : "Licencias en esta página"}
+              {statusFilter === "REVERTED" ? "Licencias restauradas" : "Licencias entregadas"}
             </p>
             <p className="mt-4 text-4xl font-extrabold text-slate-900">
               {totalLicenses}
@@ -481,7 +540,7 @@ export default function AdminOrdersPage() {
             <p className="text-sm text-slate-600">
               Mostrando <span className="font-semibold">{pageStart}</span> -{" "}
               <span className="font-semibold">{pageEnd}</span> de{" "}
-              <span className="font-semibold">{stats.totalOrders}</span>{" "}
+              <span className="font-semibold">{filteredOrders.length}</span>{" "}
               pedidos
             </p>
 

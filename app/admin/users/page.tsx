@@ -49,13 +49,14 @@ export default function AdminUsersPage() {
   const [emailDrafts, setEmailDrafts] = useState<Record<string, string>>({});
   const [passwordDrafts, setPasswordDrafts] = useState<Record<string, string>>({});
   const [currentPage, setCurrentPage] = useState(1);
-  const [totalUsers, setTotalUsers] = useState(0);
-  const [totalPages, setTotalPages] = useState(1);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void loadUsers(), search ? 350 : 0);
-    return () => window.clearTimeout(timer);
-  }, [currentPage, search]);
+    void loadUsers();
+  }, []);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search]);
 
   function handlePageChange(page: number) {
     setCurrentPage(page);
@@ -67,19 +68,11 @@ export default function AdminUsersPage() {
     setMessage("");
     setMessageType("");
 
-    const from = (currentPage - 1) * PAGE_SIZE;
-    const to = from + PAGE_SIZE - 1;
-    let query = supabase
+    const { data, error } = await supabase
       .from("profiles")
-      .select("id, email, full_name, role, created_at", { count: "exact" })
+      .select("id, email, full_name, role, created_at")
       .is("deleted_at", null)
-      .order("created_at", { ascending: false })
-      .range(from, to);
-
-    const term = search.trim().replace(/[%(),]/g, "").slice(0, 80);
-    if (term) query = query.or(`email.ilike.%${term}%,full_name.ilike.%${term}%`);
-
-    const { data, error, count } = await query;
+      .order("created_at", { ascending: false });
 
     if (error) {
       setMessage("Error cargando usuarios: " + error.message);
@@ -90,29 +83,55 @@ export default function AdminUsersPage() {
 
     const profiles = (data as Profile[]) || [];
     setUsers(profiles);
-    setTotalUsers(Number(count || 0));
-    setTotalPages(Math.max(1, Math.ceil(Number(count || 0) / PAGE_SIZE)));
 
     const initialEmailDrafts: Record<string, string> = {};
     const initialPasswordDrafts: Record<string, string> = {};
+
     profiles.forEach((user) => {
       initialEmailDrafts[user.id] = user.email || "";
       initialPasswordDrafts[user.id] = "";
     });
+
     setEmailDrafts(initialEmailDrafts);
     setPasswordDrafts(initialPasswordDrafts);
+    setCurrentPage(1);
     setLoading(false);
   };
 
-  const filteredUsers = users;
-  const paginatedUsers = users;
+  const filteredUsers = useMemo(() => {
+    const term = search.trim().toLowerCase();
+
+    if (!term) return users;
+
+    return users.filter((user) => {
+      const fullName = (user.full_name || "").toLowerCase();
+      const email = (user.email || "").toLowerCase();
+      return fullName.includes(term) || email.includes(term);
+    });
+  }, [users, search]);
+
+  const totalPages = useMemo(() => {
+    return Math.max(1, Math.ceil(filteredUsers.length / PAGE_SIZE));
+  }, [filteredUsers.length]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  const paginatedUsers = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    const end = start + PAGE_SIZE;
+    return filteredUsers.slice(start, end);
+  }, [filteredUsers, currentPage]);
 
   const paginationItems = useMemo(() => {
     return buildPagination(currentPage, totalPages);
   }, [currentPage, totalPages]);
 
-  const pageStart = totalUsers === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
-  const pageEnd = Math.min(currentPage * PAGE_SIZE, totalUsers);
+  const pageStart = filteredUsers.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+  const pageEnd = Math.min(currentPage * PAGE_SIZE, filteredUsers.length);
 
   const parseApiResponse = async (response: Response) => {
     const contentType = response.headers.get("content-type") || "";

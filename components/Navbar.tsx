@@ -5,10 +5,14 @@ import { usePathname } from "next/navigation";
 import { useCart } from "../context/CartContext";
 import { supabase } from "../lib/supabase";
 import { useCallback, useEffect, useState } from "react";
+import { Bebas_Neue } from "next/font/google";
 import UserDropdown from "@/components/UserDropdown";
 
+const bebasNeue = Bebas_Neue({
+  subsets: ["latin"],
+  weight: "400",
+});
 
-const ADMIN_CACHE_KEY = "streamingmayor_is_admin";
 const PHOTO_MODE_KEY = "streamingmayor_photo_mode";
 const PHOTO_MODE_EVENT = "streamingmayor:photo-mode-change";
 
@@ -23,11 +27,10 @@ export default function Navbar() {
 
   const totalItems = cart.reduce((acc, item) => acc + item.quantity, 0);
 
-  const checkSessionAndRole = useCallback(async (forceRoleRefresh = false) => {
+  const checkSessionAndRole = useCallback(async () => {
     const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    const user = session?.user || null;
+      data: { user },
+    } = await supabase.auth.getUser();
 
     if (!user) {
       setIsLoggedIn(false);
@@ -37,43 +40,24 @@ export default function Navbar() {
 
     setIsLoggedIn(true);
 
-    if (!forceRoleRefresh) {
-      try {
-        const cached = window.localStorage.getItem(ADMIN_CACHE_KEY);
-        if (cached === "true" || cached === "false") {
-          setIsAdmin(cached === "true");
-          return;
-        }
-      } catch {}
-    }
-
     const { data } = await supabase
       .from("profiles")
       .select("role")
       .eq("id", user.id)
-      .abortSignal(AbortSignal.timeout(8_000))
-      .maybeSingle();
+      .single();
 
-    const nextAdmin = data?.role === "admin";
-    setIsAdmin(nextAdmin);
-    try {
-      window.localStorage.setItem(ADMIN_CACHE_KEY, nextAdmin ? "true" : "false");
-    } catch {}
+    setIsAdmin(data?.role === "admin");
   }, []);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void checkSessionAndRole(), 0);
+    const timer = window.setTimeout(() => {
+      void checkSessionAndRole();
+    }, 0);
+
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "SIGNED_OUT") {
-        setIsLoggedIn(false);
-        setIsAdmin(false);
-        return;
-      }
-      if (event === "SIGNED_IN" || event === "USER_UPDATED") {
-        void checkSessionAndRole(true);
-      }
+    } = supabase.auth.onAuthStateChange(() => {
+      void checkSessionAndRole();
     });
 
     return () => {
@@ -108,7 +92,7 @@ export default function Navbar() {
       ? "inline-flex h-11 items-center rounded-full border border-white/14 bg-white/[0.12] px-5 text-[14px] font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_10px_30px_rgba(0,0,0,0.28)] backdrop-blur-xl"
       : "inline-flex h-11 items-center rounded-full border border-transparent bg-transparent px-5 text-[14px] font-semibold text-white/70 transition duration-200 hover:border-white/10 hover:bg-white/[0.06] hover:text-white";
 
-  const logoClass = "select-none whitespace-nowrap font-[Impact,Arial_Narrow,sans-serif] uppercase leading-none tracking-[-0.03em] text-[clamp(18px,5.9vw,29px)] min-[390px]:text-[clamp(20px,5.8vw,31px)] md:text-[50px] md:tracking-[-0.018em]";
+  const logoClass = `${bebasNeue.className} select-none whitespace-nowrap uppercase leading-none tracking-[-0.03em] text-[clamp(18px,5.9vw,29px)] min-[390px]:text-[clamp(20px,5.8vw,31px)] md:text-[50px] md:tracking-[-0.018em]`;
 
   return (
     <>

@@ -111,6 +111,33 @@ type PromotionFormState = {
 
 type BannerState = { kind: "success" | "error"; text: string } | null;
 type MainTab = "HISTORIAL" | "ALERTAS" | "BANCO" | "BANCO_HISTORIAL";
+type HistoryMode = "MONTH" | "DAY" | "ALL" | "RANGE";
+
+type HistoryDataResponse = {
+  ok?: boolean;
+  rows?: FormattedTopup[];
+  filteredCount?: number;
+  periodTotalCount?: number;
+  approvedCount?: number;
+  pendingCount?: number;
+  totalApprovedAmount?: number;
+  page?: number;
+  pageSize?: number;
+  mode?: HistoryMode;
+  selectedDay?: string;
+  periodLabel?: string;
+  error?: string;
+};
+
+type HistoryQueryOverrides = Partial<{
+  mode: HistoryMode;
+  day: string;
+  from: string;
+  to: string;
+  page: number;
+  status: string;
+  search: string;
+}>;
 
 type RecargasDataResponse = {
   ok?: boolean;
@@ -125,7 +152,6 @@ type RecargasDataResponse = {
 };
 
 const PAGE_SIZE = 10;
-const REFRESH_MS = 120000;
 
 function buildPagination(current: number, total: number): Array<number | "..."> {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
@@ -373,6 +399,16 @@ export default function RecargasAutomaticasPage() {
   const [bankHistoryToday, setBankHistoryToday] = useState<BankPaymentRow[]>([]);
   const [bankHistoryDate, setBankHistoryDate] = useState("");
   const [loading, setLoading] = useState(true);
+  const [historyLoading, setHistoryLoading] = useState(true);
+
+  const [historyMode, setHistoryMode] = useState<HistoryMode>("ALL");
+  const [historyDay, setHistoryDay] = useState(() => toDateInputValue(new Date()));
+  const [historyPeriodLabel, setHistoryPeriodLabel] = useState("Histórico total");
+  const [historyFilteredCount, setHistoryFilteredCount] = useState(0);
+  const [historyPeriodTotalCount, setHistoryPeriodTotalCount] = useState(0);
+  const [historyApprovedCount, setHistoryApprovedCount] = useState(0);
+  const [historyPendingCount, setHistoryPendingCount] = useState(0);
+  const [historyTotalApprovedAmount, setHistoryTotalApprovedAmount] = useState(0);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
@@ -424,7 +460,6 @@ export default function RecargasAutomaticasPage() {
         );
       }
 
-      setTopups((result?.topups || []).filter(isVisibleTopup));
       setAlerts(result?.alerts || []);
       setPromotions(result?.promotions || []);
       setBankPayments((result?.bankPayments || []).filter((payment) => !payment.is_used && !payment.matched_topup_id));
@@ -438,7 +473,6 @@ export default function RecargasAutomaticasPage() {
 
       setBanner((current) => (current?.kind === "error" ? null : current));
     } catch (error) {
-      setTopups([]);
       setAlerts([]);
       setPromotions([]);
       setBankPayments([]);
@@ -455,28 +489,95 @@ export default function RecargasAutomaticasPage() {
     }
   }, []);
 
+  const loadHistory = useCallback(async (
+    showLoader = false,
+    overrides: HistoryQueryOverrides = {}
+  ) => {
+    if (showLoader) setHistoryLoading(true);
+
+    try {
+      const token = await getAccessToken();
+      const requestedMode = overrides.mode ?? historyMode;
+      const requestedDay = overrides.day ?? historyDay;
+      const requestedFrom = overrides.from ?? dateFrom;
+      const requestedTo = overrides.to ?? dateTo;
+      const requestedPage = overrides.page ?? page;
+      const requestedStatus = overrides.status ?? statusFilter;
+      const requestedSearch = overrides.search ?? searchTerm.trim();
+
+      const params = new URLSearchParams({
+        mode: requestedMode,
+        day: requestedDay,
+        page: String(requestedPage),
+        pageSize: String(PAGE_SIZE),
+        status: requestedStatus,
+        search: requestedSearch,
+      });
+
+      if (requestedFrom) params.set("from", requestedFrom);
+      if (requestedTo) params.set("to", requestedTo);
+
+      const response = await fetch(`/api/admin/recargas-automaticas/history?${params.toString()}`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+        },
+        cache: "no-store",
+      });
+
+      const result = (await response.json().catch(() => null)) as HistoryDataResponse | null;
+      if (!response.ok) {
+        throw new Error(result?.error || `No se pudo cargar el histórico (HTTP ${response.status}).`);
+      }
+
+      setTopups((result?.rows || []).filter(isVisibleTopup));
+      setHistoryFilteredCount(Number(result?.filteredCount || 0));
+      setHistoryPeriodTotalCount(Number(result?.periodTotalCount || 0));
+      setHistoryApprovedCount(Number(result?.approvedCount || 0));
+      setHistoryPendingCount(Number(result?.pendingCount || 0));
+      setHistoryTotalApprovedAmount(Number(result?.totalApprovedAmount || 0));
+      setHistoryPeriodLabel(result?.periodLabel || "Periodo seleccionado");
+      if (result?.selectedDay) setHistoryDay(result.selectedDay);
+      setHistoryLoading(false);
+      setBanner((current) => (current?.kind === "error" ? null : current));
+    } catch (error) {
+      setTopups([]);
+      setHistoryFilteredCount(0);
+      setHistoryPeriodTotalCount(0);
+      setHistoryApprovedCount(0);
+      setHistoryPendingCount(0);
+      setHistoryTotalApprovedAmount(0);
+      setHistoryLoading(false);
+      setBanner({
+        kind: "error",
+        text: error instanceof Error ? error.message : "No se pudo cargar el histórico de recargas.",
+      });
+    }
+  }, [dateFrom, dateTo, historyDay, historyMode, page, searchTerm, statusFilter]);
+
+  const initialLoadDone = useRef(false);
+
   useEffect(() => {
+    if (initialLoadDone.current) return;
+    initialLoadDone.current = true;
+
     const initialTimer = window.setTimeout(() => {
-      void loadData(true);
+      void Promise.all([
+        loadData(true),
+        loadHistory(true, {
+          mode: "ALL",
+          from: "",
+          to: "",
+          page: 1,
+          status: "ALL",
+          search: "",
+        }),
+      ]);
     }, 0);
 
-    const refreshIfVisible = () => {
-      if (document.visibilityState === "visible") {
-        void loadData(false);
-      }
-    };
-
-    const interval = window.setInterval(refreshIfVisible, REFRESH_MS);
-    window.addEventListener("focus", refreshIfVisible);
-    document.addEventListener("visibilitychange", refreshIfVisible);
-
-    return () => {
-      window.clearTimeout(initialTimer);
-      window.clearInterval(interval);
-      window.removeEventListener("focus", refreshIfVisible);
-      document.removeEventListener("visibilitychange", refreshIfVisible);
-    };
-  }, [loadData]);
+    return () => window.clearTimeout(initialTimer);
+  }, [loadData, loadHistory]);
 
   useEffect(() => {
     if (!banner) return;
@@ -495,22 +596,6 @@ export default function RecargasAutomaticasPage() {
     );
   }, [availableBankPayments, dateFrom, dateTo]);
 
-  const topupsInScope = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase();
-
-    return topups.filter((topup) => {
-      const termMatch =
-        !term ||
-        topup.email.toLowerCase().includes(term) ||
-        (topup.full_name || "").toLowerCase().includes(term) ||
-        (topup.reference || "").toLowerCase().includes(term) ||
-        (topup.payer_origin || "").toLowerCase().includes(term) ||
-        (topup.matched_bank_reference || "").toLowerCase().includes(term);
-
-      return termMatch && isWithinDateRange(getTopupDateForFilter(topup), dateFrom, dateTo);
-    });
-  }, [topups, searchTerm, dateFrom, dateTo]);
-
   const alertsInScope = useMemo(() => {
     return alerts.filter((alert) =>
       isWithinDateRange(alert.executed_at || alert.requested_at || alert.created_at, dateFrom, dateTo)
@@ -522,31 +607,11 @@ export default function RecargasAutomaticasPage() {
     [alertsInScope]
   );
 
-  const pendingCount = useMemo(
-    () => topupsInScope.filter((topup) => normalizeStatus(topup.status) === "PENDING").length,
-    [topupsInScope]
-  );
-
-  const approvedTopupsInScope = useMemo(
-    () => topupsInScope.filter((topup) => normalizeStatus(topup.status) === "APPROVED"),
-    [topupsInScope]
-  );
-
-  const approvedCount = approvedTopupsInScope.length;
-
-  const totalRechargedAmount = useMemo(
-    () => sumMoney(approvedTopupsInScope, (topup) => Number(topup.amount || 0)),
-    [approvedTopupsInScope]
-  );
-
+  const pendingCount = historyPendingCount;
+  const approvedCount = historyApprovedCount;
+  const totalRechargedAmount = historyTotalApprovedAmount;
   const availableBankPaymentsCount = availableBankPaymentsInScope.length;
-
-  const filteredTopups = useMemo(() => {
-    return topupsInScope.filter((topup) => {
-      const status = normalizeStatus(topup.status);
-      return statusFilter === "ALL" || status === statusFilter;
-    });
-  }, [topupsInScope, statusFilter]);
+  const filteredTopups = topups;
 
   const filteredAlerts = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -592,7 +657,7 @@ export default function RecargasAutomaticasPage() {
 
   const activeLength =
     mainTab === "HISTORIAL"
-      ? filteredTopups.length
+      ? historyFilteredCount
       : mainTab === "ALERTAS"
       ? filteredAlerts.length
       : mainTab === "BANCO"
@@ -604,10 +669,7 @@ export default function RecargasAutomaticasPage() {
   const pageStart = activeLength === 0 ? 0 : (effectivePage - 1) * PAGE_SIZE + 1;
   const pageEnd = Math.min(effectivePage * PAGE_SIZE, activeLength);
 
-  const paginatedTopups = useMemo(
-    () => filteredTopups.slice((effectivePage - 1) * PAGE_SIZE, effectivePage * PAGE_SIZE),
-    [filteredTopups, effectivePage]
-  );
+  const paginatedTopups = filteredTopups;
 
   const paginatedAlerts = useMemo(
     () => filteredAlerts.slice((effectivePage - 1) * PAGE_SIZE, effectivePage * PAGE_SIZE),
@@ -644,26 +706,59 @@ export default function RecargasAutomaticasPage() {
   function handlePageChange(next: number) {
     setPage(next);
     topRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    if (mainTab === "HISTORIAL") {
+      void loadHistory(true, { page: next });
+    }
   }
 
   function setTodayFilter() {
     const today = toDateInputValue(new Date());
     setDateFrom(today);
     setDateTo(today);
+    setHistoryDay(today);
+    setHistoryMode("DAY");
     setPage(1);
+
+    void loadHistory(true, { mode: "DAY", day: today, from: today, to: today, page: 1 });
   }
 
   function setCurrentMonthFilter() {
     const now = new Date();
     const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-    setDateFrom(toDateInputValue(firstDay));
-    setDateTo(toDateInputValue(now));
+    const from = toDateInputValue(firstDay);
+    const to = toDateInputValue(now);
+
+    setDateFrom(from);
+    setDateTo(to);
+    setHistoryMode("MONTH");
     setPage(1);
+
+    void loadHistory(true, { mode: "MONTH", from, to, page: 1 });
   }
 
   function clearDateFilter() {
     setDateFrom("");
     setDateTo("");
+    setHistoryMode("ALL");
+    setPage(1);
+
+    void loadHistory(true, { mode: "ALL", from: "", to: "", page: 1 });
+  }
+
+  function handleRefresh() {
+    const mode: HistoryMode = dateFrom || dateTo ? "RANGE" : historyMode;
+    void Promise.all([
+      loadData(true),
+      loadHistory(true, {
+        mode,
+        from: dateFrom,
+        to: dateTo,
+        page: 1,
+        status: statusFilter,
+        search: searchTerm.trim(),
+      }),
+    ]);
     setPage(1);
   }
 
@@ -700,7 +795,7 @@ export default function RecargasAutomaticasPage() {
         note: "Aprobación forzada desde panel de recargas automáticas",
       });
       setBanner({ kind: "success", text: "Recarga aprobada y saldo acreditado." });
-      await loadData(false);
+      await Promise.all([loadData(false), loadHistory(false)]);
     } catch (error) {
       setBanner({ kind: "error", text: error instanceof Error ? error.message : "Error al aprobar." });
     } finally {
@@ -720,7 +815,7 @@ export default function RecargasAutomaticasPage() {
         reason: "Recarga declinada desde panel de recargas automáticas",
       });
       setBanner({ kind: "success", text: "Recarga declinada." });
-      await loadData(false);
+      await Promise.all([loadData(false), loadHistory(false)]);
     } catch (error) {
       setBanner({ kind: "error", text: error instanceof Error ? error.message : "Error al declinar." });
     } finally {
@@ -750,7 +845,7 @@ export default function RecargasAutomaticasPage() {
           ? "Recarga anulada y saldo automático descontado."
           : "Recarga anulada sin tocar saldo.",
       });
-      await loadData(false);
+      await Promise.all([loadData(false), loadHistory(false)]);
     } catch (error) {
       setBanner({ kind: "error", text: error instanceof Error ? error.message : "Error al anular." });
     } finally {
@@ -769,7 +864,7 @@ export default function RecargasAutomaticasPage() {
 
       setBankPayments((current) => current.filter((item) => item.id !== payment.id));
       setBanner({ kind: "success", text: "Pago del banco invalidado. Ya no hará match automático." });
-      await loadData(false);
+      await Promise.all([loadData(false), loadHistory(false)]);
     } catch (error) {
       setBanner({ kind: "error", text: error instanceof Error ? error.message : "Error al invalidar pago." });
     } finally {
@@ -816,7 +911,7 @@ export default function RecargasAutomaticasPage() {
 
       setBanner({ kind: "success", text: editingPromotionId ? "Promoción actualizada." : "Promoción creada." });
       resetPromotionForm();
-      await loadData(false);
+      await Promise.all([loadData(false), loadHistory(false)]);
     } catch (error) {
       setBanner({ kind: "error", text: error instanceof Error ? error.message : "No se pudo guardar la promoción." });
     } finally {
@@ -839,7 +934,7 @@ export default function RecargasAutomaticasPage() {
       });
 
       setBanner({ kind: "success", text: nextStatus === "ACTIVE" ? "Promoción activada." : "Promoción pausada." });
-      await loadData(false);
+      await Promise.all([loadData(false), loadHistory(false)]);
     } catch (error) {
       setBanner({ kind: "error", text: error instanceof Error ? error.message : "No se pudo cambiar la promoción." });
     } finally {
@@ -880,7 +975,7 @@ export default function RecargasAutomaticasPage() {
           : "Alerta reabierta.",
     });
 
-    await loadData(false);
+    await Promise.all([loadData(false), loadHistory(false)]);
     setUpdatingId(null);
   }
 
@@ -893,7 +988,7 @@ export default function RecargasAutomaticasPage() {
         </h1>
         <p className="mt-2 text-sm text-slate-600 sm:text-base">
           Centro único para recargas Bre-B / Llaves: historial, alertas anti-fraude y pagos del banco.
-          Se actualiza automáticamente cada 15 segundos.
+          Los datos se actualizan al presionar el botón Actualizar o al recargar la página.
         </p>
       </div>
 
@@ -949,7 +1044,7 @@ export default function RecargasAutomaticasPage() {
 
           <button
             type="button"
-            onClick={() => void loadData(true)}
+            onClick={handleRefresh}
             className="inline-flex h-11 items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
           >
             Actualizar
@@ -966,32 +1061,31 @@ export default function RecargasAutomaticasPage() {
                 setSearchTerm(event.target.value);
                 setPage(1);
               }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") handleRefresh();
+              }}
               placeholder="correo, nombre, referencia..."
               className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white"
             />
           </div>
 
-          {mainTab === "HISTORIAL" ? (
-            <div>
-              <label className="mb-2 block text-sm font-semibold text-slate-700">Estado</label>
-              <select
-                value={statusFilter}
-                onChange={(event) => {
-                  setStatusFilter(event.target.value);
-                  setPage(1);
-                }}
-                className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm font-semibold text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white"
-              >
-                <option value="ALL">Todos</option>
-                <option value="PENDING">En proceso</option>
-                <option value="APPROVED">Aprobadas</option>
-                <option value="REJECTED">Declinadas</option>
-                <option value="EXPIRED">Expiradas</option>
-              </select>
-            </div>
-          ) : (
-            <div className="hidden xl:block" />
-          )}
+          <div>
+            <label className="mb-2 block text-sm font-semibold text-slate-700">Estado</label>
+            <select
+              value={statusFilter}
+              onChange={(event) => {
+                setStatusFilter(event.target.value);
+                setPage(1);
+              }}
+              className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm font-semibold text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white"
+            >
+              <option value="ALL">Todos</option>
+              <option value="PENDING">En proceso</option>
+              <option value="APPROVED">Aprobadas</option>
+              <option value="REJECTED">Declinadas</option>
+              <option value="EXPIRED">Expiradas</option>
+            </select>
+          </div>
 
           <div>
             <label className="mb-2 block text-sm font-semibold text-slate-700">Desde</label>
@@ -1000,6 +1094,7 @@ export default function RecargasAutomaticasPage() {
               value={dateFrom}
               onChange={(event) => {
                 setDateFrom(event.target.value);
+                setHistoryMode("RANGE");
                 setPage(1);
               }}
               className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-slate-400 focus:bg-white"
@@ -1013,6 +1108,7 @@ export default function RecargasAutomaticasPage() {
               value={dateTo}
               onChange={(event) => {
                 setDateTo(event.target.value);
+                setHistoryMode("RANGE");
                 setPage(1);
               }}
               className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-slate-400 focus:bg-white"
@@ -1020,33 +1116,17 @@ export default function RecargasAutomaticasPage() {
           </div>
 
           <div className="flex flex-wrap gap-2 md:col-span-2 xl:col-span-1 xl:flex-nowrap xl:justify-end">
-            <button
-              type="button"
-              onClick={setTodayFilter}
-              className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-            >
-              Hoy
-            </button>
-            <button
-              type="button"
-              onClick={setCurrentMonthFilter}
-              className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-            >
-              Mes
-            </button>
-            <button
-              type="button"
-              onClick={clearDateFilter}
-              className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-            >
-              Limpiar
-            </button>
+            <button type="button" onClick={setTodayFilter} className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Hoy</button>
+            <button type="button" onClick={setCurrentMonthFilter} className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Mes</button>
+            <button type="button" onClick={clearDateFilter} className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Limpiar</button>
           </div>
         </div>
 
+        
+
         <div className="mt-5 flex flex-wrap gap-2 border-t border-slate-100 pt-5">
           {[
-            { key: "HISTORIAL", label: `Historial (${filteredTopups.length})` },
+            { key: "HISTORIAL", label: `Historial (${historyFilteredCount})` },
             { key: "ALERTAS", label: `Alertas (${openAlertsCount})` },
             { key: "BANCO", label: `Pagos del banco (${availableBankPaymentsCount})` },
             { key: "BANCO_HISTORIAL", label: `Historial del banco hoy (${bankHistoryToday.length})` },
@@ -1068,7 +1148,7 @@ export default function RecargasAutomaticasPage() {
 
         {mainTab === "HISTORIAL" && (
           <div className="mt-6 overflow-hidden rounded-[24px] border border-slate-200 bg-white">
-            {loading ? (
+            {historyLoading ? (
               <div className="px-5 py-8 text-sm text-slate-500">Cargando recargas...</div>
             ) : filteredTopups.length === 0 ? (
               <div className="px-5 py-8 text-sm text-slate-500">No hay recargas con ese filtro.</div>
@@ -1436,7 +1516,7 @@ export default function RecargasAutomaticasPage() {
           </div>
         )}
 
-        {!loading && activeLength > 0 && (
+        {!(mainTab === "HISTORIAL" ? historyLoading : loading) && activeLength > 0 && (
           <div className="mt-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <p className="text-sm text-slate-600">
               Mostrando <span className="font-semibold">{pageStart}</span> -{" "}

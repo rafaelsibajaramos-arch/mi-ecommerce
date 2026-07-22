@@ -487,7 +487,7 @@ export default function EditProductPage() {
   const fetchProduct = async () => {
     const { data, error } = await supabase
       .from("products")
-      .select("id, name, slug, description, price, stock, combo_stock, category, is_active, product_type, avoid_repeat_license, use_priority_licenses, enable_license_alerts, image_url")
+      .select("*")
       .eq("id", id)
       .single();
 
@@ -518,7 +518,7 @@ export default function EditProductPage() {
   const fetchVariants = async () => {
     const { data, error } = await supabase
       .from("product_variants")
-      .select("id, name, slug, description, price, stock, image_url, is_active, sort_order, access_duration_months, default_license_billing_months")
+      .select("*")
       .eq("product_id", id)
       .order("sort_order", { ascending: true })
       .order("created_at", { ascending: true });
@@ -556,7 +556,7 @@ export default function EditProductPage() {
   const fetchComponents = async () => {
     const { data, error } = await supabase
       .from("product_components")
-      .select("id, child_product_id, child_variant_id, quantity, sort_order")
+      .select("*")
       .eq("product_id", id)
       .order("sort_order", { ascending: true })
       .order("created_at", { ascending: true });
@@ -627,8 +627,7 @@ export default function EditProductPage() {
       .select("id, product_id, variant_id, license_text, status, assigned_order_id, assigned_order_item_id, assigned_user_id, is_priority, billing_duration_days, billing_duration_months, requires_rotation_alert, license_mode, max_active_users")
       .eq("product_id", id)
       .eq("status", "available")
-      .order("created_at", { ascending: true })
-      .limit(1000);
+      .order("created_at", { ascending: true });
 
     if (error) {
       setMessage("No se pudieron cargar las licencias.");
@@ -645,26 +644,21 @@ export default function EditProductPage() {
     let usedLicenseIds = new Set<string>();
 
     if (licenseIds.length > 0) {
-      const collected: string[] = [];
-      for (let index = 0; index < licenseIds.length; index += 100) {
-        const chunk = licenseIds.slice(index, index + 100);
-        const { data: accessesData, error: accessesError } = await supabase
-          .from("license_accesses")
-          .select("license_id")
-          .in("license_id", chunk);
+      const { data: accessesData, error: accessesError } = await supabase
+        .from("license_accesses")
+        .select("license_id")
+        .in("license_id", licenseIds);
 
-        if (accessesError) {
-          setMessage("No se pudieron validar licencias antiguas.");
-          return;
-        }
-
-        collected.push(
-          ...(((accessesData as Array<{ license_id: string | null }> | null) || [])
-            .map((access) => access.license_id)
-            .filter(Boolean) as string[])
-        );
+      if (accessesError) {
+        setMessage("No se pudieron validar licencias antiguas.");
+        return;
       }
-      usedLicenseIds = new Set(collected);
+
+      usedLicenseIds = new Set(
+        ((accessesData as Array<{ license_id: string | null }> | null) || [])
+          .map((access) => access.license_id)
+          .filter(Boolean) as string[]
+      );
     }
 
     const rows = availableRows.filter((row) => !usedLicenseIds.has(row.id));
@@ -921,67 +915,56 @@ export default function EditProductPage() {
     licenseMode: "individual" | "shared";
     maxActiveUsers: number;
   }) => {
-    let query = supabase
-      .from("product_licenses")
-      .select("id")
-      .eq("product_id", productId)
-      .eq("status", "available")
-      .eq("is_priority", isPriority);
-
-    if (variantId) {
-      query = query.eq("variant_id", variantId);
-    } else {
-      query = query.is("variant_id", null);
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-      throw new Error(error.message);
-    }
-
-    const existingRows = (data as { id: string }[]) || [];
-    const existingIds = existingRows.map((row) => row.id);
     const normalizedRows = rows
       .map((row) => ({
         licenseText: row.licenseText.trim(),
         billingDurationDays: normalizeBillingDurationDays(row.billingDurationDays),
       }))
       .filter((row) => row.licenseText);
-    const now = new Date();
 
-    if (existingIds.length > 0) {
-      const { error: deleteError } = await supabase
-        .from("product_licenses")
-        .delete()
-        .in("id", existingIds);
+    let deleteQuery = supabase
+      .from("product_licenses")
+      .delete()
+      .eq("product_id", productId)
+      .eq("status", "available")
+      .eq("is_priority", isPriority);
 
-      if (deleteError) {
-        throw new Error(deleteError.message);
-      }
+    deleteQuery = variantId
+      ? deleteQuery.eq("variant_id", variantId)
+      : deleteQuery.is("variant_id", null);
+
+    const { error: deleteError } = await deleteQuery;
+
+    if (deleteError) {
+      throw new Error(deleteError.message);
     }
 
-    for (const [index, row] of normalizedRows.entries()) {
-      const createdAt = new Date(now.getTime() + index).toISOString();
-      const billingEndsAt = addDays(now, row.billingDurationDays).toISOString();
+    if (normalizedRows.length === 0) return;
 
-      const { error: insertError } = await supabase.from("product_licenses").insert([
-        {
-          product_id: productId,
-          variant_id: variantId,
-          status: "available",
-          is_priority: isPriority,
-          license_text: row.licenseText,
-          billing_duration_days: row.billingDurationDays,
-          billing_duration_months: Math.max(1, Math.ceil(row.billingDurationDays / 30)),
-          billing_starts_at: now.toISOString(),
-          billing_ends_at: billingEndsAt,
-          requires_rotation_alert: requiresRotationAlert,
-          license_mode: licenseMode,
-          max_active_users: maxActiveUsers,
-          created_at: createdAt,
-        },
-      ]);
+    const now = new Date();
+    const payload = normalizedRows.map((row, index) => ({
+      product_id: productId,
+      variant_id: variantId,
+      status: "available",
+      is_priority: isPriority,
+      license_text: row.licenseText,
+      billing_duration_days: row.billingDurationDays,
+      billing_duration_months: Math.max(1, Math.ceil(row.billingDurationDays / 30)),
+      billing_starts_at: now.toISOString(),
+      billing_ends_at: addDays(now, row.billingDurationDays).toISOString(),
+      requires_rotation_alert: requiresRotationAlert,
+      license_mode: licenseMode,
+      max_active_users: maxActiveUsers,
+      created_at: new Date(now.getTime() + index).toISOString(),
+    }));
+
+    const BATCH_SIZE = 500;
+
+    for (let start = 0; start < payload.length; start += BATCH_SIZE) {
+      const batch = payload.slice(start, start + BATCH_SIZE);
+      const { error: insertError } = await supabase
+        .from("product_licenses")
+        .insert(batch);
 
       if (insertError) {
         throw new Error(insertError.message);
@@ -1242,6 +1225,7 @@ export default function EditProductPage() {
       }
 
       const variantIdMapByTempId: Record<string, string> = {};
+      const variantImageUrlMapByTempId: Record<string, string | null> = {};
 
       for (let index = 0; index < variants.length; index++) {
         const item = variants[index];
@@ -1279,6 +1263,8 @@ export default function EditProductPage() {
 
           finalVariantImageUrl = variantImageData.publicUrl;
         }
+
+        variantImageUrlMapByTempId[item.tempId] = finalVariantImageUrl;
 
         const payload = {
           product_id: id,
@@ -1365,37 +1351,61 @@ export default function EditProductPage() {
         await supabase.from("product_components").delete().eq("product_id", id);
       }
 
-      await syncAvailableLicenses({
-        productId: id,
-        variantId: null,
-        rows: effectiveGeneralLicenseRows,
-        isPriority: false,
-        requiresRotationAlert: enableLicenseAlerts,
-        licenseMode: "individual",
-        maxActiveUsers: 1,
-      });
-
-      for (const item of effectiveVariants) {
-        const variantId = variantIdMapByTempId[item.tempId];
-        const priorityLicenseRows = item.priorityLicenseRows;
-
-        if (!variantId) continue;
-
-        await syncAvailableLicenses({
+      const licenseSyncTasks = [
+        syncAvailableLicenses({
           productId: id,
-          variantId,
-          rows: priorityLicenseRows,
-          isPriority: true,
+          variantId: null,
+          rows: effectiveGeneralLicenseRows,
+          isPriority: false,
           requiresRotationAlert: enableLicenseAlerts,
           licenseMode: "individual",
           maxActiveUsers: 1,
-        });
-      }
+        }),
+        ...effectiveVariants
+          .map((item) => {
+            const variantId = variantIdMapByTempId[item.tempId];
+            if (!variantId) return null;
 
+            return syncAvailableLicenses({
+              productId: id,
+              variantId,
+              rows: item.priorityLicenseRows,
+              isPriority: true,
+              requiresRotationAlert: enableLicenseAlerts,
+              licenseMode: "individual",
+              maxActiveUsers: 1,
+            });
+          })
+          .filter(Boolean),
+      ] as Promise<void>[];
+
+      await Promise.all(licenseSyncTasks);
+
+      setCurrentImageUrl(finalImageUrl || "");
+      setImageFile(null);
+      setGeneralLicenseRows(effectiveGeneralLicenseRows);
+      setNewGeneralLicensesInput(rowsToLicenseText(effectiveGeneralLicenseRows));
+      setStock(String(autoGeneralStock));
+      setVariants(
+        effectiveVariants.map((item) => ({
+          ...item,
+          id: variantIdMapByTempId[item.tempId] || item.id,
+          image_url: variantImageUrlMapByTempId[item.tempId] || "",
+          imageFile: null,
+          stock: String(item.priorityLicenseRows.length),
+          newPriorityLicensesInput: rowsToLicenseText(item.priorityLicenseRows),
+        }))
+      );
       setDeletedVariantIds([]);
       setMessage("Producto actualizado correctamente.");
-      await loadAll();
-      await fetchLicenses();
+
+      try {
+        const updateVersion = String(Date.now());
+        window.localStorage.setItem("streamingmayor_catalog_updated_at", updateVersion);
+        window.dispatchEvent(new CustomEvent("streamingmayor:catalog-updated"));
+      } catch {
+        // La actualización ya quedó guardada; el evento visual es opcional.
+      }
     } catch (error) {
       setMessage(
         getErrorMessage(error, "Ocurrió un error guardando el producto.")

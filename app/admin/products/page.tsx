@@ -82,15 +82,19 @@ export default function AdminProductsPage() {
     setSavingOrder(true);
     setMessage("");
 
-    const { error } = await supabase
-      .from("products")
-      .upsert(
-        nextProducts.map((product, index) => ({ id: product.id, sort_order: index })),
-        { onConflict: "id" }
-      );
+    const updates = await Promise.all(
+      nextProducts.map((product, index) =>
+        supabase
+          .from("products")
+          .update({ sort_order: index })
+          .eq("id", product.id)
+      )
+    );
 
-    if (error) {
-      setMessage("No se pudo guardar el nuevo orden: " + error.message);
+    const failedUpdate = updates.find((result) => result.error);
+
+    if (failedUpdate?.error) {
+      setMessage("No se pudo guardar el nuevo orden: " + failedUpdate.error.message);
       void fetchProducts();
     } else {
       setMessage(successMessage);

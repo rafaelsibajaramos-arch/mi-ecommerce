@@ -51,6 +51,11 @@ type ClientWalletRow = {
   totalSpent: number;
 };
 
+type TotalSpentRow = {
+  user_id: string | null;
+  total_spent: number | string | null;
+};
+
 type BannerState = {
   kind: "success" | "error";
   text: string;
@@ -178,6 +183,9 @@ export default function AdminWalletPage() {
   const [banner, setBanner] = useState<BannerState>(null);
 
   const [profiles, setProfiles] = useState<ProfileRow[]>([]);
+  const [historicalSpentByUser, setHistoricalSpentByUser] = useState<
+    Record<string, number>
+  >({});
   const [loadingClients, setLoadingClients] = useState(true);
   const [selectedClient, setSelectedClient] = useState<ProfileRow | null>(null);
   const [clientSearch, setClientSearch] = useState("");
@@ -204,19 +212,39 @@ export default function AdminWalletPage() {
   const loadProfiles = useCallback(async () => {
     setLoadingClients(true);
 
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("id, email, full_name, balance")
-      .order("email", { ascending: true })
-      .limit(1000);
+    const [profilesResult, totalsResult] = await Promise.all([
+      supabase
+        .from("profiles")
+        .select("id, email, full_name, balance"),
+      supabase.rpc("admin_wallet_total_spent_by_user"),
+    ]);
 
-    if (error) {
+    if (profilesResult.error) {
       setProfiles([]);
+      setHistoricalSpentByUser({});
       setLoadingClients(false);
       return;
     }
 
-    setProfiles((data as ProfileRow[]) || []);
+    setProfiles((profilesResult.data as ProfileRow[]) || []);
+
+    if (totalsResult.error) {
+      setHistoricalSpentByUser({});
+      setBanner({
+        kind: "error",
+        text: "No se pudo cargar el Total Spent histórico. Ejecuta el archivo SQL incluido en Supabase.",
+      });
+    } else {
+      const totalsMap: Record<string, number> = {};
+
+      for (const row of (totalsResult.data as TotalSpentRow[] | null) || []) {
+        if (!row.user_id) continue;
+        totalsMap[row.user_id] = Number(row.total_spent || 0);
+      }
+
+      setHistoricalSpentByUser(totalsMap);
+    }
+
     setLoadingClients(false);
   }, []);
 
@@ -226,8 +254,7 @@ export default function AdminWalletPage() {
     const transactionsResult = await supabase
       .from("wallet_transactions")
       .select("id, user_id, type, amount, created_at, note, description")
-      .order("created_at", { ascending: false })
-      .limit(500);
+      .order("created_at", { ascending: false });
 
     if (transactionsResult.error) {
       setAllTransactions([]);
@@ -354,20 +381,6 @@ export default function AdminWalletPage() {
   }
 
   const clientWalletRows = useMemo<ClientWalletRow[]>(() => {
-    const spentByUser = new Map<string, number>();
-
-    allTransactions.forEach((transaction) => {
-      if (!transaction.user_id) return;
-
-      if (normalizeType(transaction.type) === "debit") {
-        spentByUser.set(
-          transaction.user_id,
-          (spentByUser.get(transaction.user_id) || 0) +
-          Math.abs(Number(transaction.amount || 0))
-        );
-      }
-    });
-
     const term = clientSearch.trim().toLowerCase();
 
     return profiles
@@ -376,7 +389,7 @@ export default function AdminWalletPage() {
         email: (profile.email || "Sin correo").trim(),
         full_name: profile.full_name || null,
         balance: Number(profile.balance || 0),
-        totalSpent: spentByUser.get(profile.id) || 0,
+        totalSpent: historicalSpentByUser[profile.id] || 0,
       }))
       .filter((profile) => {
         if (!term) return true;
@@ -389,7 +402,7 @@ export default function AdminWalletPage() {
 
         return a.email.localeCompare(b.email, "es", { sensitivity: "base" });
       });
-  }, [profiles, allTransactions, clientSearch]);
+  }, [profiles, historicalSpentByUser, clientSearch]);
 
   const clientTotalPages = useMemo(() => {
     return Math.max(1, Math.ceil(clientWalletRows.length / CLIENTS_PAGE_SIZE));
