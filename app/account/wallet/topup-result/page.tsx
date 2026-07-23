@@ -22,6 +22,17 @@ type TopupRow = {
   credited_at: string | null;
 };
 
+const FAST_POLLING_UNTIL_MS = 2 * 60 * 1000;
+const MEDIUM_POLLING_UNTIL_MS = 10 * 60 * 1000;
+const AUTO_POLLING_LIMIT_MS = 30 * 60 * 1000;
+
+function getNextPollingDelay(elapsedMs: number) {
+  if (elapsedMs < FAST_POLLING_UNTIL_MS) return 15_000;
+  if (elapsedMs < MEDIUM_POLLING_UNTIL_MS) return 30_000;
+  if (elapsedMs < AUTO_POLLING_LIMIT_MS) return 60_000;
+  return null;
+}
+
 function formatMoney(value: number | null | undefined) {
   return `$ ${Number(value || 0).toLocaleString("es-CO")}`;
 }
@@ -42,31 +53,115 @@ function WalletTopupResultContent() {
   const [topup, setTopup] = useState<TopupRow | null>(null);
 
   useEffect(() => {
+    if (!reference) return;
+
     let cancelled = false;
-    let intervalId: number | null = null;
+    let timeoutId: number | null = null;
+    let requestController: AbortController | null = null;
+    let accessToken = "";
+    let requestInProgress = false;
+    let terminalStatusReached = false;
+    let lastRequestAt = 0;
+    const pollingStartedAt = Date.now();
+
+    const clearScheduledCheck = () => {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    };
+
+    const loadAccessToken = async (forceRefresh = false) => {
+      const {
+        data: { session },
+      } = forceRefresh
+        ? await supabase.auth.refreshSession()
+        : await supabase.auth.getSession();
+
+      const token = session?.access_token || "";
+      if (!token) {
+        router.push("/");
+        return "";
+      }
+
+      accessToken = token;
+      return token;
+    };
+
+    const requestTopupStatus = async (token: string) => {
+      requestController?.abort();
+      requestController = new AbortController();
+
+      return fetch("/api/wallet/topups/status", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ reference }),
+        cache: "no-store",
+        signal: requestController.signal,
+      });
+    };
+
+    const scheduleNextCheck = (syncStatus: () => Promise<void>) => {
+      clearScheduledCheck();
+
+      if (
+        cancelled ||
+        terminalStatusReached ||
+        document.visibilityState !== "visible"
+      ) {
+        return;
+      }
+
+      const delay = getNextPollingDelay(Date.now() - pollingStartedAt);
+
+      if (delay === null) {
+        setMessage(
+          "La recarga sigue procesándose automáticamente. Volveremos a verificar cuando regreses a esta pestaña."
+        );
+        return;
+      }
+
+      timeoutId = window.setTimeout(() => {
+        void syncStatus();
+      }, delay);
+    };
 
     const syncStatus = async () => {
-      try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
+      if (
+        cancelled ||
+        terminalStatusReached ||
+        requestInProgress ||
+        document.visibilityState !== "visible"
+      ) {
+        return;
+      }
 
-        if (!session?.access_token) {
-          router.push("/");
-          return;
+      // Evita llamadas dobles cuando focus y visibilitychange ocurren juntos.
+      if (Date.now() - lastRequestAt < 5_000) return;
+
+      requestInProgress = true;
+      lastRequestAt = Date.now();
+
+      try {
+        let token = accessToken || (await loadAccessToken());
+        if (!token || cancelled) return;
+
+        let response = await requestTopupStatus(token);
+
+        // La pantalla puede permanecer abierta; renovamos la sesión solo si realmente expiró.
+        if (response.status === 401) {
+          token = await loadAccessToken(true);
+          if (!token || cancelled) return;
+          response = await requestTopupStatus(token);
         }
 
-        const response = await fetch("/api/wallet/topups/status", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({ reference }),
-        });
-
         const result = await response.json().catch(() => null);
-        if (!response.ok) throw new Error(result?.error || "No se pudo validar la recarga.");
+        if (!response.ok) {
+          throw new Error(result?.error || "No se pudo validar la recarga.");
+        }
         if (cancelled) return;
 
         const currentTopup = (result?.topup as TopupRow | null) || null;
@@ -75,9 +170,10 @@ function WalletTopupResultContent() {
         const normalizedStatus = normalizeStatus(currentTopup?.status);
 
         if (normalizedStatus === "APPROVED") {
+          terminalStatusReached = true;
+          clearScheduledCheck();
           setMessage("Saldo acreditado correctamente.");
           setLoading(false);
-          if (intervalId) window.clearInterval(intervalId);
           return;
         }
 
@@ -86,29 +182,59 @@ function WalletTopupResultContent() {
           normalizedStatus === "DECLINED" ||
           normalizedStatus === "ERROR"
         ) {
+          terminalStatusReached = true;
+          clearScheduledCheck();
           setMessage(currentTopup?.error_message || "La recarga no fue aprobada.");
           setLoading(false);
-          if (intervalId) window.clearInterval(intervalId);
           return;
         }
 
-        setMessage("Pendiente de validación.");
+        setMessage("Pendiente de validación automática.");
         setLoading(false);
       } catch (error) {
-        if (cancelled) return;
-        setMessage(error instanceof Error ? error.message : "No se pudo validar la recarga.");
+        if (cancelled || (error instanceof DOMException && error.name === "AbortError")) {
+          return;
+        }
+
+        setMessage(
+          error instanceof Error
+            ? `${error.message} Reintentaremos automáticamente.`
+            : "No se pudo validar la recarga. Reintentaremos automáticamente."
+        );
         setLoading(false);
+      } finally {
+        requestInProgress = false;
+        scheduleNextCheck(syncStatus);
       }
     };
 
-    if (!reference) return;
+    const checkWhenUserReturns = () => {
+      if (
+        cancelled ||
+        terminalStatusReached ||
+        document.visibilityState !== "visible"
+      ) {
+        clearScheduledCheck();
+        return;
+      }
+
+      clearScheduledCheck();
+      void syncStatus();
+    };
+
+    document.addEventListener("visibilitychange", checkWhenUserReturns);
+    window.addEventListener("focus", checkWhenUserReturns);
+    window.addEventListener("online", checkWhenUserReturns);
 
     void syncStatus();
-    intervalId = window.setInterval(() => void syncStatus(), 5000);
 
     return () => {
       cancelled = true;
-      if (intervalId) window.clearInterval(intervalId);
+      clearScheduledCheck();
+      requestController?.abort();
+      document.removeEventListener("visibilitychange", checkWhenUserReturns);
+      window.removeEventListener("focus", checkWhenUserReturns);
+      window.removeEventListener("online", checkWhenUserReturns);
     };
   }, [reference, router]);
 

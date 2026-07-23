@@ -1,13 +1,36 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { createSupabaseAdmin } from "../../../../../lib/supabaseAdmin";
-import { tryAutoApproveBankTopup } from "../../../../../lib/bankTopups";
-import { getWalletTopupByReference } from "../../../../../lib/walletTopups";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+const TOPUP_STATUS_COLUMNS = [
+  "id",
+  "user_id",
+  "reference",
+  "amount",
+  "amount_in_cents",
+  "status",
+  "provider",
+  "payer_origin",
+  "destination_account",
+  "receipt_url",
+  "matched_bank_reference",
+  "error_message",
+  "approved_at",
+  "rejected_at",
+  "credited_at",
+].join(",");
 
 function jsonError(message: string, status = 400) {
-  return NextResponse.json({ error: message }, { status });
+  return NextResponse.json(
+    { error: message },
+    {
+      status,
+      headers: { "Cache-Control": "no-store, max-age=0" },
+    }
+  );
 }
 
 function getBearerToken(request: NextRequest) {
@@ -22,10 +45,14 @@ function requireEnv(name: string) {
 }
 
 function createSupabaseUserClientFromToken(token: string) {
-  return createClient(requireEnv("NEXT_PUBLIC_SUPABASE_URL"), requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"), {
-    auth: { autoRefreshToken: false, persistSession: false },
-    global: { headers: { Authorization: `Bearer ${token}` } },
-  });
+  return createClient(
+    requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
+    requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
+    {
+      auth: { autoRefreshToken: false, persistSession: false },
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    }
+  );
 }
 
 export async function POST(request: NextRequest) {
@@ -47,18 +74,26 @@ export async function POST(request: NextRequest) {
     const reference = typeof body?.reference === "string" ? body.reference.trim() : "";
     if (!reference) return jsonError("Falta la referencia de recarga.");
 
-    let topup = await getWalletTopupByReference(supabaseAdmin, reference);
-    if (!topup || topup.user_id !== user.id) {
-      return jsonError("La recarga no existe o no te pertenece.", 404);
-    }
+    // Esta ruta solo consulta el estado. La aprobación automática se realiza una vez
+    // al crear la recarga y posteriormente mediante el cron bancario.
+    const { data: topup, error: topupError } = await supabaseAdmin
+      .from("wallet_topups")
+      .select(TOPUP_STATUS_COLUMNS)
+      .eq("reference", reference)
+      .eq("user_id", user.id)
+      .maybeSingle();
 
-    if (String(topup.status || "PENDING").toUpperCase() === "PENDING") {
-      await tryAutoApproveBankTopup(supabaseAdmin, topup.id);
-      topup = await getWalletTopupByReference(supabaseAdmin, reference);
-    }
+    if (topupError) throw new Error(topupError.message);
+    if (!topup) return jsonError("La recarga no existe o no te pertenece.", 404);
 
-    return NextResponse.json({ ok: true, topup });
+    return NextResponse.json(
+      { ok: true, topup },
+      { headers: { "Cache-Control": "no-store, max-age=0" } }
+    );
   } catch (error) {
-    return jsonError(error instanceof Error ? error.message : "Ocurrió un error inesperado.", 500);
+    return jsonError(
+      error instanceof Error ? error.message : "Ocurrió un error inesperado.",
+      500
+    );
   }
 }
