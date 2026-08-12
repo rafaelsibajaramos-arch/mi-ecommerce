@@ -71,6 +71,7 @@ function makeReference(messageId: string, amount: number, normalizedPayer: strin
 
 type PendingTopupForMatch = {
     id: string;
+    amount: number | string | null;
     payer_origin: string | null;
     normalized_payer_origin: string | null;
 };
@@ -138,27 +139,83 @@ async function reconcileUnusedBankPayments(supabaseAdmin: ReturnType<typeof crea
     if (error) throw new Error(error.message);
     if (!payments || payments.length === 0) return 0;
 
-    let matchedCount = 0;
-
-    for (const payment of payments as Array<{
+    const normalizedPayments = (payments as Array<{
         id: string;
         amount: number | string | null;
         payer_origin: string | null;
         normalized_payer_origin: string | null;
-    }>) {
-        const amount = Math.round(Number(payment.amount || 0));
-        const normalizedPayerOrigin = payment.normalized_payer_origin || normalizeText(payment.payer_origin || "");
+    }>)
+        .map((payment) => ({
+            ...payment,
+            numericAmount: Math.round(Number(payment.amount || 0)),
+        }))
+        .filter((payment) => payment.numericAmount > 0);
 
-        if (!amount || !normalizedPayerOrigin) continue;
+    const amounts = Array.from(
+        new Set(normalizedPayments.map((payment) => payment.numericAmount))
+    );
 
-        const matched = await matchPendingTopups(supabaseAdmin, {
-            id: payment.id,
-            amount,
-            payerOrigin: payment.payer_origin,
-            normalizedPayerOrigin,
-        });
+    if (amounts.length === 0) return 0;
 
-        if (matched) matchedCount += 1;
+    const { data: pendingTopups, error: pendingError } = await supabaseAdmin
+        .from("wallet_topups")
+        .select("id, amount, payer_origin, normalized_payer_origin")
+        .eq("status", "PENDING")
+        .eq("provider", PROVIDER)
+        .in("amount", amounts)
+        .order("created_at", { ascending: true })
+        .limit(500);
+
+    if (pendingError) throw new Error(pendingError.message);
+    if (!pendingTopups || pendingTopups.length === 0) return 0;
+
+    const pendingByAmount = new Map<number, PendingTopupForMatch[]>();
+
+    for (const topup of pendingTopups as PendingTopupForMatch[]) {
+        const amount = Math.round(Number(topup.amount || 0));
+        if (!amount) continue;
+
+        const rows = pendingByAmount.get(amount) || [];
+        rows.push(topup);
+        pendingByAmount.set(amount, rows);
+    }
+
+    const claimedTopupIds = new Set<string>();
+    let matchedCount = 0;
+
+    for (const payment of normalizedPayments) {
+        const candidates = pendingByAmount.get(payment.numericAmount) || [];
+        const bankValue =
+            payment.payer_origin ||
+            payment.normalized_payer_origin ||
+            "";
+
+        const pendingTopup = candidates.find(
+            (topup) =>
+                !claimedTopupIds.has(topup.id) &&
+                payerNamesMatch(
+                    topup.payer_origin || topup.normalized_payer_origin || "",
+                    bankValue
+                )
+        );
+
+        if (!pendingTopup) continue;
+
+        try {
+            await approveTopupWithBankPayment({
+                supabaseAdmin,
+                topupId: pendingTopup.id,
+                bankPaymentId: payment.id,
+            });
+            claimedTopupIds.add(pendingTopup.id);
+            matchedCount += 1;
+        } catch (matchError) {
+            console.error("No se pudo reconciliar una transferencia pendiente:", {
+                paymentId: payment.id,
+                topupId: pendingTopup.id,
+                error: matchError instanceof Error ? matchError.message : matchError,
+            });
+        }
     }
 
     return matchedCount;
@@ -173,12 +230,16 @@ function isOlderThanTwoMinutes(value: string | null | undefined) {
 }
 
 async function repairIncompleteBankMatches(supabaseAdmin: ReturnType<typeof createSupabaseAdmin>) {
+    const staleBefore = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+
     const { data: payments, error } = await supabaseAdmin
         .from("bank_payment_notifications")
         .select("id, is_used, matched_topup_id, used_at, updated_at")
+        .eq("is_used", false)
         .not("matched_topup_id", "is", null)
+        .lt("updated_at", staleBefore)
         .order("updated_at", { ascending: true })
-        .limit(250);
+        .limit(100);
 
     if (error) throw new Error(error.message);
     if (!payments || payments.length === 0) {

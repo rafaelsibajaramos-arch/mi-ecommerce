@@ -229,7 +229,7 @@ export async function POST(request: NextRequest) {
         updated_at: now,
       })
       .eq("id", topup.id)
-      .select("*")
+      .select("id, status, voided_at, void_reason, admin_note")
       .single();
 
     if (updateError) return jsonError(updateError.message, 500);

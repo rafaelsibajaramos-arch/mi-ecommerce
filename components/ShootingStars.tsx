@@ -16,8 +16,19 @@ export default function ShootingStars() {
 
   useEffect(() => {
     let idCounter = 0;
+    let spawnTimer: number | null = null;
+    const removalTimers = new Set<number>();
+
+    const clearSpawnTimer = () => {
+      if (spawnTimer !== null) {
+        window.clearTimeout(spawnTimer);
+        spawnTimer = null;
+      }
+    };
 
     const createStar = () => {
+      if (document.hidden) return;
+
       const newStar: Star = {
         id: idCounter++,
         top: Math.random() * 95,
@@ -30,23 +41,42 @@ export default function ShootingStars() {
       setStars((prev) => [...prev, newStar]);
 
       const lifeTime = (newStar.duration + 0.2) * 1000;
-
-      setTimeout(() => {
+      const removalTimer = window.setTimeout(() => {
+        removalTimers.delete(removalTimer);
         setStars((prev) => prev.filter((star) => star.id !== newStar.id));
       }, lifeTime);
+
+      removalTimers.add(removalTimer);
     };
 
-    const spawnLoop = () => {
-      createStar();
+    const scheduleNext = (delay: number) => {
+      clearSpawnTimer();
+      if (document.hidden) return;
 
-      const nextSpawn = 700 + Math.random() * 1800;
-      timeout = window.setTimeout(spawnLoop, nextSpawn);
+      spawnTimer = window.setTimeout(() => {
+        spawnTimer = null;
+        createStar();
+        scheduleNext(700 + Math.random() * 1800);
+      }, delay);
     };
 
-    let timeout = window.setTimeout(spawnLoop, 800);
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        clearSpawnTimer();
+        return;
+      }
+
+      scheduleNext(250);
+    };
+
+    scheduleNext(800);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
-      window.clearTimeout(timeout);
+      clearSpawnTimer();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      removalTimers.forEach((timer) => window.clearTimeout(timer));
+      removalTimers.clear();
     };
   }, []);
 

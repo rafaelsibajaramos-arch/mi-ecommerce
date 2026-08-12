@@ -99,28 +99,22 @@ export default function AdminSidebar() {
     };
 
     void fetchPendingAlerts();
-    void fetchTopupAlerts(); // 👈 NUEVO
+    void fetchTopupAlerts();
 
-    const interval = window.setInterval(() => {
+    const handleRefresh = () => {
       void fetchPendingAlerts();
-      void fetchTopupAlerts(); // 👈 NUEVO
-    }, 60000);
-
-    const handleFocus = () => {
-      void fetchPendingAlerts();
-      void fetchTopupAlerts(); // 👈 NUEVO
+      void fetchTopupAlerts();
     };
 
-    window.addEventListener("focus", handleFocus);
-    window.addEventListener("license-alerts-updated", handleFocus);
-    window.addEventListener("topup-alerts-updated", handleFocus); // 👈 NUEVO
+    window.addEventListener("focus", handleRefresh);
+    window.addEventListener("license-alerts-updated", handleRefresh);
+    window.addEventListener("topup-alerts-updated", handleRefresh);
 
     return () => {
       mounted = false;
-      window.clearInterval(interval);
-      window.removeEventListener("focus", handleFocus);
-      window.removeEventListener("license-alerts-updated", handleFocus);
-      window.removeEventListener("topup-alerts-updated", handleFocus); // 👈 NUEVO
+      window.removeEventListener("focus", handleRefresh);
+      window.removeEventListener("license-alerts-updated", handleRefresh);
+      window.removeEventListener("topup-alerts-updated", handleRefresh);
     };
   }, []);
 

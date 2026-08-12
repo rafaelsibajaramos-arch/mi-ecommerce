@@ -7,58 +7,6 @@ export const dynamic = "force-dynamic";
 
 type AnyRow = Record<string, unknown>;
 
-type ProfileRow = {
-  id: string;
-  email: string | null;
-  full_name: string | null;
-};
-
-type TopupRow = {
-  id: string;
-  user_id: string | null;
-  reference: string | null;
-  amount: number | null;
-  provider: string | null;
-  status: string | null;
-  payer_origin: string | null;
-  destination_account: string | null;
-  receipt_url: string | null;
-  matched_bank_payment_id: string | null;
-  matched_bank_reference: string | null;
-  admin_note: string | null;
-  error_message: string | null;
-  created_at: string | null;
-  approved_at: string | null;
-  credited_at: string | null;
-  executed_at: string | null;
-  delay_seconds: number | null;
-  rejected_at: string | null;
-  expired_at: string | null;
-  expiration_reason: string | null;
-  voided_at: string | null;
-  void_reason: string | null;
-  promotion_id: string | null;
-  promotion_name: string | null;
-  promotion_bonus_type: string | null;
-  promotion_bonus_value: number | null;
-  promotion_bonus_amount: number | null;
-  promotion_total_amount: number | null;
-  promotion_applied_at: string | null;
-};
-
-type PromotionRow = {
-  id: string;
-  name: string | null;
-  status: string | null;
-  min_amount: number | null;
-  bonus_type: string | null;
-  bonus_value: number | null;
-  starts_at: string | null;
-  ends_at: string | null;
-  created_at: string | null;
-  updated_at: string | null;
-};
-
 type BankPaymentRow = {
   id: string;
   provider: string | null;
@@ -180,58 +128,6 @@ function numberValue(row: AnyRow, key: string) {
   return null;
 }
 
-function isBrebTopup(row: AnyRow) {
-  const status = String(row.status || "").trim().toUpperCase();
-  if (status === "VOIDED" || row.voided_at) return false;
-
-  const provider = String(row.provider || "").trim().toUpperCase();
-  const reference = String(row.reference || "").trim().toUpperCase();
-
-  return (
-    provider === "BREB_LLAVES" ||
-    provider === "BREB" ||
-    reference.startsWith("BREB-") ||
-    Boolean(row.payer_origin) ||
-    Boolean(row.normalized_payer_origin) ||
-    Boolean(row.matched_bank_payment_id)
-  );
-}
-
-function normalizeTopup(row: AnyRow): TopupRow {
-  return {
-    id: String(row.id || ""),
-    user_id: textValue(row, "user_id"),
-    reference: textValue(row, "reference"),
-    amount: numberValue(row, "amount"),
-    provider: textValue(row, "provider"),
-    status: textValue(row, "status"),
-    payer_origin: textValue(row, "payer_origin"),
-    destination_account: textValue(row, "destination_account"),
-    receipt_url: textValue(row, "receipt_url"),
-    matched_bank_payment_id: textValue(row, "matched_bank_payment_id"),
-    matched_bank_reference: textValue(row, "matched_bank_reference"),
-    admin_note: textValue(row, "admin_note"),
-    error_message: textValue(row, "error_message"),
-    created_at: textValue(row, "created_at"),
-    approved_at: textValue(row, "approved_at"),
-    credited_at: textValue(row, "credited_at"),
-    executed_at: textValue(row, "executed_at"),
-    delay_seconds: numberValue(row, "delay_seconds"),
-    rejected_at: textValue(row, "rejected_at"),
-    expired_at: textValue(row, "expired_at"),
-    expiration_reason: textValue(row, "expiration_reason"),
-    voided_at: textValue(row, "voided_at"),
-    void_reason: textValue(row, "void_reason"),
-    promotion_id: textValue(row, "promotion_id"),
-    promotion_name: textValue(row, "promotion_name"),
-    promotion_bonus_type: textValue(row, "promotion_bonus_type"),
-    promotion_bonus_value: numberValue(row, "promotion_bonus_value"),
-    promotion_bonus_amount: numberValue(row, "promotion_bonus_amount"),
-    promotion_total_amount: numberValue(row, "promotion_total_amount"),
-    promotion_applied_at: textValue(row, "promotion_applied_at"),
-  };
-}
-
 function normalizeBankPayment(row: AnyRow): BankPaymentRow {
   return {
     id: String(row.id || ""),
@@ -248,21 +144,6 @@ function normalizeBankPayment(row: AnyRow): BankPaymentRow {
     is_used: boolValue(row, "is_used") ?? false,
     matched_topup_id: textValue(row, "matched_topup_id"),
     used_at: textValue(row, "used_at"),
-    created_at: textValue(row, "created_at"),
-    updated_at: textValue(row, "updated_at"),
-  };
-}
-
-function normalizePromotion(row: AnyRow): PromotionRow {
-  return {
-    id: String(row.id || ""),
-    name: textValue(row, "name"),
-    status: textValue(row, "status"),
-    min_amount: numberValue(row, "min_amount"),
-    bonus_type: textValue(row, "bonus_type"),
-    bonus_value: numberValue(row, "bonus_value"),
-    starts_at: textValue(row, "starts_at"),
-    ends_at: textValue(row, "ends_at"),
     created_at: textValue(row, "created_at"),
     updated_at: textValue(row, "updated_at"),
   };
@@ -331,56 +212,6 @@ async function loadBankHistoryToday(supabaseAdmin: ReturnType<typeof createSupab
   };
 }
 
-async function loadTopups(supabaseAdmin: ReturnType<typeof createSupabaseAdmin>, partialErrors: string[]) {
-  const { data, error } = await supabaseAdmin
-    .from("wallet_topups")
-    .select([
-      "id", "user_id", "reference", "amount", "provider", "status", "payer_origin",
-      "destination_account", "receipt_url", "matched_bank_payment_id", "matched_bank_reference",
-      "admin_note", "error_message", "created_at", "approved_at", "credited_at", "executed_at",
-      "delay_seconds", "rejected_at", "expired_at", "expiration_reason", "voided_at", "void_reason",
-      "promotion_id", "promotion_name", "promotion_bonus_type", "promotion_bonus_value",
-      "promotion_bonus_amount", "promotion_total_amount", "promotion_applied_at"
-    ].join(", "))
-    .order("created_at", { ascending: false })
-    .limit(500);
-
-  if (error) {
-    partialErrors.push(`wallet_topups: ${error.message}`);
-    return [] as Array<TopupRow & { email: string; full_name: string | null }>;
-  }
-
-  const rawTopups = ((((data || []) as unknown) as AnyRow[]).filter(isBrebTopup).map(normalizeTopup));
-  const userIds = Array.from(new Set(rawTopups.map((topup) => topup.user_id).filter(Boolean))) as string[];
-  let profilesData: ProfileRow[] = [];
-
-  if (userIds.length > 0) {
-    const profilesRes = await supabaseAdmin
-      .from("profiles")
-      .select("id, email, full_name")
-      .in("id", userIds);
-
-    if (profilesRes.error) {
-      partialErrors.push(`profiles: ${profilesRes.error.message}`);
-    } else {
-      profilesData = (profilesRes.data as ProfileRow[]) || [];
-    }
-  }
-
-  const profileMap = new Map<string, ProfileRow>();
-  profilesData.forEach((profile) => profileMap.set(profile.id, profile));
-
-  return rawTopups.map((topup) => {
-    const profile = topup.user_id ? profileMap.get(topup.user_id) : null;
-
-    return {
-      ...topup,
-      email: profile?.email || "Sin correo",
-      full_name: profile?.full_name || null,
-    };
-  });
-}
-
 async function loadAlerts(supabaseAdmin: ReturnType<typeof createSupabaseAdmin>, partialErrors: string[]) {
   const { data, error } = await supabaseAdmin
     .from("wallet_topup_alerts")
@@ -396,44 +227,25 @@ async function loadAlerts(supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
   return data || [];
 }
 
-async function loadPromotions(supabaseAdmin: ReturnType<typeof createSupabaseAdmin>, partialErrors: string[]) {
-  const { data, error } = await supabaseAdmin
-    .from("wallet_topup_promotions")
-    .select("id, name, status, min_amount, bonus_type, bonus_value, starts_at, ends_at, created_at, updated_at")
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false })
-    .limit(50);
-
-  if (error) {
-    partialErrors.push(`wallet_topup_promotions: ${error.message}`);
-    return [] as PromotionRow[];
-  }
-
-  return ((((data || []) as unknown) as AnyRow[]).map(normalizePromotion));
-}
-
 export async function GET(request: NextRequest) {
   try {
     const { supabaseAdmin } = await requireAdmin(request);
     const partialErrors: string[] = [];
 
-    const [bankPayments, bankHistoryToday, alerts, promotions] = await Promise.all([
+    const [bankPayments, bankHistoryToday, alerts] = await Promise.all([
       loadBankPayments(supabaseAdmin),
       loadBankHistoryToday(supabaseAdmin),
       loadAlerts(supabaseAdmin, partialErrors),
-      loadPromotions(supabaseAdmin, partialErrors),
     ]);
 
     return jsonOk({
       alerts,
-      promotions,
       bankPayments,
       bankHistoryToday: bankHistoryToday.rows,
       bankHistoryDate: bankHistoryToday.date,
       partialErrors,
       counts: {
         alerts: alerts.length,
-        promotions: promotions.length,
         bankPayments: bankPayments.length,
         availableBankPayments: bankPayments.length,
         bankHistoryToday: bankHistoryToday.rows.length,

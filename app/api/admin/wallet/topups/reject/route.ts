@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
       })
       .eq("id", topupId)
       .eq("status", "PENDING")
-      .select("*")
+      .select("id, status, rejected_at, error_message, admin_note")
       .maybeSingle();
 
     if (error) return jsonError(error.message, 500);

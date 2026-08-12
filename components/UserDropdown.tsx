@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -15,6 +15,7 @@ type Profile = {
 
 const PROFILE_CACHE_KEY = "streamingmayor_profile_cache";
 const ADMIN_CACHE_KEY = "streamingmayor_is_admin";
+const ADMIN_ROLE_EVENT = "streamingmayor:admin-role-change";
 const PHOTO_MODE_KEY = "streamingmayor_photo_mode";
 const PHOTO_MODE_EVENT = "streamingmayor:photo-mode-change";
 
@@ -25,23 +26,103 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
   const dropdownRef = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
 
-  useEffect(() => {
+  const loadProfile = useCallback(async () => {
     try {
-      const cachedProfile = window.localStorage.getItem(PROFILE_CACHE_KEY);
-      if (cachedProfile) setProfile(JSON.parse(cachedProfile) as Profile);
-    } catch {}
-    void loadProfile();
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session?.user) {
+      let currentUser = null;
+
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        currentUser = session?.user || null;
+
+        if (!currentUser) {
+          const {
+            data: { user },
+          } = await supabase.auth.getUser();
+
+          currentUser = user || null;
+        }
+
+        if (currentUser) break;
+        await new Promise((resolve) => window.setTimeout(resolve, 250));
+      }
+
+      if (!currentUser) {
         setProfile(null);
-        try { window.localStorage.removeItem(PROFILE_CACHE_KEY); window.localStorage.removeItem(ADMIN_CACHE_KEY); } catch {}
+
+        try {
+          window.localStorage.removeItem(PROFILE_CACHE_KEY);
+          window.localStorage.removeItem(ADMIN_CACHE_KEY);
+          window.dispatchEvent(new Event(ADMIN_ROLE_EVENT));
+        } catch {}
+
         return;
       }
-      window.setTimeout(() => void loadProfile(), 0);
-      window.setTimeout(() => void loadProfile(), 900);
-    });
-    return () => { subscription.unsubscribe(); };
+
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, full_name, email, balance, role")
+        .eq("id", currentUser.id)
+        .maybeSingle();
+
+      if (error || !data) return;
+
+      const nextProfile = data as Profile;
+      setProfile(nextProfile);
+
+      try {
+        window.localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(nextProfile));
+        window.localStorage.setItem(
+          ADMIN_CACHE_KEY,
+          nextProfile.role === "admin" ? "true" : "false"
+        );
+        window.dispatchEvent(new Event(ADMIN_ROLE_EVENT));
+      } catch {}
+    } catch {}
   }, []);
+
+  useEffect(() => {
+    const initialTimer = window.setTimeout(() => {
+      try {
+        const cachedProfile = window.localStorage.getItem(PROFILE_CACHE_KEY);
+
+        if (cachedProfile) {
+          setProfile(JSON.parse(cachedProfile) as Profile);
+        }
+      } catch {}
+
+      void loadProfile();
+    }, 0);
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "INITIAL_SESSION") return;
+
+      if (!session?.user) {
+        setProfile(null);
+
+        try {
+          window.localStorage.removeItem(PROFILE_CACHE_KEY);
+          window.localStorage.removeItem(ADMIN_CACHE_KEY);
+          window.dispatchEvent(new Event(ADMIN_ROLE_EVENT));
+        } catch {}
+
+        return;
+      }
+
+      if (event === "SIGNED_IN" || event === "USER_UPDATED") {
+        window.setTimeout(() => void loadProfile(), 0);
+      }
+    });
+
+    return () => {
+      window.clearTimeout(initialTimer);
+      subscription.unsubscribe();
+    };
+  }, [loadProfile]);
 
   useEffect(() => {
     const syncPhotoMode = () => {
@@ -71,39 +152,6 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
     document.addEventListener("mousedown", handleClickOutside);
     return () => { document.removeEventListener("mousedown", handleClickOutside); };
   }, []);
-
-  const loadProfile = async () => {
-    try {
-      let currentUser = null;
-      for (let attempt = 0; attempt < 4; attempt += 1) {
-        const { data: { session } } = await supabase.auth.getSession();
-        currentUser = session?.user || null;
-        if (!currentUser) {
-          const { data: { user } } = await supabase.auth.getUser();
-          currentUser = user || null;
-        }
-        if (currentUser) break;
-        await new Promise((resolve) => window.setTimeout(resolve, 250));
-      }
-      if (!currentUser) {
-        setProfile(null);
-        try { window.localStorage.removeItem(PROFILE_CACHE_KEY); window.localStorage.removeItem(ADMIN_CACHE_KEY); } catch {}
-        return;
-      }
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, full_name, email, balance, role")
-        .eq("id", currentUser.id)
-        .maybeSingle();
-      if (error || !data) return;
-      const nextProfile = data as Profile;
-      setProfile(nextProfile);
-      try {
-        window.localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(nextProfile));
-        window.localStorage.setItem(ADMIN_CACHE_KEY, nextProfile.role === "admin" ? "true" : "false");
-      } catch {}
-    } catch {}
-  };
 
   const togglePhotoMode = () => {
     const nextValue = !photoMode;

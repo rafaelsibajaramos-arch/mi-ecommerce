@@ -234,9 +234,7 @@ export async function findUnusedBankPaymentForTopup(
   // Traemos todos los pagos del mismo monto sin usar, sin filtrar por nombre exacto
   const { data, error } = await supabaseAdmin
     .from("bank_payment_notifications")
-    .select(
-      "id, provider, sender_email, subject, transaction_reference, amount, currency, payer_origin, normalized_payer_origin, paid_at, raw_body, is_used, matched_topup_id, created_at"
-    )
+.select("id, payer_origin")
     .eq("provider", "BREB_LLAVES")
     .eq("amount", Number(topup.amount || 0))
     .eq("is_used", false)
@@ -249,7 +247,7 @@ export async function findUnusedBankPaymentForTopup(
   if (!data || data.length === 0) return null;
 
   // Filtramos en JS con coincidencia parcial de palabras
-  const match = (data as BankPaymentNotificationRow[]).find((payment) =>
+  const match = (data as Array<{ id: string; payer_origin: string }>).find((payment) =>
     payerNamesMatch(userInput, payment.payer_origin)
   );
 
@@ -582,9 +580,14 @@ export async function approveTopupWithBankPayment({
 
 export async function tryAutoApproveBankTopup(
   supabaseAdmin: SupabaseClient,
-  topupId: string
+  topupId: string,
+  preloadedTopup?: WalletTopupRow | null
 ) {
-  const topup = await getWalletTopupById(supabaseAdmin, topupId);
+  const topup =
+    preloadedTopup?.id === topupId
+      ? preloadedTopup
+      : await getWalletTopupById(supabaseAdmin, topupId);
+
   if (!topup) throw new Error("No se encontró la recarga.");
 
   const bankPayment = await findUnusedBankPaymentForTopup(supabaseAdmin, topup);

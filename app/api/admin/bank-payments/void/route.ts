@@ -89,7 +89,7 @@ export async function POST(request: NextRequest) {
         updated_at: now,
       })
       .eq("id", row.id)
-      .select("*")
+      .select("id, is_used, matched_topup_id, used_at, updated_at")
       .single();
 
     if (updateError) return jsonError(updateError.message, 500);

@@ -84,11 +84,11 @@ export default function AutomaticTopupsPage() {
 
     const syncSession = async () => {
       const {
-        data: { user },
-      } = await supabase.auth.getUser();
+        data: { session },
+      } = await supabase.auth.getSession();
 
       if (!mounted) return;
-      setIsLoggedIn(Boolean(user));
+      setIsLoggedIn(Boolean(session?.user));
       setCheckingSession(false);
     };
 
@@ -96,8 +96,10 @@ export default function AutomaticTopupsPage() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(() => {
-      void syncSession();
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
+      setIsLoggedIn(Boolean(session?.user));
+      setCheckingSession(false);
     });
 
     return () => {
@@ -135,11 +137,9 @@ export default function AutomaticTopupsPage() {
     };
 
     void loadActivePromotion();
-    const interval = window.setInterval(loadActivePromotion, 60_000);
 
     return () => {
       mounted = false;
-      window.clearInterval(interval);
     };
   }, []);
 

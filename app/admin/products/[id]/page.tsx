@@ -175,19 +175,6 @@ function buildLicenseRowsFromText(
 
 const DEFAULT_BILLING_DAYS = 30;
 
-function addMonths(date: Date, months: number) {
-  const result = new Date(date.getTime());
-  const originalDay = result.getDate();
-
-  result.setMonth(result.getMonth() + months);
-
-  if (result.getDate() !== originalDay) {
-    result.setDate(0);
-  }
-
-  return result;
-}
-
 function addDays(date: Date, days: number) {
   const result = new Date(date.getTime());
   result.setDate(result.getDate() + days);
@@ -487,7 +474,7 @@ export default function EditProductPage() {
   const fetchProduct = async () => {
     const { data, error } = await supabase
       .from("products")
-      .select("*")
+      .select("id, name, slug, description, price, stock, combo_stock, category, is_active, product_type, avoid_repeat_license, use_priority_licenses, enable_license_alerts, image_url")
       .eq("id", id)
       .single();
 
@@ -518,7 +505,7 @@ export default function EditProductPage() {
   const fetchVariants = async () => {
     const { data, error } = await supabase
       .from("product_variants")
-      .select("*")
+      .select("id, name, slug, description, price, stock, image_url, is_active, sort_order, access_duration_months, default_license_billing_months")
       .eq("product_id", id)
       .order("sort_order", { ascending: true })
       .order("created_at", { ascending: true });
@@ -556,7 +543,7 @@ export default function EditProductPage() {
   const fetchComponents = async () => {
     const { data, error } = await supabase
       .from("product_components")
-      .select("*")
+      .select("id, child_product_id, child_variant_id, quantity, sort_order")
       .eq("product_id", id)
       .order("sort_order", { ascending: true })
       .order("created_at", { ascending: true });
@@ -705,17 +692,23 @@ export default function EditProductPage() {
   };
 
   useEffect(() => {
-    if (id) loadAll();
+    if (!id) return;
+    const timer = window.setTimeout(() => void loadAll(), 0);
+    return () => window.clearTimeout(timer);
   }, [id]);
 
   useEffect(() => {
-    if (!loading) {
-      fetchLicenses();
-    }
+    if (loading) return;
+    const timer = window.setTimeout(() => void fetchLicenses(), 0);
+    return () => window.clearTimeout(timer);
   }, [loading]);
 
   useEffect(() => {
-    setStock(String(generalLicenseRows.length));
+    const timer = window.setTimeout(
+      () => setStock(String(generalLicenseRows.length)),
+      0
+    );
+    return () => window.clearTimeout(timer);
   }, [generalLicenseRows.length]);
 
   useEffect(() => {

@@ -95,6 +95,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+
     const searchParams = new URLSearchParams(window.location.search);
     const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
     const hasRecoveryCode = Boolean(searchParams.get("code"));
@@ -102,14 +103,18 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
       hashParams.get("type") === "recovery" &&
       Boolean(hashParams.get("access_token")) &&
       Boolean(hashParams.get("refresh_token"));
-    if (!hasRecoveryCode && !hasRecoveryTokens) {
-      setIsRecoveryFlow(pathname === "/reset-password");
-      return;
-    }
-    setIsRecoveryFlow(true);
-    if (pathname !== "/reset-password") {
+    const nextRecoveryFlow =
+      pathname === "/reset-password" || hasRecoveryCode || hasRecoveryTokens;
+
+    const timer = window.setTimeout(() => {
+      setIsRecoveryFlow(nextRecoveryFlow);
+    }, 0);
+
+    if ((hasRecoveryCode || hasRecoveryTokens) && pathname !== "/reset-password") {
       router.replace(`/reset-password${window.location.search}${window.location.hash}`);
     }
+
+    return () => window.clearTimeout(timer);
   }, [pathname, router]);
 
   useEffect(() => {
@@ -123,9 +128,6 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
         if (!user) { setIsLoggedIn(false); setCheckingAuth(false); return; }
         setIsLoggedIn(true);
         setCheckingAuth(false);
-        const { profile, errorMessage } = await getOwnProfile(user.id);
-        if (!mounted) return;
-        if (errorMessage || !profile) console.warn("Perfil no disponible:", errorMessage || "Sin perfil");
       } catch {
         if (!mounted) return;
         setIsLoggedIn(false);

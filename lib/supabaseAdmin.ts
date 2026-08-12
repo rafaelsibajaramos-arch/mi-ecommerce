@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 function requireEnv(name: string) {
   const value = process.env[name];
@@ -10,14 +10,20 @@ function requireEnv(name: string) {
   return value.trim();
 }
 
+let cachedAdminClient: SupabaseClient | null = null;
+
 export function createSupabaseAdmin() {
+  if (cachedAdminClient) return cachedAdminClient;
+
   const url = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
   const serviceRoleKey = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
 
-  return createClient(url, serviceRoleKey, {
+  cachedAdminClient = createClient(url, serviceRoleKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
     },
   });
+
+  return cachedAdminClient;
 }

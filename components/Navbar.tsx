@@ -15,6 +15,9 @@ const bebasNeue = Bebas_Neue({
 
 const PHOTO_MODE_KEY = "streamingmayor_photo_mode";
 const PHOTO_MODE_EVENT = "streamingmayor:photo-mode-change";
+const PROFILE_CACHE_KEY = "streamingmayor_profile_cache";
+const ADMIN_CACHE_KEY = "streamingmayor_is_admin";
+const ADMIN_ROLE_EVENT = "streamingmayor:admin-role-change";
 
 // Barra de navegación principal del sitio.
 export default function Navbar() {
@@ -29,24 +32,65 @@ export default function Navbar() {
 
   const checkSessionAndRole = useCallback(async () => {
     const {
-      data: { user },
-    } = await supabase.auth.getUser();
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    const user = session?.user || null;
 
     if (!user) {
       setIsLoggedIn(false);
       setIsAdmin(false);
+
+      try {
+        window.localStorage.removeItem(ADMIN_CACHE_KEY);
+        window.dispatchEvent(new Event(ADMIN_ROLE_EVENT));
+      } catch {}
+
       return;
     }
 
     setIsLoggedIn(true);
 
-    const { data } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single();
+    try {
+      const cachedProfile = window.localStorage.getItem(PROFILE_CACHE_KEY);
 
-    setIsAdmin(data?.role === "admin");
+      if (cachedProfile) {
+        const parsedProfile = JSON.parse(cachedProfile) as {
+          id?: string;
+          role?: string | null;
+        };
+
+        if (parsedProfile.id === user.id) {
+          setIsAdmin(parsedProfile.role === "admin");
+          return;
+        }
+
+        window.localStorage.removeItem(PROFILE_CACHE_KEY);
+        window.localStorage.removeItem(ADMIN_CACHE_KEY);
+      }
+
+      setIsAdmin(window.localStorage.getItem(ADMIN_CACHE_KEY) === "true");
+    } catch {
+      setIsAdmin(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const syncAdminRole = () => {
+      try {
+        setIsAdmin(window.localStorage.getItem(ADMIN_CACHE_KEY) === "true");
+      } catch {
+        setIsAdmin(false);
+      }
+    };
+
+    window.addEventListener("storage", syncAdminRole);
+    window.addEventListener(ADMIN_ROLE_EVENT, syncAdminRole);
+
+    return () => {
+      window.removeEventListener("storage", syncAdminRole);
+      window.removeEventListener(ADMIN_ROLE_EVENT, syncAdminRole);
+    };
   }, []);
 
   useEffect(() => {
@@ -56,8 +100,10 @@ export default function Navbar() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(() => {
-      void checkSessionAndRole();
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (event !== "INITIAL_SESSION") {
+        void checkSessionAndRole();
+      }
     });
 
     return () => {

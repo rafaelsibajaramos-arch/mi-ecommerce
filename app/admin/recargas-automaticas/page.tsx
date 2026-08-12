@@ -1,14 +1,7 @@
 "use client";
 
-import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../../lib/supabase";
-
-type ProfileRow = {
-  id: string;
-  email: string | null;
-  full_name: string | null;
-};
 
 type TopupRow = {
   id: string;
@@ -86,29 +79,6 @@ type BankPaymentRow = {
   updated_at: string | null;
 };
 
-type PromotionRow = {
-  id: string;
-  name: string | null;
-  status: string | null;
-  min_amount: number | null;
-  bonus_type: string | null;
-  bonus_value: number | null;
-  starts_at: string | null;
-  ends_at: string | null;
-  created_at: string | null;
-  updated_at: string | null;
-};
-
-type PromotionFormState = {
-  name: string;
-  minAmount: string;
-  bonusType: "PERCENTAGE" | "FIXED";
-  bonusValue: string;
-  startsAt: string;
-  endsAt: string;
-  status: "ACTIVE" | "PAUSED";
-};
-
 type BannerState = { kind: "success" | "error"; text: string } | null;
 type MainTab = "HISTORIAL" | "ALERTAS" | "BANCO" | "BANCO_HISTORIAL";
 type HistoryMode = "MONTH" | "DAY" | "ALL" | "RANGE";
@@ -143,7 +113,6 @@ type RecargasDataResponse = {
   ok?: boolean;
   topups?: FormattedTopup[];
   alerts?: AlertRow[];
-  promotions?: PromotionRow[];
   bankPayments?: BankPaymentRow[];
   bankHistoryToday?: BankPaymentRow[];
   bankHistoryDate?: string;
@@ -203,82 +172,6 @@ function isWithinDateRange(value: string | null | undefined, from: string, to: s
   }
 
   return true;
-}
-
-function getTopupDateForFilter(topup: FormattedTopup) {
-  const status = normalizeStatus(topup.status);
-
-  if (status === "APPROVED") {
-    return topup.executed_at || topup.credited_at || topup.approved_at || topup.created_at;
-  }
-
-  if (status === "REJECTED") return topup.rejected_at || topup.created_at;
-  if (status === "EXPIRED") return topup.expired_at || topup.created_at;
-
-  return topup.created_at;
-}
-
-function sumMoney<T>(rows: T[], pick: (row: T) => number) {
-  return rows.reduce((total, row) => total + pick(row), 0);
-}
-
-
-function toLocalDateTimeInput(value: string | null | undefined) {
-  const date = value ? new Date(value) : new Date();
-  if (!Number.isFinite(date.getTime())) return "";
-
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 16);
-}
-
-function dateTimeInputToIso(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-
-  const date = new Date(trimmed);
-  if (!Number.isFinite(date.getTime())) return null;
-  return date.toISOString();
-}
-
-function buildDefaultPromotionForm(): PromotionFormState {
-  return {
-    name: "Aumento de recarga 10%",
-    minAmount: "30000",
-    bonusType: "PERCENTAGE",
-    bonusValue: "10",
-    startsAt: toLocalDateTimeInput(new Date().toISOString()),
-    endsAt: "",
-    status: "ACTIVE",
-  };
-}
-
-function promotionRuntimeStatus(promotion: PromotionRow) {
-  const status = normalizeStatus(promotion.status);
-  const now = Date.now();
-  const startsAt = promotion.starts_at ? new Date(promotion.starts_at).getTime() : 0;
-  const endsAt = promotion.ends_at ? new Date(promotion.ends_at).getTime() : null;
-
-  if (status === "PAUSED") {
-    return { label: "Pausada", cls: "border border-slate-200 bg-slate-50 text-slate-600" };
-  }
-
-  if (Number.isFinite(startsAt) && startsAt > now) {
-    return { label: "Programada", cls: "border border-blue-200 bg-blue-50 text-blue-700" };
-  }
-
-  if (endsAt && Number.isFinite(endsAt) && endsAt < now) {
-    return { label: "Vencida", cls: "border border-zinc-200 bg-zinc-50 text-zinc-600" };
-  }
-
-  return { label: "Activa", cls: "border border-emerald-200 bg-emerald-50 text-emerald-700" };
-}
-
-function promotionBonusLabel(promotion: PromotionRow) {
-  const type = String(promotion.bonus_type || "PERCENTAGE").toUpperCase();
-  const value = Number(promotion.bonus_value || 0);
-
-  if (type === "FIXED") return `${formatMoney(value)} fijos`;
-  return `${value.toLocaleString("es-CO")}% adicional`;
 }
 
 function formatDelay(seconds: number | null | undefined) {
@@ -394,7 +287,6 @@ export default function RecargasAutomaticasPage() {
 
   const [topups, setTopups] = useState<FormattedTopup[]>([]);
   const [alerts, setAlerts] = useState<AlertRow[]>([]);
-  const [promotions, setPromotions] = useState<PromotionRow[]>([]);
   const [bankPayments, setBankPayments] = useState<BankPaymentRow[]>([]);
   const [bankHistoryToday, setBankHistoryToday] = useState<BankPaymentRow[]>([]);
   const [bankHistoryDate, setBankHistoryDate] = useState("");
@@ -403,9 +295,7 @@ export default function RecargasAutomaticasPage() {
 
   const [historyMode, setHistoryMode] = useState<HistoryMode>("ALL");
   const [historyDay, setHistoryDay] = useState(() => toDateInputValue(new Date()));
-  const [historyPeriodLabel, setHistoryPeriodLabel] = useState("Histórico total");
   const [historyFilteredCount, setHistoryFilteredCount] = useState(0);
-  const [historyPeriodTotalCount, setHistoryPeriodTotalCount] = useState(0);
   const [historyApprovedCount, setHistoryApprovedCount] = useState(0);
   const [historyPendingCount, setHistoryPendingCount] = useState(0);
   const [historyTotalApprovedAmount, setHistoryTotalApprovedAmount] = useState(0);
@@ -418,9 +308,6 @@ export default function RecargasAutomaticasPage() {
 
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [promotionForm, setPromotionForm] = useState<PromotionFormState>(() => buildDefaultPromotionForm());
-  const [editingPromotionId, setEditingPromotionId] = useState<string | null>(null);
-  const [savingPromotion, setSavingPromotion] = useState(false);
 
   async function getAccessToken() {
     const {
@@ -461,7 +348,6 @@ export default function RecargasAutomaticasPage() {
       }
 
       setAlerts(result?.alerts || []);
-      setPromotions(result?.promotions || []);
       setBankPayments((result?.bankPayments || []).filter((payment) => !payment.is_used && !payment.matched_topup_id));
       setBankHistoryToday(result?.bankHistoryToday || []);
       setBankHistoryDate(result?.bankHistoryDate || "");
@@ -474,7 +360,6 @@ export default function RecargasAutomaticasPage() {
       setBanner((current) => (current?.kind === "error" ? null : current));
     } catch (error) {
       setAlerts([]);
-      setPromotions([]);
       setBankPayments([]);
       setBankHistoryToday([]);
       setBankHistoryDate("");
@@ -533,18 +418,15 @@ export default function RecargasAutomaticasPage() {
 
       setTopups((result?.rows || []).filter(isVisibleTopup));
       setHistoryFilteredCount(Number(result?.filteredCount || 0));
-      setHistoryPeriodTotalCount(Number(result?.periodTotalCount || 0));
       setHistoryApprovedCount(Number(result?.approvedCount || 0));
       setHistoryPendingCount(Number(result?.pendingCount || 0));
       setHistoryTotalApprovedAmount(Number(result?.totalApprovedAmount || 0));
-      setHistoryPeriodLabel(result?.periodLabel || "Periodo seleccionado");
       if (result?.selectedDay) setHistoryDay(result.selectedDay);
       setHistoryLoading(false);
       setBanner((current) => (current?.kind === "error" ? null : current));
     } catch (error) {
       setTopups([]);
       setHistoryFilteredCount(0);
-      setHistoryPeriodTotalCount(0);
       setHistoryApprovedCount(0);
       setHistoryPendingCount(0);
       setHistoryTotalApprovedAmount(0);
@@ -872,75 +754,6 @@ export default function RecargasAutomaticasPage() {
     }
   }
 
-
-  function resetPromotionForm() {
-    setEditingPromotionId(null);
-    setPromotionForm(buildDefaultPromotionForm());
-  }
-
-  function editPromotion(promotion: PromotionRow) {
-    setEditingPromotionId(promotion.id);
-    setPromotionForm({
-      name: promotion.name || "",
-      minAmount: String(Math.round(Number(promotion.min_amount || 0))),
-      bonusType: String(promotion.bonus_type || "PERCENTAGE").toUpperCase() === "FIXED" ? "FIXED" : "PERCENTAGE",
-      bonusValue: String(Math.round(Number(promotion.bonus_value || 0))),
-      startsAt: toLocalDateTimeInput(promotion.starts_at),
-      endsAt: promotion.ends_at ? toLocalDateTimeInput(promotion.ends_at) : "",
-      status: normalizeStatus(promotion.status) === "PAUSED" ? "PAUSED" : "ACTIVE",
-    });
-  }
-
-  async function savePromotion(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSavingPromotion(true);
-    setBanner(null);
-
-    try {
-      await postAdminAction("/api/admin/topup-promotions", {
-        action: "save",
-        id: editingPromotionId,
-        name: promotionForm.name,
-        minAmount: Number(promotionForm.minAmount),
-        bonusType: promotionForm.bonusType,
-        bonusValue: Number(promotionForm.bonusValue),
-        startsAt: dateTimeInputToIso(promotionForm.startsAt),
-        endsAt: dateTimeInputToIso(promotionForm.endsAt),
-        status: promotionForm.status,
-      });
-
-      setBanner({ kind: "success", text: editingPromotionId ? "Promoción actualizada." : "Promoción creada." });
-      resetPromotionForm();
-      await Promise.all([loadData(false), loadHistory(false)]);
-    } catch (error) {
-      setBanner({ kind: "error", text: error instanceof Error ? error.message : "No se pudo guardar la promoción." });
-    } finally {
-      setSavingPromotion(false);
-    }
-  }
-
-  async function togglePromotionStatus(promotion: PromotionRow) {
-    setUpdatingId(promotion.id);
-    setBanner(null);
-
-    const currentStatus = normalizeStatus(promotion.status) === "PAUSED" ? "PAUSED" : "ACTIVE";
-    const nextStatus = currentStatus === "ACTIVE" ? "PAUSED" : "ACTIVE";
-
-    try {
-      await postAdminAction("/api/admin/topup-promotions", {
-        action: "status",
-        id: promotion.id,
-        status: nextStatus,
-      });
-
-      setBanner({ kind: "success", text: nextStatus === "ACTIVE" ? "Promoción activada." : "Promoción pausada." });
-      await Promise.all([loadData(false), loadHistory(false)]);
-    } catch (error) {
-      setBanner({ kind: "error", text: error instanceof Error ? error.message : "No se pudo cambiar la promoción." });
-    } finally {
-      setUpdatingId(null);
-    }
-  }
 
   async function updateAlertStatus(alert: AlertRow, newStatus: "REVIEWED" | "DISMISSED" | "OPEN") {
     setUpdatingId(alert.id);

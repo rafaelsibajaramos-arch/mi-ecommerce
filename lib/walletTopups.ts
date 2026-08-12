@@ -34,7 +34,39 @@ export type WalletTopupRow = {
     updated_at?: string | null;
 };
 
-const SELECT_TOPUP = "*";
+const SELECT_TOPUP = [
+    "id",
+    "user_id",
+    "reference",
+    "amount",
+    "amount_in_cents",
+    "currency",
+    "provider",
+    "status",
+    "wompi_transaction_id",
+    "wompi_status",
+    "wompi_payment_method_type",
+    "payer_origin",
+    "destination_account",
+    "receipt_url",
+    "matched_bank_payment_id",
+    "matched_bank_reference",
+    "approved_by",
+    "admin_note",
+    "promotion_id",
+    "promotion_name",
+    "promotion_bonus_type",
+    "promotion_bonus_value",
+    "promotion_bonus_amount",
+    "promotion_total_amount",
+    "promotion_applied_at",
+    "error_message",
+    "approved_at",
+    "rejected_at",
+    "credited_at",
+    "created_at",
+    "updated_at",
+].join(", ");
 
 export function normalizeTopupStatus(status: string | null | undefined) {
     return String(status || "PENDING").trim().toUpperCase();
@@ -72,7 +104,7 @@ export async function getWalletTopupByReference(
 
     if (error) throw new Error(error.message);
 
-    return (data as WalletTopupRow | null) || null;
+    return (data as unknown as WalletTopupRow | null) || null;
 }
 
 export async function getWalletTopupById(
@@ -87,7 +119,7 @@ export async function getWalletTopupById(
 
     if (error) throw new Error(error.message);
 
-    return (data as WalletTopupRow | null) || null;
+    return (data as unknown as WalletTopupRow | null) || null;
 }
 
 export async function upsertTopupTransactionState({
@@ -131,7 +163,7 @@ export async function upsertTopupTransactionState({
 
     if (error) throw new Error(error.message);
 
-    return data as WalletTopupRow;
+    return data as unknown as WalletTopupRow;
 }
 
 function getTopupProviderLabel(topup: WalletTopupRow) {

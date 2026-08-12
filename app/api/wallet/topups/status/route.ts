@@ -1,27 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { createSupabaseAdmin } from "../../../../../lib/supabaseAdmin";
+import { tryAutoApproveBankTopup } from "../../../../../lib/bankTopups";
+import { getWalletTopupByReference } from "../../../../../lib/walletTopups";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const TOPUP_STATUS_COLUMNS = [
-  "id",
-  "user_id",
-  "reference",
-  "amount",
-  "amount_in_cents",
-  "status",
-  "provider",
-  "payer_origin",
-  "destination_account",
-  "receipt_url",
-  "matched_bank_reference",
-  "error_message",
-  "approved_at",
-  "rejected_at",
-  "credited_at",
-].join(",");
 
 function jsonError(message: string, status = 400) {
   return NextResponse.json(
@@ -44,15 +28,18 @@ function requireEnv(name: string) {
   return value.trim();
 }
 
-function createSupabaseUserClientFromToken(token: string) {
-  return createClient(
+let cachedSupabaseAuthClient: ReturnType<typeof createClient> | null = null;
+
+function getSupabaseAuthClient() {
+  if (cachedSupabaseAuthClient) return cachedSupabaseAuthClient;
+
+  cachedSupabaseAuthClient = createClient(
     requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
     requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
-    {
-      auth: { autoRefreshToken: false, persistSession: false },
-      global: { headers: { Authorization: `Bearer ${token}` } },
-    }
+    { auth: { autoRefreshToken: false, persistSession: false } }
   );
+
+  return cachedSupabaseAuthClient;
 }
 
 export async function POST(request: NextRequest) {
@@ -60,31 +47,31 @@ export async function POST(request: NextRequest) {
     const token = getBearerToken(request);
     if (!token) return jsonError("No autorizado.", 401);
 
-    const supabaseAuth = createSupabaseUserClientFromToken(token);
+    const supabaseAuth = getSupabaseAuthClient();
     const supabaseAdmin = createSupabaseAdmin();
 
-    const {
-      data: { user },
-      error: authError,
-    } = await supabaseAuth.auth.getUser();
+    // getClaims verifica el JWT localmente cuando Supabase usa claves
+    // asimétricas y conserva el JWKS en memoria entre invocaciones calientes.
+    // Si el proyecto usa firma simétrica, Supabase cae de forma segura a getUser.
+    const { data: claimsData, error: authError } =
+      await supabaseAuth.auth.getClaims(token);
+    const userId = String(claimsData?.claims?.sub || "").trim();
 
-    if (authError || !user) return jsonError("Sesión inválida.", 401);
+    if (authError || !userId) return jsonError("Sesión inválida.", 401);
 
     const body = await request.json();
     const reference = typeof body?.reference === "string" ? body.reference.trim() : "";
     if (!reference) return jsonError("Falta la referencia de recarga.");
 
-    // Esta ruta solo consulta el estado. La aprobación automática se realiza una vez
-    // al crear la recarga y posteriormente mediante el cron bancario.
-    const { data: topup, error: topupError } = await supabaseAdmin
-      .from("wallet_topups")
-      .select(TOPUP_STATUS_COLUMNS)
-      .eq("reference", reference)
-      .eq("user_id", user.id)
-      .maybeSingle();
+    let topup = await getWalletTopupByReference(supabaseAdmin, reference);
 
-    if (topupError) throw new Error(topupError.message);
-    if (!topup) return jsonError("La recarga no existe o no te pertenece.", 404);
+    if (!topup || topup.user_id !== userId) {
+      return jsonError("La recarga no existe o no te pertenece.", 404);
+    }
+
+    if (String(topup.status || "PENDING").toUpperCase() === "PENDING") {
+      topup = await tryAutoApproveBankTopup(supabaseAdmin, topup.id, topup);
+    }
 
     return NextResponse.json(
       { ok: true, topup },

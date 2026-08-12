@@ -22,15 +22,11 @@ type TopupRow = {
   credited_at: string | null;
 };
 
-const FAST_POLLING_UNTIL_MS = 2 * 60 * 1000;
-const MEDIUM_POLLING_UNTIL_MS = 10 * 60 * 1000;
 const AUTO_POLLING_LIMIT_MS = 30 * 60 * 1000;
+const TOPUP_POLLING_DELAY_MS = 5_000;
 
 function getNextPollingDelay(elapsedMs: number) {
-  if (elapsedMs < FAST_POLLING_UNTIL_MS) return 15_000;
-  if (elapsedMs < MEDIUM_POLLING_UNTIL_MS) return 30_000;
-  if (elapsedMs < AUTO_POLLING_LIMIT_MS) return 60_000;
-  return null;
+  return elapsedMs < AUTO_POLLING_LIMIT_MS ? TOPUP_POLLING_DELAY_MS : null;
 }
 
 function formatMoney(value: number | null | undefined) {

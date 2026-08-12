@@ -144,22 +144,15 @@ const PRODUCTS_PER_PAGE = 12;
 const SEARCH_DEBOUNCE_MS = 350;
 const SUPABASE_QUERY_TIMEOUT_MS = 12_000;
 const ADMIN_CACHE_KEY = "streamingmayor_is_admin";
+const ADMIN_ROLE_EVENT = "streamingmayor:admin-role-change";
 const PHOTO_MODE_KEY = "streamingmayor_photo_mode";
 const PHOTO_MODE_EVENT = "streamingmayor:photo-mode-change";
-const CATALOG_UPDATED_AT_KEY = "streamingmayor_catalog_updated_at";
 const CATALOG_UPDATED_EVENT = "streamingmayor:catalog-updated";
-const CATALOG_CACHE_PREFIX = "streamingmayor_catalog_cache_v3";
-const CATEGORIES_CACHE_KEY = "streamingmayor_categories_cache_v2";
-const CATALOG_CACHE_TTL_MS = 60_000;
-const CATEGORIES_CACHE_TTL_MS = 15 * 60_000;
 
 export default function HomePage() {
   const { addToCart } = useCart();
 
-  const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
-  const [categories, setCategories] = useState<CategoryItem[]>([
-    { name: "Todas", count: 0 },
-  ]);
+  const [allCatalogItems, setAllCatalogItems] = useState<CatalogItem[]>([]);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("Todas");
@@ -171,29 +164,12 @@ export default function HomePage() {
   const [quickViewItem, setQuickViewItem] = useState<CatalogItem | null>(null);
   const [receiptOrder, setReceiptOrder] = useState<ReceiptOrder | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const [totalProducts, setTotalProducts] = useState(0);
 
   const catalogRequestIdRef = useRef(0);
-  const categoryRequestIdRef = useRef(0);
-  const roleRequestIdRef = useRef(0);
-  const hasCatalogRef = useRef(false);
-  const lastCatalogRefreshRef = useRef(0);
-
-  useEffect(() => {
-    hasCatalogRef.current = catalogItems.length > 0;
-  }, [catalogItems.length]);
-
-  useEffect(() => {
-    try {
-      const cachedAdmin = window.localStorage.getItem(ADMIN_CACHE_KEY);
-
-      if (cachedAdmin === "true") {
-        setIsAdmin(true);
-      }
-    } catch {
-      // Ignora errores de localStorage.
-    }
-  }, []);
+  const catalogDirtyRef = useRef(false);
+  const catalogItemsRef = useRef<CatalogItem[]>([]);
+  const comboChildProductIdsRef = useRef<Set<string>>(new Set());
+  const comboChildVariantIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const syncPhotoMode = () => {
@@ -458,57 +434,9 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    setCurrentPage(1);
+    const timer = window.setTimeout(() => setCurrentPage(1), 0);
+    return () => window.clearTimeout(timer);
   }, [selectedCategory, debouncedSearch]);
-
-  const fetchRole = useCallback(async () => {
-    const requestId = ++roleRequestIdRef.current;
-
-    try {
-      // Esta comprobación solo controla elementos visuales del inicio.
-      // La seguridad real continúa en el layout y las APIs.
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (requestId !== roleRequestIdRef.current) return;
-
-      const currentUser = session?.user || null;
-
-      if (!currentUser) {
-        setIsAdmin(false);
-        try {
-          window.localStorage.removeItem(ADMIN_CACHE_KEY);
-        } catch {
-          // Ignora errores de localStorage.
-        }
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", currentUser.id)
-        .abortSignal(AbortSignal.timeout(SUPABASE_QUERY_TIMEOUT_MS))
-        .maybeSingle();
-
-      if (requestId !== roleRequestIdRef.current || error) return;
-
-      const nextIsAdmin = data?.role === "admin";
-      setIsAdmin(nextIsAdmin);
-
-      try {
-        window.localStorage.setItem(
-          ADMIN_CACHE_KEY,
-          nextIsAdmin ? "true" : "false"
-        );
-      } catch {
-        // Ignora errores de localStorage.
-      }
-    } catch {
-      // Si hay error temporal de red/Supabase, conserva el estado cacheado.
-    }
-  }, []);
 
   const getVariantDisplayStock = (
     product: Product,
@@ -582,206 +510,23 @@ export default function HomePage() {
     []
   );
 
-  const fetchCategories = useCallback(async () => {
-    const requestId = ++categoryRequestIdRef.current;
-
-    try {
-      const cachedText = window.sessionStorage.getItem(CATEGORIES_CACHE_KEY);
-      if (cachedText) {
-        const cached = JSON.parse(cachedText) as {
-          savedAt?: number;
-          categories?: CategoryItem[];
-        };
-
-        if (
-          Number(cached.savedAt || 0) + CATEGORIES_CACHE_TTL_MS > Date.now() &&
-          Array.isArray(cached.categories) &&
-          cached.categories.length > 0
-        ) {
-          setCategories(cached.categories);
-        }
-      }
-    } catch {
-      // La caché visual es opcional.
-    }
-
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        const { data, error } = await supabase
-          .from("products")
-          .select("id, category, product_type")
-          .eq("is_active", true)
-          .abortSignal(AbortSignal.timeout(SUPABASE_QUERY_TIMEOUT_MS));
-
-        if (requestId !== categoryRequestIdRef.current) {
-          return;
-        }
-
-        if (error) {
-          throw error;
-        }
-
-        const productRows =
-          ((data as {
-            id: string;
-            category: string | null;
-            product_type?: ProductType;
-          }[]) || []);
-
-        const variableProductIds = productRows
-          .filter((product) => product.product_type === "variable")
-          .map((product) => product.id);
-
-        const variantCounts = new Map<string, number>();
-
-        if (variableProductIds.length > 0) {
-          const { data: variantsData, error: variantsError } = await supabase
-            .from("product_variants")
-            .select("id, product_id")
-            .in("product_id", variableProductIds)
-            .eq("is_active", true)
-            .abortSignal(AbortSignal.timeout(SUPABASE_QUERY_TIMEOUT_MS));
-
-          if (requestId !== categoryRequestIdRef.current) {
-            return;
-          }
-
-          if (variantsError) {
-            throw variantsError;
-          }
-
-          ((variantsData as { product_id: string }[]) || []).forEach(
-            (variant) => {
-              variantCounts.set(
-                variant.product_id,
-                (variantCounts.get(variant.product_id) || 0) + 1
-              );
-            }
-          );
-        }
-
-        const counts = new Map<string, number>();
-        let totalVisibleItems = 0;
-
-        productRows.forEach((item) => {
-          const visibleCount =
-            item.product_type === "variable"
-              ? Math.max(variantCounts.get(item.id) || 0, 1)
-              : 1;
-
-          totalVisibleItems += visibleCount;
-
-          const category = (item.category || "").trim();
-          if (!category) return;
-
-          counts.set(category, (counts.get(category) || 0) + visibleCount);
-        });
-
-        const ordered = Array.from(counts.entries())
-          .sort((a, b) =>
-            a[0].localeCompare(b[0], "es", { sensitivity: "base" })
-          )
-          .map(([name, count]) => ({ name, count }));
-
-        const nextCategories = [
-          {
-            name: "Todas",
-            count: totalVisibleItems,
-          },
-          ...ordered,
-        ];
-
-        setCategories(nextCategories);
-
-        try {
-          window.sessionStorage.setItem(
-            CATEGORIES_CACHE_KEY,
-            JSON.stringify({ savedAt: Date.now(), categories: nextCategories })
-          );
-        } catch {
-          // La caché visual es opcional.
-        }
-
-        return;
-      } catch (error) {
-        if (requestId !== categoryRequestIdRef.current) {
-          return;
-        }
-
-        if (isAbortLikeError(error) && attempt === 0) {
-          await sleep(350);
-          continue;
-        }
-
-        return;
-      }
-    }
-  }, []);
-
-  const fetchProductsPage = useCallback(async () => {
+  const fetchCatalog = useCallback(async (showLoader = true) => {
     const requestId = ++catalogRequestIdRef.current;
-    const cacheKey = `${CATALOG_CACHE_PREFIX}:${selectedCategory}:${debouncedSearch}:${currentPage}`;
-    let restoredFromCache = false;
 
-    try {
-      const cachedText = window.sessionStorage.getItem(cacheKey);
-      const lastCatalogUpdate = Number(
-        window.localStorage.getItem(CATALOG_UPDATED_AT_KEY) || 0
-      );
-
-      if (cachedText) {
-        const cached = JSON.parse(cachedText) as {
-          savedAt?: number;
-          items?: CatalogItem[];
-          total?: number;
-        };
-        const savedAt = Number(cached.savedAt || 0);
-
-        if (
-          savedAt >= lastCatalogUpdate &&
-          savedAt + CATALOG_CACHE_TTL_MS > Date.now() &&
-          Array.isArray(cached.items)
-        ) {
-          setCatalogItems(cached.items);
-          setTotalProducts(Number(cached.total || 0));
-          setLoading(false);
-          restoredFromCache = true;
-        }
-      }
-    } catch {
-      // La caché visual es opcional.
-    }
-
-    if (!restoredFromCache && !hasCatalogRef.current) {
-      setLoading(true);
-    }
+    if (showLoader) setLoading(true);
     setMessage("");
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        let query = supabase
+        const { data, error } = await supabase
           .from("products")
           .select(
             "id, name, description, price, stock, image_url, category, is_active, created_at, sort_order, product_type, fallback_to_general_licenses, combo_stock"
           )
           .eq("is_active", true)
           .order("sort_order", { ascending: true })
-          .order("created_at", { ascending: false });
-
-        if (selectedCategory !== "Todas") {
-          query = query.eq("category", selectedCategory);
-        }
-
-        if (debouncedSearch) {
-          const term = debouncedSearch.replace(/[%]/g, "").trim();
-          query = query.or(
-            `name.ilike.%${term}%,category.ilike.%${term}%,description.ilike.%${term}%`
-          );
-        }
-
-        const { data, error } = await query.abortSignal(
-          AbortSignal.timeout(SUPABASE_QUERY_TIMEOUT_MS)
-        );
+          .order("created_at", { ascending: false })
+          .abortSignal(AbortSignal.timeout(SUPABASE_QUERY_TIMEOUT_MS));
 
         if (requestId !== catalogRequestIdRef.current) {
           return;
@@ -797,6 +542,8 @@ export default function HomePage() {
         );
 
         const groupedVariants: Record<string, ProductVariant[]> = {};
+        const comboChildProductIds = new Set<string>();
+        const comboChildVariantIds = new Set<string>();
 
         if (variableProducts.length > 0) {
           const productIds = variableProducts.map((product) => product.id);
@@ -864,6 +611,9 @@ export default function HomePage() {
                 .filter(Boolean) as string[]
             )
           );
+
+          childProductIds.forEach((id) => comboChildProductIds.add(id));
+          childVariantIds.forEach((id) => comboChildVariantIds.add(id));
 
           const [childProductsResult, childVariantsResult] = await Promise.all([
             childProductIds.length
@@ -1021,29 +771,14 @@ export default function HomePage() {
           groupedVariants,
           comboStockByProduct
         );
-        const from = (currentPage - 1) * PRODUCTS_PER_PAGE;
-        const to = from + PRODUCTS_PER_PAGE;
 
-        const visibleItems = expandedItems.slice(from, to);
-
-        setCatalogItems(visibleItems);
-        setTotalProducts(expandedItems.length);
+        catalogItemsRef.current = expandedItems;
+        comboChildProductIdsRef.current = comboChildProductIds;
+        comboChildVariantIdsRef.current = comboChildVariantIds;
+        setAllCatalogItems(expandedItems);
+        catalogDirtyRef.current = false;
         setLoading(false);
-        lastCatalogRefreshRef.current = Date.now();
-
-        try {
-          window.sessionStorage.setItem(
-            cacheKey,
-            JSON.stringify({
-              savedAt: Date.now(),
-              items: visibleItems,
-              total: expandedItems.length,
-            })
-          );
-        } catch {
-          // La caché visual es opcional.
-        }
-
+        setMessage("");
         return;
       } catch (error) {
         if (requestId !== catalogRequestIdRef.current) {
@@ -1060,110 +795,359 @@ export default function HomePage() {
           }`
         );
 
-        if (!hasCatalogRef.current && !restoredFromCache) {
-          setCatalogItems([]);
-          setTotalProducts(0);
+        if (showLoader) {
+          catalogItemsRef.current = [];
+          setAllCatalogItems([]);
         }
 
         setLoading(false);
         return;
       }
     }
-  }, [buildCatalogItems, currentPage, debouncedSearch, selectedCategory]);
+  }, [buildCatalogItems]);
 
-  useEffect(() => {
-    let mounted = true;
-    const run = () => {
-      if (!mounted) return;
 
-      // No retrasar categorías ni catálogo esperando la comprobación visual del rol.
-      void fetchRole();
-      void fetchCategories();
-    };
+  const categories = useMemo<CategoryItem[]>(() => {
+    const counts = new Map<string, number>();
 
-    void run();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!mounted) {
-        return;
-      }
-
-      if (!session?.user) {
-        setIsAdmin(false);
-
-        try {
-          window.localStorage.removeItem(ADMIN_CACHE_KEY);
-        } catch {
-          // Ignora errores de localStorage.
-        }
-
-        return;
-      }
-
-      window.setTimeout(() => {
-        if (mounted) {
-          void fetchRole();
-        }
-      }, 0);
+    allCatalogItems.forEach((item) => {
+      const category = (item.product.category || "").trim();
+      if (!category) return;
+      counts.set(category, (counts.get(category) || 0) + 1);
     });
 
-    return () => {
-      mounted = false;
+    const ordered = Array.from(counts.entries())
+      .sort((a, b) =>
+        a[0].localeCompare(b[0], "es", { sensitivity: "base" })
+      )
+      .map(([name, count]) => ({ name, count }));
 
-      subscription.unsubscribe();
-    };
-  }, [fetchCategories, fetchRole]);
+    return [{ name: "Todas", count: allCatalogItems.length }, ...ordered];
+  }, [allCatalogItems]);
+
+  const filteredCatalogItems = useMemo(() => {
+    const term = debouncedSearch.toLocaleLowerCase("es-CO");
+
+    return allCatalogItems.filter((item) => {
+      if (
+        selectedCategory !== "Todas" &&
+        item.product.category !== selectedCategory
+      ) {
+        return false;
+      }
+
+      if (!term) return true;
+
+      return [
+        item.displayName,
+        item.displayDescription || "",
+        item.product.category || "",
+      ].some((value) => value.toLocaleLowerCase("es-CO").includes(term));
+    });
+  }, [allCatalogItems, debouncedSearch, selectedCategory]);
+
+  const totalProducts = filteredCatalogItems.length;
+
+  const catalogItems = useMemo(() => {
+    const from = (currentPage - 1) * PRODUCTS_PER_PAGE;
+    return filteredCatalogItems.slice(from, from + PRODUCTS_PER_PAGE);
+  }, [currentPage, filteredCatalogItems]);
 
   useEffect(() => {
-    let mounted = true;
+    const initialCatalogTimer = window.setTimeout(() => {
+      void fetchCatalog(true);
+    }, 0);
 
-    const run = async () => {
-      if (!mounted) return;
-      await fetchProductsPage();
-    };
-
-    void run();
-
-    return () => {
-      mounted = false;
-    };
-  }, [fetchProductsPage]);
+    return () => window.clearTimeout(initialCatalogTimer);
+  }, [fetchCatalog]);
 
   useEffect(() => {
-    const refreshCatalog = () => {
-      if (document.visibilityState !== "visible") return;
-      if (Date.now() - lastCatalogRefreshRef.current < 1_000) return;
-
+    const syncAdminRole = () => {
       try {
-        Object.keys(window.sessionStorage)
-          .filter((key) => key.startsWith(CATALOG_CACHE_PREFIX))
-          .forEach((key) => window.sessionStorage.removeItem(key));
+        setIsAdmin(window.localStorage.getItem(ADMIN_CACHE_KEY) === "true");
       } catch {
-        // La limpieza de caché es opcional.
-      }
-
-      void fetchProductsPage();
-      void fetchCategories();
-    };
-
-    const refreshOnFocus = () => {
-      if (Date.now() - lastCatalogRefreshRef.current >= 30_000) {
-        refreshCatalog();
+        setIsAdmin(false);
       }
     };
 
-    window.addEventListener(CATALOG_UPDATED_EVENT, refreshCatalog);
-    window.addEventListener("focus", refreshOnFocus);
-    window.addEventListener("pageshow", refreshOnFocus);
+    syncAdminRole();
+    window.addEventListener("storage", syncAdminRole);
+    window.addEventListener(ADMIN_ROLE_EVENT, syncAdminRole);
 
     return () => {
-      window.removeEventListener(CATALOG_UPDATED_EVENT, refreshCatalog);
-      window.removeEventListener("focus", refreshOnFocus);
-      window.removeEventListener("pageshow", refreshOnFocus);
+      window.removeEventListener("storage", syncAdminRole);
+      window.removeEventListener(ADMIN_ROLE_EVENT, syncAdminRole);
     };
-  }, [fetchCategories, fetchProductsPage]);
+  }, []);
+
+  useEffect(() => {
+    let refreshTimer: number | null = null;
+
+    const replaceCatalogItems = (items: CatalogItem[]) => {
+      catalogItemsRef.current = items;
+      setAllCatalogItems(items);
+    };
+
+    const scheduleCatalogRefresh = (delayMs = 250) => {
+      catalogDirtyRef.current = true;
+
+      if (document.visibilityState !== "visible") return;
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+
+      refreshTimer = window.setTimeout(() => {
+        refreshTimer = null;
+        if (!catalogDirtyRef.current) return;
+        void fetchCatalog(false);
+      }, delayMs);
+    };
+
+    const applyProductUpdate = (record: Record<string, unknown>) => {
+      const id = typeof record.id === "string" ? record.id : "";
+      if (!id || comboChildProductIdsRef.current.has(id)) return false;
+
+      const currentItems = catalogItemsRef.current;
+      const firstItem = currentItems.find((item) => item.product.id === id);
+      if (!firstItem) return false;
+
+      const previousProduct = firstItem.product;
+      const nextType =
+        typeof record.product_type === "string"
+          ? (record.product_type as ProductType)
+          : previousProduct.product_type;
+
+      if (
+        previousProduct.product_type === "composite" ||
+        nextType === "composite" ||
+        nextType !== previousProduct.product_type
+      ) {
+        return false;
+      }
+
+      const nextProduct: Product = {
+        ...previousProduct,
+        ...record,
+        id,
+        name:
+          typeof record.name === "string" ? record.name : previousProduct.name,
+        description:
+          record.description === null || typeof record.description === "string"
+            ? (record.description as string | null)
+            : previousProduct.description,
+        price:
+          record.price !== undefined
+            ? Number(record.price || 0)
+            : previousProduct.price,
+        stock:
+          record.stock !== undefined
+            ? Number(record.stock || 0)
+            : previousProduct.stock,
+        image_url:
+          record.image_url === null || typeof record.image_url === "string"
+            ? (record.image_url as string | null)
+            : previousProduct.image_url,
+        category:
+          record.category === null || typeof record.category === "string"
+            ? (record.category as string | null)
+            : previousProduct.category,
+        is_active:
+          typeof record.is_active === "boolean"
+            ? record.is_active
+            : previousProduct.is_active,
+        fallback_to_general_licenses:
+          typeof record.fallback_to_general_licenses === "boolean"
+            ? record.fallback_to_general_licenses
+            : previousProduct.fallback_to_general_licenses,
+      };
+
+      if (!nextProduct.is_active) {
+        replaceCatalogItems(
+          currentItems.filter((item) => item.product.id !== id)
+        );
+        catalogDirtyRef.current = false;
+        return true;
+      }
+
+      const nextItems = currentItems.map((item) => {
+        if (item.product.id !== id) return item;
+
+        const variant = item.variant;
+        const displayStock = variant
+          ? Number(variant.stock || 0) +
+            (nextProduct.fallback_to_general_licenses === false
+              ? 0
+              : Number(nextProduct.stock || 0))
+          : Number(nextProduct.stock || 0);
+
+        return {
+          ...item,
+          product: nextProduct,
+          displayName: variant
+            ? `${nextProduct.name} - ${variant.name}`
+            : nextProduct.name,
+          displayDescription: variant?.description || nextProduct.description,
+          displayPrice: variant
+            ? Number(variant.price || 0)
+            : Number(nextProduct.price || 0),
+          displayStock,
+          displayImageUrl: variant?.image_url || nextProduct.image_url,
+        };
+      });
+
+      replaceCatalogItems(nextItems);
+      catalogDirtyRef.current = false;
+      return true;
+    };
+
+    const applyVariantUpdate = (record: Record<string, unknown>) => {
+      const id = typeof record.id === "string" ? record.id : "";
+      if (!id || comboChildVariantIdsRef.current.has(id)) return false;
+
+      const currentItems = catalogItemsRef.current;
+      const currentItem = currentItems.find((item) => item.variant?.id === id);
+      if (!currentItem?.variant) return false;
+
+      if (
+        typeof record.product_id === "string" &&
+        record.product_id !== currentItem.product.id
+      ) {
+        return false;
+      }
+
+      if (record.is_active === false) {
+        // Una variante desactivada puede hacer que el producto vuelva al modo
+        // de catálogo general si era la última variante activa.
+        return false;
+      }
+
+      const previousVariant = currentItem.variant;
+      const nextVariant: ProductVariant = {
+        ...previousVariant,
+        ...record,
+        id,
+        product_id: currentItem.product.id,
+        name:
+          typeof record.name === "string" ? record.name : previousVariant.name,
+        slug:
+          record.slug === null || typeof record.slug === "string"
+            ? (record.slug as string | null)
+            : previousVariant.slug,
+        description:
+          record.description === null || typeof record.description === "string"
+            ? (record.description as string | null)
+            : previousVariant.description,
+        price:
+          record.price !== undefined
+            ? Number(record.price || 0)
+            : previousVariant.price,
+        stock:
+          record.stock !== undefined
+            ? Number(record.stock || 0)
+            : previousVariant.stock,
+        image_url:
+          record.image_url === null || typeof record.image_url === "string"
+            ? (record.image_url as string | null)
+            : previousVariant.image_url,
+        is_active:
+          typeof record.is_active === "boolean"
+            ? record.is_active
+            : previousVariant.is_active,
+        sort_order:
+          record.sort_order !== undefined
+            ? Number(record.sort_order || 0)
+            : previousVariant.sort_order,
+      };
+
+      const nextItems = currentItems.map((item) => {
+        if (item.variant?.id !== id) return item;
+
+        const product = item.product;
+        return {
+          ...item,
+          variant: nextVariant,
+          displayName: `${product.name} - ${nextVariant.name}`,
+          displayDescription: nextVariant.description || product.description,
+          displayPrice: Number(nextVariant.price || 0),
+          displayStock:
+            Number(nextVariant.stock || 0) +
+            (product.fallback_to_general_licenses === false
+              ? 0
+              : Number(product.stock || 0)),
+          displayImageUrl: nextVariant.image_url || product.image_url,
+        };
+      });
+
+      replaceCatalogItems(nextItems);
+      catalogDirtyRef.current = false;
+      return true;
+    };
+
+    const channel = supabase
+      .channel("streamingmayor-catalog-stock-live")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "products" },
+        (payload) => {
+          if (
+            payload.eventType === "UPDATE" &&
+            applyProductUpdate(payload.new as Record<string, unknown>)
+          ) {
+            return;
+          }
+          scheduleCatalogRefresh();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "product_variants" },
+        (payload) => {
+          if (
+            payload.eventType === "UPDATE" &&
+            applyVariantUpdate(payload.new as Record<string, unknown>)
+          ) {
+            return;
+          }
+          scheduleCatalogRefresh();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "product_components" },
+        () => scheduleCatalogRefresh()
+      )
+      .subscribe();
+
+    const refreshIfNeeded = () => {
+      if (
+        document.visibilityState === "visible" &&
+        catalogDirtyRef.current
+      ) {
+        scheduleCatalogRefresh(0);
+      }
+    };
+
+    const handleCheckoutRefresh = () => {
+      // Realtime suele actualizar el stock antes de este respaldo. Si no llega
+      // ningún evento, hacemos una sola resincronización silenciosa.
+      scheduleCatalogRefresh(1_500);
+    };
+    const handleCatalogUpdated = () => scheduleCatalogRefresh(0);
+
+    document.addEventListener("visibilitychange", refreshIfNeeded);
+    window.addEventListener("focus", refreshIfNeeded);
+    window.addEventListener("online", refreshIfNeeded);
+    window.addEventListener("checkout:receipt-ready", handleCheckoutRefresh);
+    window.addEventListener(CATALOG_UPDATED_EVENT, handleCatalogUpdated);
+
+    return () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      document.removeEventListener("visibilitychange", refreshIfNeeded);
+      window.removeEventListener("focus", refreshIfNeeded);
+      window.removeEventListener("online", refreshIfNeeded);
+      window.removeEventListener("checkout:receipt-ready", handleCheckoutRefresh);
+      window.removeEventListener(CATALOG_UPDATED_EVENT, handleCatalogUpdated);
+      void supabase.removeChannel(channel);
+    };
+  }, [fetchCatalog]);
 
   const totalPages = useMemo(() => {
     return Math.max(1, Math.ceil(totalProducts / PRODUCTS_PER_PAGE));
@@ -1181,9 +1165,9 @@ export default function HomePage() {
   }, [totalProducts, currentPage]);
 
   useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(totalPages);
-    }
+    if (currentPage <= totalPages) return;
+    const timer = window.setTimeout(() => setCurrentPage(totalPages), 0);
+    return () => window.clearTimeout(timer);
   }, [currentPage, totalPages]);
 
   const handleAddToCart = (
