@@ -243,6 +243,10 @@ export default function AdminOrdersPage() {
         .map((item) => `${item.product_name} ${item.variant_name || ""}`)
         .join(" ")
         .toLowerCase();
+      const productTerms = order.items.flatMap((item) => [
+        item.product_name,
+        item.variant_name || "",
+      ]);
 
       const licensesText = order.items
         .flatMap((item) => item.licenses.map((license) => license.license_text))
@@ -258,6 +262,7 @@ export default function AdminOrdersPage() {
         fullName.includes(term) ||
         productsText.includes(term) ||
         licensesText.includes(term) ||
+        productTerms.some((value) => normalizeSearchText(value).includes(term)) ||
         terms.every((searchTerm) => searchableText.includes(searchTerm))
       );
     });
@@ -425,8 +430,8 @@ export default function AdminOrdersPage() {
         {banner && (
           <div
             className={`rounded-2xl border px-4 py-3 text-sm font-semibold shadow-sm ${banner.kind === "success"
-                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                : "border-rose-200 bg-rose-50 text-rose-700"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+              : "border-rose-200 bg-rose-50 text-rose-700"
               }`}
           >
             {banner.text}
@@ -518,22 +523,6 @@ export default function AdminOrdersPage() {
                           </p>
 
                           <div className="mt-3">
-                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                              Productos comprados
-                            </p>
-                            <div className="mt-1 space-y-1">
-                              {order.items.map((item) => (
-                                <p key={item.id} className="text-sm font-semibold text-slate-700">
-                                  {item.product_name}
-                                  {item.variant_name ? ` - ${item.variant_name}` : ""}
-                                  <span className="ml-1 font-normal text-slate-500">x{item.quantity}</span>
-                                </p>
-                              ))}
-                            </div>
-
-                            <p className="mt-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                              Licencias
-                            </p>
                             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
                               Productos comprados
                             </p>
@@ -665,8 +654,8 @@ export default function AdminOrdersPage() {
                       type="button"
                       onClick={() => handlePageChange(item)}
                       className={`flex h-11 min-w-[44px] items-center justify-center rounded-2xl border px-3 text-sm font-semibold transition ${effectiveCurrentPage === item
-                          ? "border-slate-900 bg-slate-900 text-white"
-                          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                        ? "border-slate-900 bg-slate-900 text-white"
+                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                         }`}
                     >
                       {item}
