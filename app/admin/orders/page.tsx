@@ -101,6 +101,7 @@ export default function AdminOrdersPage() {
   const [selectedOrder, setSelectedOrder] = useState<ReceiptOrder | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [reversingOrderId, setReversingOrderId] = useState<string | null>(null);
+  const [searchFocused, setSearchFocused] = useState(false);
 
   const loadOrders = useCallback(async () => {
     setLoading(true);
@@ -229,6 +230,10 @@ export default function AdminOrdersPage() {
       const orderNumber = String(order.order_number || "").toLowerCase();
       const email = (order.customer_email || "").toLowerCase();
       const fullName = (order.customer_full_name || "").toLowerCase();
+      const productsText = order.items
+        .map((item) => `${item.product_name} ${item.variant_name || ""}`)
+        .join(" ")
+        .toLowerCase();
 
       const licensesText = order.items
         .flatMap((item) => item.licenses.map((license) => license.license_text))
@@ -239,6 +244,7 @@ export default function AdminOrdersPage() {
         orderNumber.includes(term) ||
         email.includes(term) ||
         fullName.includes(term) ||
+        productsText.includes(term) ||
         licensesText.includes(term)
       );
     });
@@ -305,6 +311,27 @@ export default function AdminOrdersPage() {
     return preview;
   };
 
+  const searchSuggestions = useMemo(() => {
+    const values = new Set<string>();
+
+    orders.forEach((order) => {
+      order.items.forEach((item) => {
+        const productName = [item.product_name, item.variant_name]
+          .filter(Boolean)
+          .join(" - ");
+        if (productName) values.add(productName);
+      });
+    });
+
+    const term = search.trim().toLowerCase();
+    if (!term) return [];
+
+    return Array.from(values)
+      .filter((value) => value.toLowerCase().includes(term))
+      .sort((first, second) => first.localeCompare(second, "es"))
+      .slice(0, 8);
+  }, [orders, search]);
+
   return (
     <>
       <section className="space-y-6 text-slate-900" ref={ordersSectionRef}>
@@ -323,17 +350,43 @@ export default function AdminOrdersPage() {
           </div>
 
           <div className="grid w-full gap-3 sm:grid-cols-[minmax(0,1fr)_180px] lg:max-w-2xl">
-            <div>
+            <div className="relative">
               <label className="mb-2 block text-sm font-semibold text-slate-700">
                 Buscar pedido
               </label>
               <input
                 type="text"
                 value={search}
-                onChange={(event) => setSearch(event.target.value)}
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  setCurrentPage(1);
+                }}
+                onFocus={() => setSearchFocused(true)}
+                onBlur={() => window.setTimeout(() => setSearchFocused(false), 150)}
                 placeholder="Número, correo o licencia"
                 className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400"
               />
+              {searchFocused && searchSuggestions.length > 0 && (
+                <div className="absolute left-0 right-0 top-full z-20 mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white p-1 shadow-xl">
+                  <p className="px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">
+                    Sugerencias
+                  </p>
+                  {searchSuggestions.map((suggestion) => (
+                    <button
+                      key={suggestion}
+                      type="button"
+                      onClick={() => {
+                        setSearch(suggestion);
+                        setCurrentPage(1);
+                        setSearchFocused(false);
+                      }}
+                      className="block w-full rounded-xl px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                    >
+                      {suggestion}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div>
@@ -358,11 +411,10 @@ export default function AdminOrdersPage() {
 
         {banner && (
           <div
-            className={`rounded-2xl border px-4 py-3 text-sm font-semibold shadow-sm ${
-              banner.kind === "success"
+            className={`rounded-2xl border px-4 py-3 text-sm font-semibold shadow-sm ${banner.kind === "success"
                 ? "border-emerald-200 bg-emerald-50 text-emerald-700"
                 : "border-rose-200 bg-rose-50 text-rose-700"
-            }`}
+              }`}
           >
             {banner.text}
           </div>
@@ -423,9 +475,9 @@ export default function AdminOrdersPage() {
                   const licensesCount = order.is_reverted
                     ? Number(order.released_license_count || 0)
                     : order.items.reduce(
-                        (sum, item) => sum + item.licenses.length,
-                        0
-                      );
+                      (sum, item) => sum + item.licenses.length,
+                      0
+                    );
 
                   const licensesPreview = getLicensesPreview(order);
 
@@ -454,6 +506,19 @@ export default function AdminOrdersPage() {
 
                           <div className="mt-3">
                             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                              Productos comprados
+                            </p>
+                            <div className="mt-1 space-y-1">
+                              {order.items.map((item) => (
+                                <p key={item.id} className="text-sm font-semibold text-slate-700">
+                                  {item.product_name}
+                                  {item.variant_name ? ` - ${item.variant_name}` : ""}
+                                  <span className="ml-1 font-normal text-slate-500">x{item.quantity}</span>
+                                </p>
+                              ))}
+                            </div>
+
+                            <p className="mt-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
                               Licencias
                             </p>
                             <p className="mt-1 text-sm font-medium text-slate-700">
@@ -570,11 +635,10 @@ export default function AdminOrdersPage() {
                       key={item}
                       type="button"
                       onClick={() => handlePageChange(item)}
-                      className={`flex h-11 min-w-[44px] items-center justify-center rounded-2xl border px-3 text-sm font-semibold transition ${
-                        effectiveCurrentPage === item
+                      className={`flex h-11 min-w-[44px] items-center justify-center rounded-2xl border px-3 text-sm font-semibold transition ${effectiveCurrentPage === item
                           ? "border-slate-900 bg-slate-900 text-white"
                           : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                      }`}
+                        }`}
                     >
                       {item}
                     </button>

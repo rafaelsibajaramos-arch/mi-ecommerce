@@ -30,10 +30,16 @@ type OrderItemRow = {
   id: string;
   order_id: string;
   product_id: string;
+  variant_id: string | null;
   quantity: number | null;
   unit_price: number | null;
   product_name: string | null;
   variant_name: string | null;
+};
+
+type ProductVariantRow = {
+  id: string;
+  name: string | null;
 };
 
 type ProductRow = {
@@ -269,7 +275,7 @@ export async function GET(request: NextRequest) {
         const { data, error } = await supabaseAdmin
           .from("order_items")
           .select(
-            "id, order_id, product_id, quantity, unit_price, product_name, variant_name"
+            "id, order_id, product_id, variant_id, quantity, unit_price, product_name, variant_name"
           )
           .in("order_id", chunk)
           .range(from, to);
@@ -284,8 +290,16 @@ export async function GET(request: NextRequest) {
     const productIds = Array.from(
       new Set(rawItems.map((item) => item.product_id).filter(Boolean))
     );
+    const variantIds = Array.from(
+      new Set(
+        rawItems
+          .map((item) => item.variant_id)
+          .filter((variantId): variantId is string => Boolean(variantId))
+      )
+    );
 
     const productsMap = new Map<string, ProductRow>();
+    const variantsMap = new Map<string, ProductVariantRow>();
 
     if (productIds.length > 0) {
       const productsData = await fetchAllRowsInChunks<ProductRow>({
@@ -308,6 +322,27 @@ export async function GET(request: NextRequest) {
       productsData.forEach((product) => {
         productsMap.set(product.id, product);
       });
+    }
+
+    if (variantIds.length > 0) {
+      const variantsData = await fetchAllRowsInChunks<ProductVariantRow>({
+        ids: variantIds,
+        chunkSize: 100,
+        queryBuilder: async (chunk, from, to) => {
+          const { data, error } = await supabaseAdmin
+            .from("product_variants")
+            .select("id, name")
+            .in("id", chunk)
+            .range(from, to);
+
+          return {
+            data: (data as ProductVariantRow[]) || [],
+            error: error ? { message: error.message } : null,
+          };
+        },
+      });
+
+      variantsData.forEach((variant) => variantsMap.set(variant.id, variant));
     }
 
     const rawLicenses = await fetchAllRowsInChunks<LicenseRow>({
@@ -395,7 +430,8 @@ export async function GET(request: NextRequest) {
           price: Number(item.unit_price || 0),
           product_id: item.product_id,
           product_name: item.product_name || product?.name || "Producto",
-          variant_name: item.variant_name || null,
+          variant_name:
+            item.variant_name || variantsMap.get(item.variant_id || "")?.name || null,
           product_description: product?.description || null,
           product_category: product?.category || null,
           licenses: itemLicenses.map((license) => ({
