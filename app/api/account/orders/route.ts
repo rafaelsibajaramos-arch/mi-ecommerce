@@ -64,12 +64,10 @@ export async function GET(request: NextRequest) {
       global: { headers: { Authorization: `Bearer ${token}` } },
     });
 
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
+    const { data: claimsData, error: authError } = await supabase.auth.getClaims(token);
+    const userId = String(claimsData?.claims?.sub || "").trim();
 
-    if (authError || !user) {
+    if (authError || !userId) {
       return NextResponse.json({ ok: false, error: "Sesión inválida." }, { status: 401 });
     }
 
@@ -86,7 +84,7 @@ export async function GET(request: NextRequest) {
     let pageQuery = supabase
       .from("orders")
       .select("id, order_number, user_id, total, status, created_at", { count: "exact" })
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .eq("is_reverted", false)
       .order("created_at", { ascending: false })
       .range(offset, offset + pageSize - 1);
@@ -95,7 +93,7 @@ export async function GET(request: NextRequest) {
       ? supabase
           .from("orders")
           .select("total")
-          .eq("user_id", user.id)
+          .eq("user_id", userId)
           .eq("is_reverted", false)
           .limit(1500)
       : null;
@@ -132,7 +130,7 @@ export async function GET(request: NextRequest) {
           .from("product_licenses")
           .select("id, product_id, license_text, assigned_order_id, assigned_order_item_id")
           .in("assigned_order_id", orderIds)
-          .eq("assigned_user_id", user.id)
+          .eq("assigned_user_id", userId)
           .eq("status", "assigned"),
       ]);
 

@@ -61,6 +61,8 @@ type CategoryItem = { name: string; count: number };
 type CatalogSnapshot = {
   items: CatalogItem[];
   categories: CategoryItem[];
+  comboChildProductIds: string[];
+  comboChildVariantIds: string[];
 };
 
 function requireEnv(name: string) {
@@ -100,6 +102,8 @@ const loadCatalogSnapshot = unstable_cache(
     if (productsError) throw new Error(productsError.message);
 
     const products = (productsData || []) as Product[];
+    const comboChildProductIds = new Set<string>();
+    const comboChildVariantIds = new Set<string>();
     const variableIds = products
       .filter((product) => product.product_type === "variable")
       .map((product) => product.id);
@@ -146,6 +150,8 @@ const loadCatalogSnapshot = unstable_cache(
       const childVariantIds = Array.from(
         new Set(components.map((row) => row.child_variant_id).filter(Boolean) as string[])
       );
+      childProductIds.forEach((id) => comboChildProductIds.add(id));
+      childVariantIds.forEach((id) => comboChildVariantIds.add(id));
 
       const [childProductsResult, childVariantsResult] = await Promise.all([
         childProductIds.length
@@ -286,7 +292,12 @@ const loadCatalogSnapshot = unstable_cache(
         .map(([name, count]) => ({ name, count })),
     ];
 
-    return { items, categories };
+    return {
+      items,
+      categories,
+      comboChildProductIds: Array.from(comboChildProductIds),
+      comboChildVariantIds: Array.from(comboChildVariantIds),
+    };
   },
   ["public-catalog-v2"],
   { revalidate: 60, tags: ["public-catalog"] }
@@ -296,7 +307,7 @@ export async function GET(request: NextRequest) {
   try {
     const params = request.nextUrl.searchParams;
     const page = Math.max(1, Number(params.get("page") || 1));
-    const pageSize = Math.max(1, Math.min(24, Number(params.get("pageSize") || 12)));
+    const pageSize = Math.max(1, Math.min(100, Number(params.get("pageSize") || 12)));
     const category = (params.get("category") || "Todas").trim();
     const search = (params.get("search") || "").trim().toLowerCase();
 
@@ -317,6 +328,8 @@ export async function GET(request: NextRequest) {
         ok: true,
         items,
         categories: snapshot.categories,
+        comboChildProductIds: snapshot.comboChildProductIds,
+        comboChildVariantIds: snapshot.comboChildVariantIds,
         total: filtered.length,
         page,
         pageSize,

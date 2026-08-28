@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowDownLeft,
@@ -68,18 +68,6 @@ function getPreviousMonthRange(): DateRange {
   const { year, month } = getBogotaDateParts();
   const previous = new Date(Date.UTC(year, month - 2, 1));
   return buildMonthRange(previous.getUTCFullYear(), previous.getUTCMonth() + 1);
-}
-
-function dateInputToStart(value: string) {
-  if (!value) return null;
-  const date = new Date(`${value}T00:00:00.000-05:00`);
-  return Number.isFinite(date.getTime()) ? date.getTime() : null;
-}
-
-function dateInputToEnd(value: string) {
-  if (!value) return null;
-  const date = new Date(`${value}T23:59:59.999-05:00`);
-  return Number.isFinite(date.getTime()) ? date.getTime() : null;
 }
 
 function formatInputDate(value: string) {
@@ -196,29 +184,80 @@ export default function WalletPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [dateFrom, setDateFrom] = useState(initialRange.from);
   const [dateTo, setDateTo] = useState(initialRange.to);
+  const [totalTransactionCount, setTotalTransactionCount] = useState(0);
+  const [periodSales, setPeriodSales] = useState(0);
+  const [periodCredits, setPeriodCredits] = useState(0);
+  const [creditCount, setCreditCount] = useState(0);
 
-  const loadWallet = async (showRefreshing = false) => {
+  const loadWallet = useCallback(async (showRefreshing = false) => {
     if (showRefreshing) setRefreshing(true);
 
     const {
-      data: { user },
-    } = await supabase.auth.getUser();
+      data: { session },
+    } = await supabase.auth.getSession();
 
-    if (!user) {
+    if (!session?.access_token) {
       router.push("/login");
       return;
     }
 
-    const { data: txData } = await supabase
-      .from("wallet_transactions")
-      .select("id, type, amount, note, created_at")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false });
+    if (!dateFrom || !dateTo || dateFrom > dateTo) {
+      setTransactions([]);
+      setTotalTransactionCount(0);
+      setPeriodSales(0);
+      setPeriodCredits(0);
+      setCreditCount(0);
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
 
-    setTransactions((txData as WalletTransaction[]) || []);
-    setLoading(false);
-    setRefreshing(false);
-  };
+    const params = new URLSearchParams({
+      from: dateFrom,
+      to: dateTo,
+      filter,
+      page: String(currentPage),
+      pageSize: String(PAGE_SIZE),
+    });
+
+    try {
+      const response = await fetch(`/api/account/wallet/summary?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        cache: "no-store",
+      });
+      const result = (await response.json().catch(() => null)) as {
+        ok?: boolean;
+        error?: string;
+        transactions?: WalletTransaction[];
+        totals?: {
+          sales?: number;
+          credits?: number;
+          creditCount?: number;
+          transactionCount?: number;
+        };
+        pagination?: { total?: number };
+      } | null;
+
+      if (!response.ok || !result?.ok) {
+        throw new Error(result?.error || "No se pudo cargar la billetera.");
+      }
+
+      setTransactions(result.transactions || []);
+      setTotalTransactionCount(Number(result.pagination?.total || 0));
+      setPeriodSales(Number(result.totals?.sales || 0));
+      setPeriodCredits(Number(result.totals?.credits || 0));
+      setCreditCount(Number(result.totals?.creditCount || 0));
+    } catch {
+      setTransactions([]);
+      setTotalTransactionCount(0);
+      setPeriodSales(0);
+      setPeriodCredits(0);
+      setCreditCount(0);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [currentPage, dateFrom, dateTo, filter, router]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -226,54 +265,13 @@ export default function WalletPage() {
     }, 0);
 
     return () => window.clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router]);
+  }, [loadWallet]);
 
   const rangeIsValid = !dateFrom || !dateTo || dateFrom <= dateTo;
-
-  const periodTransactions = useMemo(() => {
-    if (!rangeIsValid) return [];
-
-    const start = dateInputToStart(dateFrom);
-    const end = dateInputToEnd(dateTo);
-
-    return transactions.filter((tx) => {
-      const txTime = new Date(tx.created_at).getTime();
-      if (!Number.isFinite(txTime)) return false;
-      if (start !== null && txTime < start) return false;
-      if (end !== null && txTime > end) return false;
-      return true;
-    });
-  }, [dateFrom, dateTo, rangeIsValid, transactions]);
-
-  const filteredTransactions = useMemo(() => {
-    if (filter === "all") return periodTransactions;
-    return periodTransactions.filter((tx) => getTransactionKind(tx) === filter);
-  }, [filter, periodTransactions]);
-
-  const periodSales = useMemo(() => {
-    return periodTransactions.reduce((sum, tx) => {
-      return getTransactionKind(tx) === "debit"
-        ? sum + Number(tx.amount || 0)
-        : sum;
-    }, 0);
-  }, [periodTransactions]);
-
-  const periodCredits = useMemo(() => {
-    return periodTransactions.reduce((sum, tx) => {
-      return getTransactionKind(tx) === "credit"
-        ? sum + Number(tx.amount || 0)
-        : sum;
-    }, 0);
-  }, [periodTransactions]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredTransactions.length / PAGE_SIZE));
+  const filteredTransactions = transactions;
+  const totalPages = Math.max(1, Math.ceil(totalTransactionCount / PAGE_SIZE));
   const effectiveCurrentPage = Math.min(currentPage, totalPages);
-
-  const paginatedTransactions = useMemo(() => {
-    const start = (effectiveCurrentPage - 1) * PAGE_SIZE;
-    return filteredTransactions.slice(start, start + PAGE_SIZE);
-  }, [effectiveCurrentPage, filteredTransactions]);
+  const paginatedTransactions = filteredTransactions;
 
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
@@ -292,9 +290,6 @@ export default function WalletPage() {
   };
 
   const periodLabel = `${formatInputDate(dateFrom)} — ${formatInputDate(dateTo)}`;
-  const creditCount = periodTransactions.filter(
-    (tx) => getTransactionKind(tx) === "credit"
-  ).length;
 
   if (loading) {
     return (
@@ -417,7 +412,7 @@ export default function WalletPage() {
               <History className="h-4 w-4" />
               <p className="text-xs font-semibold">Movimientos</p>
             </div>
-            <p className="mt-2 text-xl font-black text-white">{periodTransactions.length}</p>
+            <p className="mt-2 text-xl font-black text-white">{totalTransactionCount}</p>
             <p className="mt-1 text-[11px] text-white/35">En el período</p>
           </div>
         </div>
@@ -434,7 +429,7 @@ export default function WalletPage() {
                 </p>
                 <h2 className="mt-1 text-lg font-extrabold">Movimientos</h2>
               </div>
-              <span className="text-xs text-white/40">{filteredTransactions.length}</span>
+              <span className="text-xs text-white/40">{totalTransactionCount}</span>
             </div>
 
             <div className="mt-3 grid grid-cols-3 gap-2 rounded-2xl bg-black/20 p-1">
@@ -511,7 +506,7 @@ export default function WalletPage() {
             </div>
           )}
 
-          {filteredTransactions.length > PAGE_SIZE ? (
+          {totalTransactionCount > PAGE_SIZE ? (
             <div className="flex items-center justify-between border-t border-white/10 px-4 py-3 sm:px-5">
               <button
                 type="button"

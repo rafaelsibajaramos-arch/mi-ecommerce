@@ -10,6 +10,12 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60; // segundos máx en Vercel
 
 const PROVIDER = "BREB_LLAVES";
+const BANK_MATCH_WINDOW_MS = 5 * 60 * 1000;
+const MAX_UNSEEN_EMAILS_PER_RUN = 10;
+const MAX_REPAIR_PAYMENTS_PER_RUN = 10;
+const MAX_RECONCILE_PAYMENTS_PER_RUN = 10;
+const MAX_MATCH_CANDIDATES = 25;
+const MAX_RECONCILE_TOPUP_CANDIDATES = 100;
 
 function env(name: string) {
     const v = process.env[name]?.trim();
@@ -88,14 +94,16 @@ async function matchPendingTopups(
     supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
     payment: BankPaymentForMatch
 ) {
+    const activeSince = new Date(Date.now() - BANK_MATCH_WINDOW_MS).toISOString();
     const { data: pendingTopups, error } = await supabaseAdmin
         .from("wallet_topups")
         .select("id, payer_origin, normalized_payer_origin")
         .eq("status", "PENDING")
         .eq("provider", PROVIDER)
         .eq("amount", payment.amount)
+        .gte("created_at", activeSince)
         .order("created_at", { ascending: true }) // el más antiguo primero (FIFO justo)
-        .limit(50);
+        .limit(MAX_MATCH_CANDIDATES);
 
     if (error) throw new Error(error.message);
     if (!pendingTopups || pendingTopups.length === 0) return false;
@@ -126,15 +134,17 @@ async function matchPendingTopups(
 }
 
 async function reconcileUnusedBankPayments(supabaseAdmin: ReturnType<typeof createSupabaseAdmin>) {
+    const activeSince = new Date(Date.now() - BANK_MATCH_WINDOW_MS).toISOString();
     const { data: payments, error } = await supabaseAdmin
         .from("bank_payment_notifications")
         .select("id, amount, payer_origin, normalized_payer_origin")
         .eq("provider", PROVIDER)
         .eq("is_used", false)
         .is("matched_topup_id", null)
+        .gte("created_at", activeSince)
         .order("paid_at", { ascending: false, nullsFirst: false })
         .order("created_at", { ascending: false })
-        .limit(100);
+        .limit(MAX_RECONCILE_PAYMENTS_PER_RUN);
 
     if (error) throw new Error(error.message);
     if (!payments || payments.length === 0) return 0;
@@ -163,8 +173,9 @@ async function reconcileUnusedBankPayments(supabaseAdmin: ReturnType<typeof crea
         .eq("status", "PENDING")
         .eq("provider", PROVIDER)
         .in("amount", amounts)
+        .gte("created_at", activeSince)
         .order("created_at", { ascending: true })
-        .limit(500);
+        .limit(MAX_RECONCILE_TOPUP_CANDIDATES);
 
     if (pendingError) throw new Error(pendingError.message);
     if (!pendingTopups || pendingTopups.length === 0) return 0;
@@ -239,7 +250,7 @@ async function repairIncompleteBankMatches(supabaseAdmin: ReturnType<typeof crea
         .not("matched_topup_id", "is", null)
         .lt("updated_at", staleBefore)
         .order("updated_at", { ascending: true })
-        .limit(100);
+        .limit(MAX_REPAIR_PAYMENTS_PER_RUN);
 
     if (error) throw new Error(error.message);
     if (!payments || payments.length === 0) {
@@ -367,7 +378,10 @@ export async function GET(request: NextRequest) {
         const lock = await client.getMailboxLock(mailbox);
 
         try {
-            const unseenUids = await client.search({ seen: false }, { uid: true });
+            const searchResult = await client.search({ seen: false }, { uid: true });
+            const unseenUids = [...(searchResult || [])]
+                .sort((a, b) => a - b)
+                .slice(0, MAX_UNSEEN_EMAILS_PER_RUN);
 
             if (!unseenUids || unseenUids.length === 0) {
                 results.push({ skipped: "Sin correos nuevos." });

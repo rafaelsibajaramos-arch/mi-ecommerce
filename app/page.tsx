@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { useCart } from "../context/CartContext";
@@ -48,9 +49,12 @@ function ProductImage({
   }
 
   return (
-    <img
+    <Image
       src={imageSrc}
       alt={alt}
+      width={800}
+      height={600}
+      sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
       loading="lazy"
       onError={() => setFailed(true)}
       className={className}
@@ -289,11 +293,11 @@ export default function HomePage() {
         setReceiptMessage("");
 
         const {
-          data: { user },
-          error: userError,
-        } = await supabase.auth.getUser();
+          data: { session },
+        } = await supabase.auth.getSession();
+        const user = session?.user;
 
-        if (userError || !user) {
+        if (!user) {
           return;
         }
 
@@ -515,6 +519,68 @@ export default function HomePage() {
 
     if (showLoader) setLoading(true);
     setMessage("");
+
+    if (showLoader) {
+      try {
+        const pageSize = 100;
+        const firstResponse = await fetch(`/api/catalog?page=1&pageSize=${pageSize}`, {
+          cache: "no-store",
+          signal: AbortSignal.timeout(SUPABASE_QUERY_TIMEOUT_MS),
+        });
+        const firstResult = (await firstResponse.json().catch(() => null)) as {
+          ok?: boolean;
+          items?: CatalogItem[];
+          total?: number;
+          comboChildProductIds?: string[];
+          comboChildVariantIds?: string[];
+          error?: string;
+        } | null;
+
+        if (!firstResponse.ok || !firstResult?.ok) {
+          throw new Error(firstResult?.error || "Catalog API unavailable.");
+          throw new Error(firstResult?.error || `CatÃ¡logo no disponible (HTTP ${firstResponse.status}).`);
+        }
+
+        const allItems = [...(firstResult.items || [])];
+        const total = Number(firstResult.total || allItems.length);
+        let page = 2;
+
+        while (allItems.length < total && page <= 20) {
+          const nextResponse = await fetch(`/api/catalog?page=${page}&pageSize=${pageSize}`, {
+            cache: "no-store",
+            signal: AbortSignal.timeout(SUPABASE_QUERY_TIMEOUT_MS),
+          });
+          const nextResult = (await nextResponse.json().catch(() => null)) as {
+            ok?: boolean;
+            items?: CatalogItem[];
+            error?: string;
+          } | null;
+
+          if (!nextResponse.ok || !nextResult?.ok) {
+            throw new Error(nextResult?.error || "Catalog API unavailable.");
+            throw new Error(nextResult?.error || `CatÃ¡logo no disponible (HTTP ${nextResponse.status}).`);
+          }
+
+          const nextItems = nextResult.items || [];
+          if (nextItems.length === 0) break;
+          allItems.push(...nextItems);
+          page += 1;
+        }
+
+        if (requestId !== catalogRequestIdRef.current) return;
+
+        catalogItemsRef.current = allItems;
+        comboChildProductIdsRef.current = new Set(firstResult.comboChildProductIds || []);
+        comboChildVariantIdsRef.current = new Set(firstResult.comboChildVariantIds || []);
+        setAllCatalogItems(allItems);
+        catalogDirtyRef.current = false;
+        setLoading(false);
+        setMessage("");
+        return;
+      } catch {
+        // Si la API cacheada falla, conservamos el fallback directo existente.
+      }
+    }
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {

@@ -36,11 +36,11 @@ export default function AccountPage() {
     // Carga el usuario autenticado y recupera su perfil desde la base de datos.
     const loadUser = async () => {
       const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
+        data: { session },
+      } = await supabase.auth.getSession();
+      const user = session?.user;
 
-      if (userError || !user) {
+      if (!user) {
         router.push("/login");
         return;
       }

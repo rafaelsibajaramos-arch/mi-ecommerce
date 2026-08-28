@@ -1,19 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { supabase } from "../../../lib/supabase";
-
-type ActiveAccess = {
-  access_id: string;
-  user_id: string | null;
-  customer_email: string;
-  customer_full_name: string;
-  order_number: number | null;
-  product_name: string;
-  variant_name: string | null;
-  expires_at: string;
-  license_id: string;
-};
 
 type LicenseAlert = {
   id: string;
@@ -49,7 +37,6 @@ type LicenseAlert = {
   manual_license_text?: string | null;
   manual_product_note?: string | null;
   manual_note?: string | null;
-  active_accesses?: ActiveAccess[];
 };
 
 type BannerState = {
@@ -88,24 +75,6 @@ function formatDateTime(value: string | null | undefined) {
   }
 }
 
-function formatDate(value: string | null | undefined) {
-  if (!value) return "Sin fecha";
-
-  try {
-    return new Date(value).toLocaleDateString("es-CO", {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    });
-  } catch {
-    return "Sin fecha";
-  }
-}
-
-function formatOrderNumber(value: number | null | undefined) {
-  return value ? `#${String(value).padStart(5, "0")}` : "Sin pedido";
-}
-
 function getAlertLabel(alert: LicenseAlert) {
   if (alert.status === "completed") return "Realizada";
   if (alert.is_due) return "Pendiente ahora";
@@ -128,9 +97,9 @@ export default function AdminLicenseAlertsPage() {
   const [alerts, setAlerts] = useState<LicenseAlert[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [banner, setBanner] = useState<BannerState>(null);
-  const [filter, setFilter] = useState<"pending" | "due" | "completed" | "all">("pending");
+  const [filter, setFilter] = useState<"pending" | "due" | "completed" | "renewal" | "all">("pending");
+  const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize] = useState(10);
   const [stats, setStats] = useState<AlertStats>({
@@ -172,6 +141,7 @@ export default function AdminLicenseAlertsPage() {
 
       const params = new URLSearchParams({
         filter,
+        search,
         page: String(page),
         pageSize: String(pageSize),
       });
@@ -214,7 +184,7 @@ export default function AdminLicenseAlertsPage() {
     } finally {
       setLoading(false);
     }
-  }, [filter, page, pageSize]);
+  }, [filter, page, pageSize, search]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -223,10 +193,6 @@ export default function AdminLicenseAlertsPage() {
 
     return () => window.clearTimeout(timer);
   }, [loadAlerts]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [filter]);
 
   const createManualAlert = async (event: FormEvent) => {
     event.preventDefault();
@@ -312,7 +278,7 @@ export default function AdminLicenseAlertsPage() {
 
       setBanner({
         kind: "success",
-        text: "Alerta marcada como realizada. La licencia quedó disponible si aún no venció para ti.",
+        text: "Alerta realizada y eliminada. Ya puedes crear una nueva renovación para esta cuenta.",
       });
       window.dispatchEvent(new Event("license-alerts-updated"));
       await loadAlerts();
@@ -326,59 +292,6 @@ export default function AdminLicenseAlertsPage() {
       });
     } finally {
       setSavingId(null);
-    }
-  };
-
-  const deleteAlert = async (alertId: string) => {
-    const confirmed = window.confirm(
-      "¿Seguro que quieres borrar esta alerta? Esta acción solo elimina el aviso; no cambia la licencia ni el pedido."
-    );
-
-    if (!confirmed) return;
-
-    setDeletingId(alertId);
-    setBanner(null);
-
-    try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session?.access_token) {
-        throw new Error("Tu sesión expiró. Inicia sesión de nuevo.");
-      }
-
-      const response = await fetch(`/api/admin/license-alerts?alertId=${encodeURIComponent(alertId)}`, {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
-      });
-
-      const result = await response.json().catch(() => null);
-
-      if (!response.ok) {
-        throw new Error(result?.error || "No se pudo borrar la alerta.");
-      }
-
-      setBanner({ kind: "success", text: "Alerta borrada correctamente." });
-      window.dispatchEvent(new Event("license-alerts-updated"));
-
-      if (alerts.length === 1 && page > 1) {
-        setPage((currentPage) => Math.max(1, currentPage - 1));
-      } else {
-        await loadAlerts();
-      }
-    } catch (error) {
-      setBanner({
-        kind: "error",
-        text:
-          error instanceof Error
-            ? error.message
-            : "Ocurrió un error borrando la alerta.",
-      });
-    } finally {
-      setDeletingId(null);
     }
   };
 
@@ -410,11 +323,10 @@ export default function AdminLicenseAlertsPage() {
 
       {banner && (
         <div
-          className={`rounded-2xl border px-4 py-3 text-sm font-semibold shadow-sm ${
-            banner.kind === "success"
-              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-              : "border-rose-200 bg-rose-50 text-rose-700"
-          }`}
+          className={`rounded-2xl border px-4 py-3 text-sm font-semibold shadow-sm ${banner.kind === "success"
+            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+            : "border-rose-200 bg-rose-50 text-rose-700"
+            }`}
         >
           {banner.text}
         </div>
@@ -520,26 +432,44 @@ export default function AdminLicenseAlertsPage() {
       </div>
 
       <div className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-wrap gap-2">
-          {([
-            ["pending", "Pendientes"],
-            ["due", "Para realizar"],
-            ["completed", "Realizadas"],
-            ["all", "Todas"],
-          ] as const).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setFilter(key)}
-              className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
-                filter === key
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="relative min-w-0 flex-1">
+            <label htmlFor="alert-search" className="sr-only">Buscar alerta</label>
+            <input
+              id="alert-search"
+              value={search}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setPage(1);
+              }}
+              placeholder="Buscar por correo o licencia..."
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white focus:ring-2 focus:ring-slate-200"
+            />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {([
+              ["pending", "Pendientes"],
+              ["due", "Para realizar"],
+              ["renewal", "Renovaciones"],
+              ["completed", "Realizadas"],
+              ["all", "Todas"],
+            ] as const).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => {
+                  setFilter(key);
+                  setPage(1);
+                }}
+                className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${filter === key
                   ? "bg-slate-900 text-white"
                   : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
+                  }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -557,138 +487,74 @@ export default function AdminLicenseAlertsPage() {
             No hay alertas para este filtro.
           </div>
         ) : (
-          <div className="divide-y divide-slate-100">
+          <div className="grid gap-2 p-2 sm:grid-cols-2 sm:p-3 lg:grid-cols-3">
             {alerts.map((alert) => (
-              <article key={alert.id} className="space-y-4 px-5 py-5">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
+              <article
+                key={alert.id}
+                className={`rounded-xl border bg-slate-50/80 p-2.5 shadow-sm transition hover:shadow-md ${alert.is_due && alert.status === "pending"
+                  ? "border-red-200"
+                  : alert.status === "completed"
+                    ? "border-emerald-200"
+                    : "border-slate-200"
+                  }`}
+              >
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
                       <span
-                        className={`rounded-full border px-3 py-1 text-xs font-bold ${getAlertClasses(
+                        className={`rounded-full border px-2 py-0.5 text-xs font-bold ${getAlertClasses(
                           alert
                         )}`}
                       >
                         {getAlertLabel(alert)}
                       </span>
 
-                      <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
-                        {formatOrderNumber(alert.order_number)}
-                      </span>
+                      <h3 className="mt-1 break-words text-lg font-black leading-tight text-slate-900" title={alert.product_name}>
+                        {alert.product_name}
+                        {alert.variant_name ? ` - ${alert.variant_name}` : ""}
+                      </h3>
                     </div>
 
-                    <h3 className="mt-3 text-lg font-black text-slate-900">
-                      {alert.product_name}
-                      {alert.variant_name ? ` - ${alert.variant_name}` : ""}
-                    </h3>
-
-                    <p className="mt-1 text-sm text-slate-600">
-                      {alert.message ||
-                        "Cambiar contraseña porque el acceso del cliente venció antes que la licencia real."}
-                    </p>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    {alert.status === "pending" && (
-                      <button
-                        type="button"
-                        disabled={savingId === alert.id || deletingId === alert.id}
-                        onClick={() => void completeAlert(alert.id)}
-                        className="rounded-2xl bg-slate-900 px-5 py-3 text-sm font-bold text-white transition hover:bg-slate-700 disabled:opacity-70"
-                      >
-                        {savingId === alert.id ? "Marcando..." : "Marcar realizada"}
-                      </button>
-                    )}
-
-                    <button
-                      type="button"
-                      disabled={deletingId === alert.id || savingId === alert.id}
-                      onClick={() => void deleteAlert(alert.id)}
-                      className="rounded-2xl border border-red-200 bg-white px-5 py-3 text-sm font-bold text-red-600 transition hover:bg-red-50 disabled:opacity-70"
-                    >
-                      {deletingId === alert.id ? "Borrando..." : "Borrar"}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-                      Cliente
-                    </p>
-                    <p className="mt-2 text-sm font-bold text-slate-900">
-                      {alert.customer_full_name}
-                    </p>
-                    <p className="mt-1 break-all text-xs text-slate-500">
-                      {alert.customer_email}
-                    </p>
-                  </div>
-
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-                      Vencimiento cliente
-                    </p>
-                    <p className="mt-2 text-sm font-bold text-slate-900">
-                      {formatDateTime(alert.access_expires_at || alert.due_at)}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      Duración vendida: {alert.access_duration_months || "N/D"} mes(es)
-                    </p>
-                  </div>
-
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-                      Facturación real
-                    </p>
-                    <p className="mt-2 text-sm font-bold text-slate-900">
-                      {alert.billing_duration_days
-                        ? `${alert.billing_duration_days} día(s)`
-                        : alert.billing_duration_months
-                          ? `${alert.billing_duration_months} mes(es)`
-                          : "30 día(s)"}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      Vence para ti: {formatDate(alert.billing_ends_at)}
-                    </p>
-                  </div>
-
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-                      Licencia
-                    </p>
-                    <p className="mt-2 break-all text-xs font-semibold text-slate-700">
-                      {alert.license_text}
-                    </p>
-                  </div>
-                </div>
-
-                {alert.active_accesses && alert.active_accesses.length > 0 && (
-                  <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4">
-                    <p className="text-sm font-black text-sky-900">
-                      Clientes que deben conservar acceso a esta misma licencia
-                    </p>
-                    <div className="mt-3 grid gap-2 md:grid-cols-2">
-                      {alert.active_accesses.map((access) => (
-                        <div
-                          key={access.access_id}
-                          className="rounded-xl border border-sky-100 bg-white p-3 text-sm"
+                    <div className="flex shrink-0 gap-1">
+                      {alert.status === "pending" && (
+                        <button
+                          type="button"
+                          disabled={savingId === alert.id}
+                          onClick={() => void completeAlert(alert.id)}
+                          aria-label="Marcar realizada"
+                          title="Marcar realizada"
+                          className="rounded-lg bg-slate-900 px-2 py-1.5 text-xs font-bold text-white transition hover:bg-slate-700 disabled:opacity-70"
                         >
-                          <p className="font-bold text-slate-900">
-                            {access.customer_full_name}
-                          </p>
-                          <p className="break-all text-xs text-slate-500">
-                            {access.customer_email}
-                          </p>
-                          <p className="mt-1 text-xs font-semibold text-sky-700">
-                            Pedido {formatOrderNumber(access.order_number)} · vence {formatDateTime(access.expires_at)}
-                          </p>
-                        </div>
-                      ))}
+                          {savingId === alert.id ? "..." : "OK"}
+                        </button>
+                      )}
                     </div>
                   </div>
-                )}
+                </div>
+
+                <div className="mt-1.5 divide-y divide-slate-200/80 border-t border-slate-200/80">
+                  <div className="flex items-center justify-between gap-2 py-1.5">
+                    <p className="shrink-0 text-xs font-bold uppercase tracking-[0.12em] text-slate-400">Correo</p>
+                    <p className="break-all text-right text-sm font-semibold text-slate-700">{alert.customer_email}</p>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 py-1.5">
+                    <p className="shrink-0 text-xs font-bold uppercase tracking-[0.12em] text-slate-400">Vence</p>
+                    <p className="text-right text-sm font-semibold text-slate-700">{formatDateTime(alert.access_expires_at || alert.due_at)}</p>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 py-1.5">
+                    <p className="shrink-0 text-xs font-bold uppercase tracking-[0.12em] text-slate-400">Licencia</p>
+                    <p className="break-words text-right font-mono text-sm font-semibold text-slate-700" title={alert.license_text}>{alert.license_text}</p>
+                  </div>
+                </div>
+
+                {alert.manual_note ? (
+                  <p className="mt-1.5 rounded-lg border border-amber-100 bg-amber-50 px-2.5 py-1.5 text-sm text-amber-900">
+                    {alert.manual_note}
+                  </p>
+                ) : null}
 
                 {alert.status === "completed" && (
-                  <p className="text-xs font-semibold text-emerald-700">
+                  <p className="mt-2 text-xs font-semibold text-emerald-700">
                     Realizada el {formatDateTime(alert.completed_at)}.
                   </p>
                 )}
@@ -704,6 +570,18 @@ export default function AdminLicenseAlertsPage() {
             </p>
 
             <div className="flex gap-2">
+              <label className="sr-only" htmlFor="alert-page">Ir a página</label>
+              <select
+                id="alert-page"
+                value={pagination.page}
+                onChange={(event) => setPage(Number(event.target.value))}
+                disabled={loading || pagination.totalPages <= 1}
+                className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 outline-none focus:border-slate-400 disabled:opacity-50"
+              >
+                {Array.from({ length: pagination.totalPages }, (_, index) => index + 1).map((pageNumber) => (
+                  <option key={pageNumber} value={pageNumber}>Página {pageNumber}</option>
+                ))}
+              </select>
               <button
                 type="button"
                 disabled={!pagination.hasPreviousPage || loading}

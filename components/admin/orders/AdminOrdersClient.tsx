@@ -16,6 +16,7 @@ type OrderItemRow = {
   id: string;
   order_id: string;
   product_id: string | null;
+  variant_id: string | null;
   quantity: number | null;
   unit_price: number | null;
   product_name: string | null;
@@ -27,6 +28,17 @@ type ProfileRow = {
   email: string | null;
   full_name: string | null;
   role?: string | null;
+};
+
+type CatalogProductRow = {
+  id: string;
+  name: string | null;
+};
+
+type CatalogVariantRow = {
+  id: string;
+  product_id: string;
+  name: string | null;
 };
 
 type LicenseRow = {
@@ -98,6 +110,14 @@ function truncateLicense(value: string, max = 72) {
   return `${value.slice(0, max)}...`;
 }
 
+function normalizeSearchText(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
 const PAGE_SIZE = 10;
 
 function buildPagination(current: number, total: number): Array<number | "..."> {
@@ -126,14 +146,8 @@ export default function AdminOrdersClient() {
   const [error, setError] = useState("");
   const [selectedOrder, setSelectedOrder] = useState<FormattedOrder | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
-
-  useEffect(() => {
-    checkAdminAndLoad();
-  }, []);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [search]);
+  const [catalogSuggestions, setCatalogSuggestions] = useState<string[]>([]);
+  const [searchFocused, setSearchFocused] = useState(false);
 
   function handlePageChange(page: number) {
     setCurrentPage(page);
@@ -200,7 +214,7 @@ export default function AdminOrdersClient() {
       const { data, error } = await supabase
         .from("order_items")
         .select(
-          "id, order_id, product_id, quantity, unit_price, product_name, variant_name"
+          "id, order_id, product_id, variant_id, quantity, unit_price, product_name, variant_name"
         )
         .in("order_id", orderIds);
 
@@ -241,6 +255,28 @@ export default function AdminOrdersClient() {
       }
     }
 
+    const [{ data: catalogProducts }, { data: catalogVariants }] = await Promise.all([
+      supabase.from("products").select("id, name").order("name"),
+      supabase.from("product_variants").select("id, product_id, name").order("name"),
+    ]);
+    const productNameMap = new Map<string, string>();
+    const variantNameMap = new Map<string, string>();
+
+    ((catalogProducts || []) as CatalogProductRow[]).forEach((product) => {
+      if (product.name) productNameMap.set(product.id, product.name);
+    });
+    ((catalogVariants || []) as CatalogVariantRow[]).forEach((variant) => {
+      if (variant.name) variantNameMap.set(variant.id, variant.name);
+    });
+
+    setCatalogSuggestions([
+      ...Array.from(productNameMap.values()),
+      ...((catalogVariants || []) as CatalogVariantRow[]).flatMap((variant) => {
+        const productName = productNameMap.get(variant.product_id);
+        return productName && variant.name ? [`${productName} - ${variant.name}`] : [];
+      }),
+    ]);
+
     const profileMap = new Map<string, ProfileRow>();
     profilesData.forEach((profile) => {
       profileMap.set(profile.id, profile);
@@ -255,13 +291,26 @@ export default function AdminOrdersClient() {
         .map((license) => {
           const matchedItem =
             orderItems.find((item) => item.id === license.assigned_order_item_id) ||
-            orderItems.find((item) => item.product_id === license.product_id);
+            orderItems.find(
+              (item) =>
+                item.product_id === license.product_id &&
+                item.variant_id === license.variant_id
+            ) ||
+            orderItems.find(
+              (item) => item.product_id === license.product_id && !license.variant_id
+            );
 
           return {
             id: license.id,
             license_text: license.license_text,
-            product_name: matchedItem?.product_name || "Producto",
-            variant_name: matchedItem?.variant_name || null,
+            product_name:
+              matchedItem?.product_name ||
+              productNameMap.get(license.product_id || "") ||
+              "Producto",
+            variant_name:
+              matchedItem?.variant_name ||
+              variantNameMap.get(license.variant_id || "") ||
+              null,
           };
         });
 
@@ -278,8 +327,9 @@ export default function AdminOrdersClient() {
           id: item.id,
           quantity: Number(item.quantity || 0),
           price: Number(item.unit_price || 0),
-          product_name: item.product_name || "Producto",
-          variant_name: item.variant_name || null,
+          product_name: item.product_name || productNameMap.get(item.product_id || "") || "Producto",
+          variant_name:
+            item.variant_name || variantNameMap.get(item.variant_id || "") || null,
           licenses: itemLicenses.map((license) => ({
             id: license.id,
             license_text: license.license_text,
@@ -304,9 +354,10 @@ export default function AdminOrdersClient() {
   }
 
   const filteredOrders = useMemo(() => {
-    const term = search.trim().toLowerCase();
+    const term = normalizeSearchText(search);
 
     if (!term) return orders;
+    const searchTerms = term.split(/\s+/).filter(Boolean);
 
     return orders.filter((order) => {
       const idText = (order.id || "").toLowerCase();
@@ -315,17 +366,30 @@ export default function AdminOrdersClient() {
       const licensesText = order.licenses
         .map(
           (license) =>
-            `${license.license_text} ${license.product_name || ""} ${
-              license.variant_name || ""
-            }`.toLowerCase()
+            `${license.license_text} ${license.product_name || ""} ${license.variant_name || ""
+              }`.toLowerCase()
         )
         .join(" ");
+      const itemsText = order.items
+        .map(
+          (item) =>
+            `${item.product_name} ${item.variant_name || ""} ${item.licenses
+              .map((license) => license.license_text)
+              .join(" ")}`.toLowerCase()
+        )
+        .join(" ");
+
+      const searchableText = normalizeSearchText(
+        [idText, numberText, emailText, licensesText, itemsText].join(" ")
+      );
 
       return (
         idText.includes(term) ||
         numberText.includes(term) ||
         emailText.includes(term) ||
-        licensesText.includes(term)
+        licensesText.includes(term) ||
+        itemsText.includes(term) ||
+        searchTerms.every((searchTerm) => searchableText.includes(searchTerm))
       );
     });
   }, [orders, search]);
@@ -334,24 +398,55 @@ export default function AdminOrdersClient() {
     return Math.max(1, Math.ceil(filteredOrders.length / PAGE_SIZE));
   }, [filteredOrders.length]);
 
-  useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(totalPages);
-    }
-  }, [currentPage, totalPages]);
+  const effectiveCurrentPage = Math.min(currentPage, totalPages);
 
   const paginatedOrders = useMemo(() => {
-    const start = (currentPage - 1) * PAGE_SIZE;
+    const start = (effectiveCurrentPage - 1) * PAGE_SIZE;
     const end = start + PAGE_SIZE;
     return filteredOrders.slice(start, end);
-  }, [filteredOrders, currentPage]);
+  }, [effectiveCurrentPage, filteredOrders]);
 
   const paginationItems = useMemo(() => {
-    return buildPagination(currentPage, totalPages);
-  }, [currentPage, totalPages]);
+    return buildPagination(effectiveCurrentPage, totalPages);
+  }, [effectiveCurrentPage, totalPages]);
 
-  const pageStart = filteredOrders.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
-  const pageEnd = Math.min(currentPage * PAGE_SIZE, filteredOrders.length);
+  const pageStart = filteredOrders.length === 0 ? 0 : (effectiveCurrentPage - 1) * PAGE_SIZE + 1;
+  const pageEnd = Math.min(effectiveCurrentPage * PAGE_SIZE, filteredOrders.length);
+
+  const searchSuggestions = useMemo(() => {
+    const values = new Set<string>(catalogSuggestions);
+
+    orders.forEach((order) => {
+      order.items.forEach((item) => {
+        const itemName = [item.product_name, item.variant_name].filter(Boolean).join(" - ");
+        if (itemName) values.add(itemName);
+      });
+
+      order.licenses.forEach((license) => {
+        const licenseName = [license.product_name, license.variant_name]
+          .filter(Boolean)
+          .join(" - ");
+        if (licenseName) values.add(licenseName);
+        if (license.license_text) values.add(license.license_text);
+      });
+    });
+
+    const term = normalizeSearchText(search);
+    if (!term) return [];
+
+    return Array.from(values)
+      .filter((value) => normalizeSearchText(value).includes(term))
+      .sort((first, second) => first.localeCompare(second, "es"))
+      .slice(0, 8);
+  }, [catalogSuggestions, orders, search]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void checkAdminAndLoad();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const totalRevenue = useMemo(() => {
     return orders.reduce((acc, order) => acc + Number(order.total || 0), 0);
@@ -377,17 +472,43 @@ export default function AdminOrdersClient() {
             </p>
           </div>
 
-          <div className="w-full lg:max-w-md">
+          <div className="relative w-full lg:max-w-md">
             <label className="mb-2 block text-sm font-medium text-slate-600">
               Buscar pedido
             </label>
             <input
               type="text"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setCurrentPage(1);
+              }}
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => window.setTimeout(() => setSearchFocused(false), 150)}
               placeholder="Buscar por ID, número, correo o licencia"
               className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400"
             />
+            {searchFocused && searchSuggestions.length > 0 && (
+              <div className="absolute inset-x-0 top-full z-20 mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white p-1 shadow-xl">
+                <p className="px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">
+                  Sugerencias
+                </p>
+                {searchSuggestions.map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    type="button"
+                    onClick={() => {
+                      setSearch(suggestion);
+                      setCurrentPage(1);
+                      setSearchFocused(false);
+                    }}
+                    className="block w-full rounded-xl px-3 py-2 text-left text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -477,7 +598,7 @@ export default function AdminOrdersClient() {
                               {order.licenses.length > 1 ? "s" : ""}
                             </p>
 
-                            {order.licenses.slice(0, 2).map((license) => (
+                            {order.licenses.map((license) => (
                               <div
                                 key={license.id}
                                 className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2"
@@ -494,11 +615,6 @@ export default function AdminOrdersClient() {
                               </div>
                             ))}
 
-                            {order.licenses.length > 2 && (
-                              <p className="text-xs text-slate-500">
-                                +{order.licenses.length - 2} más
-                              </p>
-                            )}
                           </>
                         )}
                       </div>
@@ -571,11 +687,10 @@ export default function AdminOrdersClient() {
                       key={item}
                       type="button"
                       onClick={() => handlePageChange(item)}
-                      className={`flex h-11 min-w-[44px] items-center justify-center rounded-2xl border px-3 text-sm font-semibold transition ${
-                        currentPage === item
-                          ? "border-slate-900 bg-slate-900 text-white"
-                          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                      }`}
+                      className={`flex h-11 min-w-[44px] items-center justify-center rounded-2xl border px-3 text-sm font-semibold transition ${currentPage === item
+                        ? "border-slate-900 bg-slate-900 text-white"
+                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                        }`}
                     >
                       {item}
                     </button>

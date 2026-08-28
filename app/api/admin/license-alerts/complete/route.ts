@@ -128,24 +128,6 @@ export async function POST(request: NextRequest) {
     const alert = alertData as LicenseAlertRow;
     const now = new Date().toISOString();
 
-    if (alert.status !== "completed") {
-      const { error: updateAlertError } = await auth.supabaseAdmin
-        .from("license_alerts")
-        .update({
-          status: "completed",
-          completed_at: now,
-          completed_by: auth.user.id,
-        })
-        .eq("id", alert.id);
-
-      if (updateAlertError) {
-        return jsonError(
-          `No se pudo marcar la alerta como realizada: ${updateAlertError.message}`,
-          500
-        );
-      }
-    }
-
     if (alert.access_id) {
       const { error: updateAccessError } = await auth.supabaseAdmin
         .from("license_accesses")
@@ -164,7 +146,19 @@ export async function POST(request: NextRequest) {
     }
 
     if (!alert.license_id) {
-      return NextResponse.json({ ok: true });
+      const { error: deleteAlertError } = await auth.supabaseAdmin
+        .from("license_alerts")
+        .delete()
+        .eq("id", alert.id);
+
+      if (deleteAlertError) {
+        return jsonError(
+          `La alerta fue procesada, pero no se pudo eliminar: ${deleteAlertError.message}`,
+          500
+        );
+      }
+
+      return NextResponse.json({ ok: true, deleted: true });
     }
 
     // IMPORTANTE: una licencia entregada no debe volver a venta de forma automática.
@@ -190,7 +184,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ ok: true });
+    const { error: deleteAlertError } = await auth.supabaseAdmin
+      .from("license_alerts")
+      .delete()
+      .eq("id", alert.id);
+
+    if (deleteAlertError) {
+      return jsonError(
+        `La alerta fue procesada, pero no se pudo eliminar: ${deleteAlertError.message}`,
+        500
+      );
+    }
+
+    return NextResponse.json({ ok: true, deleted: true });
   } catch (error) {
     return jsonError(
       error instanceof Error ? error.message : "Ocurrió un error inesperado.",

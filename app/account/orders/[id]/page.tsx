@@ -56,11 +56,11 @@ export default function OrderDetailPage() {
       setMessage("");
 
       const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
+        data: { session },
+      } = await supabase.auth.getSession();
+      const user = session?.user;
 
-      if (userError || !user) {
+      if (!user) {
         router.push("/login");
         return;
       }

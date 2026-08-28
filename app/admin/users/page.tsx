@@ -50,20 +50,12 @@ export default function AdminUsersPage() {
   const [passwordDrafts, setPasswordDrafts] = useState<Record<string, string>>({});
   const [currentPage, setCurrentPage] = useState(1);
 
-  useEffect(() => {
-    void loadUsers();
-  }, []);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [search]);
-
   function handlePageChange(page: number) {
     setCurrentPage(page);
     sectionTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  const loadUsers = async () => {
+  async function loadUsers() {
     setLoading(true);
     setMessage("");
     setMessageType("");
@@ -96,7 +88,7 @@ export default function AdminUsersPage() {
     setPasswordDrafts(initialPasswordDrafts);
     setCurrentPage(1);
     setLoading(false);
-  };
+  }
 
   const filteredUsers = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -114,24 +106,28 @@ export default function AdminUsersPage() {
     return Math.max(1, Math.ceil(filteredUsers.length / PAGE_SIZE));
   }, [filteredUsers.length]);
 
-  useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(totalPages);
-    }
-  }, [currentPage, totalPages]);
+  const effectiveCurrentPage = Math.min(currentPage, totalPages);
 
   const paginatedUsers = useMemo(() => {
-    const start = (currentPage - 1) * PAGE_SIZE;
+    const start = (effectiveCurrentPage - 1) * PAGE_SIZE;
     const end = start + PAGE_SIZE;
     return filteredUsers.slice(start, end);
-  }, [filteredUsers, currentPage]);
+  }, [effectiveCurrentPage, filteredUsers]);
 
   const paginationItems = useMemo(() => {
-    return buildPagination(currentPage, totalPages);
-  }, [currentPage, totalPages]);
+    return buildPagination(effectiveCurrentPage, totalPages);
+  }, [effectiveCurrentPage, totalPages]);
 
-  const pageStart = filteredUsers.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
-  const pageEnd = Math.min(currentPage * PAGE_SIZE, filteredUsers.length);
+  const pageStart = filteredUsers.length === 0 ? 0 : (effectiveCurrentPage - 1) * PAGE_SIZE + 1;
+  const pageEnd = Math.min(effectiveCurrentPage * PAGE_SIZE, filteredUsers.length);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadUsers();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const parseApiResponse = async (response: Response) => {
     const contentType = response.headers.get("content-type") || "";
@@ -430,11 +426,10 @@ export default function AdminUsersPage() {
 
       {message && (
         <div
-          className={`rounded-2xl border px-4 py-3 text-sm font-semibold shadow-sm ${
-            messageType === "success"
-              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-              : "border-rose-200 bg-rose-50 text-rose-700"
-          }`}
+          className={`rounded-2xl border px-4 py-3 text-sm font-semibold shadow-sm ${messageType === "success"
+            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+            : "border-rose-200 bg-rose-50 text-rose-700"
+            }`}
         >
           {message}
         </div>
@@ -665,11 +660,10 @@ export default function AdminUsersPage() {
                     key={item}
                     type="button"
                     onClick={() => handlePageChange(item)}
-                    className={`flex h-11 min-w-[44px] items-center justify-center rounded-2xl border px-3 text-sm font-semibold transition ${
-                      currentPage === item
-                        ? "border-slate-900 bg-slate-900 text-white"
-                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                    }`}
+                    className={`flex h-11 min-w-[44px] items-center justify-center rounded-2xl border px-3 text-sm font-semibold transition ${currentPage === item
+                      ? "border-slate-900 bg-slate-900 text-white"
+                      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                      }`}
                   >
                     {item}
                   </button>

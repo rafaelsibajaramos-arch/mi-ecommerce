@@ -81,12 +81,10 @@ export async function GET(request: NextRequest) {
       }
     );
 
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
+    const { data: claimsData, error: userError } = await supabase.auth.getClaims(token);
+    const userId = String(claimsData?.claims?.sub || "").trim();
 
-    if (userError || !user) {
+    if (userError || !userId) {
       return NextResponse.json({ ok: false, error: "Sesión inválida." }, { status: 401 });
     }
 
@@ -106,7 +104,7 @@ export async function GET(request: NextRequest) {
     const { data, error } = await supabase
       .from("wallet_transactions")
       .select("id, type, amount, note, created_at")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .gte("created_at", fromIso)
       .lte("created_at", toIso)
       .order("created_at", { ascending: false })

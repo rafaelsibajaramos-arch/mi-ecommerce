@@ -290,7 +290,23 @@ function sanitizeSearch(value: string) {
   return value.replace(/[(),]/g, " ").replace(/\s+/g, " ").trim().slice(0, 120);
 }
 
-function applyAutomaticTopupFilter(query: any) {
+interface TopupQuery {
+  is(column: string, value: null): this;
+  neq(column: string, value: string): this;
+  or(filters: string): this;
+  gte(column: string, value: string): this;
+  lt(column: string, value: string): this;
+  eq(column: string, value: string): this;
+  order(column: string, options: { ascending: boolean }): this;
+  range(from: number, to: number): this;
+  maybeSingle(): PromiseLike<{ data: unknown; error: { message: string } | null }>;
+  then<TResult1 = { data: unknown; count: number | null; error: { message: string } | null }, TResult2 = never>(
+    onfulfilled?: ((value: { data: unknown; count: number | null; error: { message: string } | null }) => TResult1 | PromiseLike<TResult1>) | null,
+    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
+  ): PromiseLike<TResult1 | TResult2>;
+}
+
+function applyAutomaticTopupFilter(query: TopupQuery) {
   return query
     .is("voided_at", null)
     .neq("status", "VOIDED")
@@ -299,20 +315,20 @@ function applyAutomaticTopupFilter(query: any) {
     );
 }
 
-function applyPeriodFilter(query: any, period: { fromIso: string | null; toIso: string | null }) {
+function applyPeriodFilter(query: TopupQuery, period: { fromIso: string | null; toIso: string | null }) {
   let next = query;
   if (period.fromIso) next = next.gte("created_at", period.fromIso);
   if (period.toIso) next = next.lt("created_at", period.toIso);
   return next;
 }
 
-function applyStatusFilter(query: any, status: string) {
+function applyStatusFilter(query: TopupQuery, status: string) {
   const normalized = status.trim().toUpperCase();
   if (!normalized || normalized === "ALL") return query;
   return query.eq("status", normalized);
 }
 
-function applySearchFilter(query: any, search: string, profileIds: string[]) {
+function applySearchFilter(query: TopupQuery, search: string, profileIds: string[]) {
   const term = sanitizeSearch(search);
   if (!term) return query;
 
@@ -344,11 +360,12 @@ function createBaseQuery(
   supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
   select: string,
   options?: { count?: "exact"; head?: boolean }
-) {
-  return applyAutomaticTopupFilter(supabaseAdmin.from("wallet_topups").select(select, options));
+): TopupQuery {
+  const query = supabaseAdmin.from("wallet_topups").select(select, options) as unknown as TopupQuery;
+  return applyAutomaticTopupFilter(query);
 }
 
-async function countRows(query: any) {
+async function countRows(query: TopupQuery) {
   const { count, error } = await query;
   if (error) throw new Error(error.message);
   return Number(count || 0);

@@ -7,43 +7,6 @@ import OrderReceiptModal, {
   type ReceiptOrder,
 } from "../../../components/OrderReceiptModal";
 
-type OrderRow = {
-  id: string;
-  order_number: number | null;
-  user_id: string;
-  total: number;
-  status: string | null;
-  created_at: string;
-};
-
-type OrderItemRow = {
-  id: string;
-  order_id: string;
-  product_id: string;
-  quantity: number;
-  unit_price: number | null;
-  product_name: string | null;
-  variant_name: string | null;
-};
-
-type ProductRow = {
-  id: string;
-  name: string;
-  description: string | null;
-  category: string | null;
-};
-
-type LicenseRow = {
-  id: string;
-  product_id: string;
-  variant_id: string | null;
-  license_text: string;
-  status: string;
-  assigned_order_id: string | null;
-  assigned_order_item_id: string | null;
-  assigned_user_id: string | null;
-};
-
 type OrderWithItems = ReceiptOrder;
 
 const PAGE_SIZE = 10;
@@ -81,145 +44,64 @@ export default function AccountOrdersPage() {
     null
   );
   const [currentPage, setCurrentPage] = useState(1);
+  const [totalOrderCount, setTotalOrderCount] = useState(0);
+  const [totalInvested, setTotalInvested] = useState(0);
 
   const loadOrders = useCallback(async () => {
     setLoading(true);
     setMessage("");
 
     const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
+      data: { session },
+    } = await supabase.auth.getSession();
 
-    if (userError || !user) {
+    if (!session?.access_token) {
       router.push("/login");
       return;
     }
 
-    const { data: ordersData, error: ordersError } = await supabase
-      .from("orders")
-      .select("id, order_number, user_id, total, status, created_at")
-      .eq("user_id", user.id)
-      .eq("is_reverted", false)
-      .order("created_at", { ascending: false });
+    const params = new URLSearchParams({
+      page: String(currentPage),
+      pageSize: String(PAGE_SIZE),
+      includeSummary: "true",
+    });
+    if (dateFrom) params.set("from", dateFrom);
+    if (dateTo) params.set("to", dateTo);
 
-    if (ordersError) {
-      setMessage("No se pudieron cargar los pedidos.");
-      setLoading(false);
-      return;
-    }
+    try {
+      const response = await fetch(`/api/account/orders?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        cache: "no-store",
+      });
+      const result = (await response.json().catch(() => null)) as {
+        ok?: boolean;
+        error?: string;
+        orders?: OrderWithItems[];
+        summary?: { totalInvested?: number | null };
+        pagination?: { total?: number };
+      } | null;
 
-    const rawOrders = (ordersData as OrderRow[]) || [];
-
-    if (rawOrders.length === 0) {
-      setOrders([]);
-      setLoading(false);
-      return;
-    }
-
-    const orderIds = rawOrders.map((order) => order.id);
-
-    const { data: itemsData, error: itemsError } = await supabase
-      .from("order_items")
-      .select(
-        "id, order_id, product_id, quantity, unit_price, product_name, variant_name"
-      )
-      .in("order_id", orderIds);
-
-    if (itemsError) {
-      setMessage("No se pudieron cargar los productos de tus pedidos.");
-      setLoading(false);
-      return;
-    }
-
-    const rawItems = (itemsData as OrderItemRow[]) || [];
-    const productIds = Array.from(
-      new Set(rawItems.map((item) => item.product_id).filter(Boolean))
-    );
-
-    const productsMap = new Map<string, ProductRow>();
-
-    if (productIds.length > 0) {
-      const { data: productsData, error: productsError } = await supabase
-        .from("products")
-        .select("id, name, description, category")
-        .in("id", productIds);
-
-      if (productsError) {
-        setMessage("No se pudo cargar la información de los productos.");
-        setLoading(false);
-        return;
+      if (!response.ok || !result?.ok) {
+        throw new Error(result?.error || "No se pudieron cargar los pedidos.");
       }
 
-      ((productsData as ProductRow[]) || []).forEach((product) => {
-        productsMap.set(product.id, product);
-      });
-    }
-
-    const { data: licensesData, error: licensesError } = await supabase
-      .from("product_licenses")
-      .select(
-        "id, product_id, variant_id, license_text, status, assigned_order_id, assigned_order_item_id, assigned_user_id"
-      )
-      .in("assigned_order_id", orderIds)
-      .eq("assigned_user_id", user.id)
-      .eq("status", "assigned");
-
-    if (licensesError) {
-      setMessage("No se pudieron cargar las licencias entregadas.");
+      setOrders(result.orders || []);
+      setTotalOrderCount(Number(result.pagination?.total || 0));
+      setTotalInvested(Number(result.summary?.totalInvested || 0));
+      setLoading(false);
+      return;
+    } catch (error) {
+      setOrders([]);
+      setTotalOrderCount(0);
+      setTotalInvested(0);
+      setMessage(
+        error instanceof Error ? error.message : "No se pudieron cargar los pedidos."
+      );
       setLoading(false);
       return;
     }
 
-    const rawLicenses = (licensesData as LicenseRow[]) || [];
-
-    const mergedOrders: OrderWithItems[] = rawOrders.map((order) => {
-      const items = rawItems
-        .filter((item) => item.order_id === order.id)
-        .map((item) => {
-          const product = productsMap.get(item.product_id);
-
-          const itemLicenses = rawLicenses.filter((license) => {
-            if (license.assigned_order_item_id) {
-              return license.assigned_order_item_id === item.id;
-            }
-
-            return (
-              license.assigned_order_id === order.id &&
-              license.product_id === item.product_id
-            );
-          });
-
-          return {
-            id: item.id,
-            quantity: Number(item.quantity || 0),
-            price: Number(item.unit_price || 0),
-            product_id: item.product_id,
-            product_name: item.product_name || product?.name || "Producto",
-            variant_name: item.variant_name || null,
-            product_description: product?.description || null,
-            product_category: product?.category || null,
-            licenses: itemLicenses.map((license) => ({
-              id: license.id,
-              license_text: license.license_text,
-            })),
-          };
-        });
-
-      return {
-        id: order.id,
-        order_number: order.order_number,
-        total: Number(order.total || 0),
-        status: order.status || "completed",
-        created_at: order.created_at,
-        items,
-      };
-    });
-
-    setOrders(mergedOrders);
-    setCurrentPage(1);
-    setLoading(false);
-  }, [router]);
+  }, [currentPage, dateFrom, dateTo, router]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -231,48 +113,28 @@ export default function AccountOrdersPage() {
     };
   }, [loadOrders]);
 
-  const filteredOrders = useMemo(() => {
-    return orders.filter((order) => {
-      const orderDate = new Date(order.created_at);
-
-      if (dateFrom) {
-        const from = new Date(`${dateFrom}T00:00:00`);
-        if (orderDate < from) return false;
-      }
-
-      if (dateTo) {
-        const to = new Date(`${dateTo}T23:59:59`);
-        if (orderDate > to) return false;
-      }
-
-      return true;
-    });
-  }, [orders, dateFrom, dateTo]);
+  const filteredOrders = orders;
 
   const totalPages = useMemo(() => {
-    return Math.max(1, Math.ceil(filteredOrders.length / PAGE_SIZE));
-  }, [filteredOrders.length]);
+    return Math.max(1, Math.ceil(totalOrderCount / PAGE_SIZE));
+  }, [totalOrderCount]);
 
   const effectiveCurrentPage = Math.min(currentPage, totalPages);
 
-  const paginatedOrders = useMemo(() => {
-    const start = (effectiveCurrentPage - 1) * PAGE_SIZE;
-    const end = start + PAGE_SIZE;
-    return filteredOrders.slice(start, end);
-  }, [effectiveCurrentPage, filteredOrders]);
+  const paginatedOrders = filteredOrders;
 
   const paginationItems = useMemo(() => {
     return buildPagination(effectiveCurrentPage, totalPages);
   }, [effectiveCurrentPage, totalPages]);
 
   const pageStart =
-    filteredOrders.length === 0
+    totalOrderCount === 0
       ? 0
       : (effectiveCurrentPage - 1) * PAGE_SIZE + 1;
 
   const pageEnd = Math.min(
     effectiveCurrentPage * PAGE_SIZE,
-    filteredOrders.length
+    totalOrderCount
   );
 
   // Maneja la acción de page change.
@@ -283,13 +145,6 @@ export default function AccountOrdersPage() {
       block: "start",
     });
   };
-
-  const totalInvested = useMemo(() => {
-    return filteredOrders.reduce(
-      (sum, order) => sum + Number(order.total || 0),
-      0
-    );
-  }, [filteredOrders]);
 
   // Formatea un valor numérico como dinero para mostrarlo en la interfaz.
   const formatMoney = (value: number) => {
@@ -448,7 +303,7 @@ export default function AccountOrdersPage() {
           >
             <div className="border-b border-white/10 px-5 py-5 md:px-6">
               <h2 className="text-xl font-bold md:text-2xl">
-                Historial de pedidos ({filteredOrders.length})
+                Historial de pedidos ({totalOrderCount})
               </h2>
             </div>
 
@@ -526,14 +381,14 @@ export default function AccountOrdersPage() {
             )}
           </div>
 
-          {filteredOrders.length > 0 && (
+          {totalOrderCount > 0 && (
             <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <p className="text-sm text-white/60">
                 Mostrando{" "}
                 <span className="font-semibold text-white">{pageStart}</span> -{" "}
                 <span className="font-semibold text-white">{pageEnd}</span> de{" "}
                 <span className="font-semibold text-white">
-                  {filteredOrders.length}
+                  {totalOrderCount}
                 </span>{" "}
                 pedidos
               </p>

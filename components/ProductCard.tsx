@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useCart } from "../context/CartContext";
 
 type Product = {
@@ -17,9 +18,12 @@ export default function ProductCard({ product }: { product: Product }) {
   return (
     <div className="bg-white rounded-3xl overflow-hidden border border-black/5 shadow-sm hover:shadow-xl hover:-translate-y-1 transition duration-300">
       <Link href={`/product/${product.id}`}>
-        <img
+        <Image
           src={product.image}
           alt={product.name}
+          width={800}
+          height={448}
+          sizes="(max-width: 768px) 100vw, 33vw"
           className="w-full h-56 object-cover cursor-pointer"
         />
 

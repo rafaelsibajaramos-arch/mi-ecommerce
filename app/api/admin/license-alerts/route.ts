@@ -860,9 +860,12 @@ export async function GET(request: NextRequest) {
 
     const url = new URL(request.url);
     const filterParam = url.searchParams.get("filter") || "pending";
-    const filter = ["pending", "due", "completed", "all"].includes(filterParam)
+    const filter = ["pending", "due", "completed", "renewal", "all"].includes(filterParam)
       ? filterParam
       : "pending";
+    const search = String(url.searchParams.get("search") || "")
+      .trim()
+      .slice(0, 120);
     const page = parsePositiveInteger(url.searchParams.get("page"), 1);
     const requestedPageSize = parsePositiveInteger(url.searchParams.get("pageSize"), 10);
     const pageSize = Math.min(Math.max(requestedPageSize, 5), 50);
@@ -883,6 +886,33 @@ export async function GET(request: NextRequest) {
       alertsQuery = alertsQuery.eq("status", "pending").lte("due_at", nowIso);
     } else if (filter === "completed") {
       alertsQuery = alertsQuery.eq("status", "completed");
+    } else if (filter === "renewal") {
+      alertsQuery = alertsQuery
+        .is("license_id", null)
+        .not("product_id", "is", null);
+    }
+
+    if (search) {
+      const escapedSearch = search.replace(/[(),]/g, " ").replace(/\s+/g, " ").trim();
+      const [{ data: profiles }, { data: licenses }] = await Promise.all([
+        auth.supabaseAdmin
+          .from("profiles")
+          .select("id")
+          .or(`email.ilike.%${escapedSearch}%,full_name.ilike.%${escapedSearch}%`)
+          .limit(100),
+        auth.supabaseAdmin
+          .from("product_licenses")
+          .select("id")
+          .ilike("license_text", `%${escapedSearch}%`)
+          .limit(100),
+      ]);
+
+      const profileIds = uniqueIds((profiles || []).map((profile) => profile.id));
+      const matchingLicenseIds = uniqueIds((licenses || []).map((license) => license.id));
+      const searchClauses = [`manual_license_text.ilike.%${escapedSearch}%`];
+      if (profileIds.length) searchClauses.push(`user_id.in.(${profileIds.join(",")})`);
+      if (matchingLicenseIds.length) searchClauses.push(`license_id.in.(${matchingLicenseIds.join(",")})`);
+      alertsQuery = alertsQuery.or(searchClauses.join(","));
     }
 
     const { data, error, count } = await alertsQuery
@@ -922,41 +952,41 @@ export async function GET(request: NextRequest) {
       await Promise.all([
         productIds.length
           ? auth.supabaseAdmin
-              .from("products")
-              .select("id, name")
-              .in("id", productIds)
+            .from("products")
+            .select("id, name")
+            .in("id", productIds)
           : Promise.resolve({ data: [] as ProductRow[], error: null }),
         variantIds.length
           ? auth.supabaseAdmin
-              .from("product_variants")
-              .select("id, name, access_duration_months")
-              .in("id", variantIds)
+            .from("product_variants")
+            .select("id, name, access_duration_months")
+            .in("id", variantIds)
           : Promise.resolve({ data: [] as VariantRow[], error: null }),
         licenseIds.length
           ? auth.supabaseAdmin
-              .from("product_licenses")
-              .select(
-                "id, product_id, variant_id, license_text, billing_duration_days, billing_duration_months, billing_ends_at, rotation_status"
-              )
-              .in("id", licenseIds)
+            .from("product_licenses")
+            .select(
+              "id, product_id, variant_id, license_text, billing_duration_days, billing_duration_months, billing_ends_at, rotation_status"
+            )
+            .in("id", licenseIds)
           : Promise.resolve({ data: [] as LicenseRow[], error: null }),
         accessIds.length
           ? auth.supabaseAdmin
-              .from("license_accesses")
-              .select("id, license_id, order_id, order_item_id, user_id, product_id, variant_id, starts_at, expires_at, status")
-              .in("id", accessIds)
+            .from("license_accesses")
+            .select("id, license_id, order_id, order_item_id, user_id, product_id, variant_id, starts_at, expires_at, status")
+            .in("id", accessIds)
           : Promise.resolve({ data: [] as AccessRow[], error: null }),
         orderIds.length
           ? auth.supabaseAdmin
-              .from("orders")
-              .select("id, order_number")
-              .in("id", orderIds)
+            .from("orders")
+            .select("id, order_number")
+            .in("id", orderIds)
           : Promise.resolve({ data: [] as OrderRow[], error: null }),
         userIds.length
           ? auth.supabaseAdmin
-              .from("profiles")
-              .select("id, email, full_name")
-              .in("id", userIds)
+            .from("profiles")
+            .select("id, email, full_name")
+            .in("id", userIds)
           : Promise.resolve({ data: [] as ProfileRow[], error: null }),
       ]);
 
@@ -1162,6 +1192,8 @@ export async function POST(request: NextRequest) {
     const licenseText = typeof body?.licenseText === "string" ? body.licenseText.trim() : "";
     const productNote = typeof body?.productNote === "string" ? body.productNote.trim() : "";
     const note = typeof body?.note === "string" ? body.note.trim() : "";
+    const productId = typeof body?.productId === "string" ? body.productId.trim() : "";
+    const isRenewal = body?.type === "renewal";
     const daysUntilAlert = parseNonNegativeInteger(body?.daysUntilAlert, 0);
     const priority = body?.priority === "urgent" ? "urgent" : "normal";
 
@@ -1171,6 +1203,26 @@ export async function POST(request: NextRequest) {
 
     if (!productNote) {
       return jsonError("Escribe una nota para identificar el producto o cliente.");
+    }
+
+    if (isRenewal) {
+      if (!productId) {
+        return jsonError("Falta el producto de la cuenta a renovar.");
+      }
+
+      const { data: existingAlert } = await auth.supabaseAdmin
+        .from("license_alerts")
+        .select("id")
+        .eq("task_type", "manual")
+        .eq("status", "pending")
+        .is("license_id", null)
+        .eq("product_id", productId)
+        .eq("manual_license_text", licenseText)
+        .maybeSingle();
+
+      if (existingAlert) {
+        return NextResponse.json({ ok: true, alreadyExists: true, alertId: existingAlert.id });
+      }
     }
 
     const dueAt = addDays(new Date(), daysUntilAlert).toISOString();
@@ -1185,7 +1237,7 @@ export async function POST(request: NextRequest) {
           order_id: null,
           order_item_id: null,
           user_id: null,
-          product_id: null,
+          product_id: productId || null,
           variant_id: null,
           task_type: "manual",
           due_at: dueAt,

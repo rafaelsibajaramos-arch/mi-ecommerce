@@ -217,7 +217,7 @@ function normalizeBillingDurationDays(value: string | number | null | undefined)
 function resolveLicenseBillingDays(row: ProductLicenseRow) {
   return normalizeBillingDurationDays(
     row.billing_duration_days ||
-      (row.billing_duration_months ? row.billing_duration_months * 30 : null)
+    (row.billing_duration_months ? row.billing_duration_months * 30 : null)
   );
 }
 
@@ -448,6 +448,8 @@ export default function EditProductPage() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [renewalLicense, setRenewalLicense] = useState("");
+  const [renewalDays, setRenewalDays] = useState("30");
 
   const previewUrl = useMemo(() => {
     if (!imageFile) return "";
@@ -556,9 +558,8 @@ export default function EditProductPage() {
     const uniqueComponents = new Map<string, ProductComponentDbRow>();
 
     for (const item of (data as ProductComponentDbRow[] | null) || []) {
-      const key = `${item.child_product_id || ""}__${
-        item.child_variant_id || "base"
-      }`;
+      const key = `${item.child_product_id || ""}__${item.child_variant_id || "base"
+        }`;
       const existing = uniqueComponents.get(key);
 
       if (!existing) {
@@ -860,13 +861,13 @@ export default function EditProductPage() {
       prev.map((variant) =>
         variant.tempId === variantTempId
           ? {
-              ...variant,
-              priorityLicenseRows: variant.priorityLicenseRows.map((license) =>
-                license.tempId === licenseTempId
-                  ? { ...license, billingDurationDays: value }
-                  : license
-              ),
-            }
+            ...variant,
+            priorityLicenseRows: variant.priorityLicenseRows.map((license) =>
+              license.tempId === licenseTempId
+                ? { ...license, billingDurationDays: value }
+                : license
+            ),
+          }
           : variant
       )
     );
@@ -1085,9 +1086,8 @@ export default function EditProductPage() {
           return;
         }
 
-        const componentKey = `${item.child_product_id}__${
-          item.child_variant_id || "base"
-        }`;
+        const componentKey = `${item.child_product_id}__${item.child_variant_id || "base"
+          }`;
 
         if (uniqueComponentKeys.has(componentKey)) {
           setMessage(
@@ -1242,8 +1242,7 @@ export default function EditProductPage() {
 
           if (uploadVariantImageError) {
             setMessage(
-              `Error subiendo imagen de variante "${
-                item.name || "sin nombre"
+              `Error subiendo imagen de variante "${item.name || "sin nombre"
               }": ${uploadVariantImageError.message}`
             );
             setSaving(false);
@@ -1373,6 +1372,39 @@ export default function EditProductPage() {
       ] as Promise<void>[];
 
       await Promise.all(licenseSyncTasks);
+
+      if (renewalLicense.trim()) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const accessToken = sessionData.session?.access_token;
+
+        if (!accessToken) {
+          throw new Error("Tu sesión expiró. Inicia sesión de nuevo.");
+        }
+
+        const renewalResponse = await fetch("/api/admin/license-alerts", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            type: "renewal",
+            licenseText: renewalLicense,
+            productId: id,
+            productNote: cleanName,
+            daysUntilAlert: renewalDays || "30",
+            note: `Renovar licencia de ${cleanName}.`,
+          }),
+        });
+        const renewalResult = await renewalResponse.json().catch(() => null);
+
+        if (!renewalResponse.ok || !renewalResult?.ok) {
+          throw new Error(renewalResult?.error || "No se pudo crear la alerta de renovación.");
+        }
+
+        setRenewalLicense("");
+        setRenewalDays("30");
+      }
 
       setCurrentImageUrl(finalImageUrl || "");
       setImageFile(null);
@@ -1684,6 +1716,40 @@ export default function EditProductPage() {
                     />
                     <p className="mt-2 text-sm text-slate-500">
                       Licencias detectadas: {generalLicenseRows.length}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_120px] lg:items-end">
+                      <div>
+                        <label className="mb-2 block text-sm font-semibold text-slate-700">
+                          RENOVACIÓN
+                        </label>
+                        <input
+                          type="text"
+                          value={renewalLicense}
+                          onChange={(event) => setRenewalLicense(event.target.value)}
+                          placeholder="Licencia que deseas renovar"
+                          className={inputSoftClass}
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-2 block text-sm font-semibold text-slate-700">
+                          Avisar en días
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={renewalDays}
+                          onChange={(event) => setRenewalDays(event.target.value)}
+                          placeholder="30"
+                          className={inputSoftClass}
+                        />
+                      </div>
+                    </div>
+                    <p className="mt-2 text-xs text-slate-500">
+                      Al guardar se crea una sola alerta pendiente para esta cuenta y los campos quedan listos para otra licencia.
                     </p>
                   </div>
 

@@ -28,26 +28,10 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
 
   const loadProfile = useCallback(async () => {
     try {
-      let currentUser = null;
-
-      for (let attempt = 0; attempt < 4; attempt += 1) {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-
-        currentUser = session?.user || null;
-
-        if (!currentUser) {
-          const {
-            data: { user },
-          } = await supabase.auth.getUser();
-
-          currentUser = user || null;
-        }
-
-        if (currentUser) break;
-        await new Promise((resolve) => window.setTimeout(resolve, 250));
-      }
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const currentUser = session?.user || null;
 
       if (!currentUser) {
         setProfile(null);

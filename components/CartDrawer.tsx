@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useCart } from "../context/CartContext";
+import Image from "next/image";
 import { supabase } from "../lib/supabase";
 
 type ReceiptOrder = {
@@ -260,9 +261,12 @@ export default function CartDrawer() {
                   className="rounded-[24px] border border-white/10 bg-white/[0.05] p-4"
                 >
                   <div className="flex gap-3">
-                    <img
+                    <Image
                       src={item.image || "/placeholder.png"}
                       alt={item.name}
+                      width={74}
+                      height={74}
+                      sizes="74px"
                       className="h-[74px] w-[74px] rounded-2xl object-cover"
                     />
 
