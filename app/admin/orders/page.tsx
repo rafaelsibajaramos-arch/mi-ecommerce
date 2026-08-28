@@ -60,6 +60,14 @@ function formatOrderNumber(value: number | null | undefined) {
   return value ? `#${value}` : "#Sin número";
 }
 
+function normalizeSearchText(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
 function getStatusLabel(status: string | null | undefined) {
   const normalized = String(status || "").toLowerCase().trim();
 
@@ -217,7 +225,8 @@ export default function AdminOrdersPage() {
   };
 
   const filteredOrders = useMemo(() => {
-    const term = search.trim().toLowerCase();
+    const term = normalizeSearchText(search);
+    const terms = term.split(/\s+/).filter(Boolean);
 
     return orders.filter((order) => {
       const matchesStatus =
@@ -239,13 +248,17 @@ export default function AdminOrdersPage() {
         .flatMap((item) => item.licenses.map((license) => license.license_text))
         .join(" ")
         .toLowerCase();
+      const searchableText = normalizeSearchText(
+        `${orderNumber} ${email} ${fullName} ${productsText} ${licensesText}`
+      );
 
       return (
         orderNumber.includes(term) ||
         email.includes(term) ||
         fullName.includes(term) ||
         productsText.includes(term) ||
-        licensesText.includes(term)
+        licensesText.includes(term) ||
+        terms.every((searchTerm) => searchableText.includes(searchTerm))
       );
     });
   }, [orders, search, statusFilter]);
@@ -323,7 +336,7 @@ export default function AdminOrdersPage() {
       });
     });
 
-    const term = search.trim().toLowerCase();
+    const term = normalizeSearchText(search);
     if (!term) return [];
 
     return Array.from(values)
@@ -505,6 +518,22 @@ export default function AdminOrdersPage() {
                           </p>
 
                           <div className="mt-3">
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                              Productos comprados
+                            </p>
+                            <div className="mt-1 space-y-1">
+                              {order.items.map((item) => (
+                                <p key={item.id} className="text-sm font-semibold text-slate-700">
+                                  {item.product_name}
+                                  {item.variant_name ? ` - ${item.variant_name}` : ""}
+                                  <span className="ml-1 font-normal text-slate-500">x{item.quantity}</span>
+                                </p>
+                              ))}
+                            </div>
+
+                            <p className="mt-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                              Licencias
+                            </p>
                             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
                               Productos comprados
                             </p>
