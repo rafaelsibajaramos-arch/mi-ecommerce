@@ -9,6 +9,23 @@ import {
   createImageStoragePath,
 } from "../../../../lib/imageUpload";
 
+const CATALOG_BROADCAST_CHANNEL = "streamingmayor-catalog-invalidation";
+const CATALOG_BROADCAST_EVENT = "catalog-updated";
+
+function notifyCatalogUpdate(productId: string) {
+  const channel = supabase.channel(CATALOG_BROADCAST_CHANNEL);
+
+  void channel
+    .httpSend(CATALOG_BROADCAST_EVENT, {
+      productId,
+      updatedAt: new Date().toISOString(),
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      void supabase.removeChannel(channel);
+    });
+}
+
 type ProductType = "simple" | "variable" | "composite";
 
 type VariantRow = {
@@ -1425,6 +1442,20 @@ export default function EditProductPage() {
       setMessage("Producto actualizado correctamente.");
 
       try {
+        // Publica el cambio primero: las páginas abiertas actualizan el stock
+        // sin esperar a la validación ni a la invalidación de caché.
+        notifyCatalogUpdate(id);
+
+        const { data: currentSession } = await supabase.auth.getSession();
+        if (currentSession.session?.access_token) {
+          void fetch("/api/catalog/revalidate", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${currentSession.session.access_token}`,
+            },
+          }).catch(() => undefined);
+        }
+
         const updateVersion = String(Date.now());
         window.localStorage.setItem("streamingmayor_catalog_updated_at", updateVersion);
         window.dispatchEvent(new CustomEvent("streamingmayor:catalog-updated"));

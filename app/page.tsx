@@ -152,6 +152,9 @@ const ADMIN_ROLE_EVENT = "streamingmayor:admin-role-change";
 const PHOTO_MODE_KEY = "streamingmayor_photo_mode";
 const PHOTO_MODE_EVENT = "streamingmayor:photo-mode-change";
 const CATALOG_UPDATED_EVENT = "streamingmayor:catalog-updated";
+const CATALOG_REALTIME_CHANNEL = "streamingmayor-catalog-stock-live";
+const CATALOG_BROADCAST_CHANNEL = "streamingmayor-catalog-invalidation";
+const CATALOG_REALTIME_EVENT = "catalog-updated";
 
 export default function HomePage() {
   const { addToCart } = useCart();
@@ -1147,8 +1150,15 @@ export default function HomePage() {
       return true;
     };
 
+    const broadcastChannel = supabase
+      .channel(CATALOG_BROADCAST_CHANNEL)
+      .on("broadcast", { event: CATALOG_REALTIME_EVENT }, () =>
+        scheduleCatalogRefresh(0)
+      )
+      .subscribe();
+
     const channel = supabase
-      .channel("streamingmayor-catalog-stock-live")
+      .channel(CATALOG_REALTIME_CHANNEL)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "products" },
@@ -1212,6 +1222,7 @@ export default function HomePage() {
       window.removeEventListener("checkout:receipt-ready", handleCheckoutRefresh);
       window.removeEventListener(CATALOG_UPDATED_EVENT, handleCatalogUpdated);
       void supabase.removeChannel(channel);
+      void supabase.removeChannel(broadcastChannel);
     };
   }, [fetchCatalog]);
 
