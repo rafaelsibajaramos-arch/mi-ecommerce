@@ -11,14 +11,22 @@ import {
 
 const CATALOG_BROADCAST_CHANNEL = "streamingmayor-catalog-invalidation";
 const CATALOG_BROADCAST_EVENT = "catalog-updated";
+const CATALOG_UPDATED_STORAGE_KEY = "streamingmayor_catalog_updated_at";
 
-function notifyCatalogUpdate(productId: string) {
+type CatalogStockUpdate = {
+  productId: string;
+  productStock: number;
+  comboStock: number | null;
+  variants: Array<{ id: string; stock: number; isActive: boolean }>;
+  updatedAt: number;
+};
+
+function notifyCatalogUpdate(update: CatalogStockUpdate) {
   const channel = supabase.channel(CATALOG_BROADCAST_CHANNEL);
 
   void channel
     .httpSend(CATALOG_BROADCAST_EVENT, {
-      productId,
-      updatedAt: new Date().toISOString(),
+      ...update,
     })
     .catch(() => undefined)
     .finally(() => {
@@ -1444,7 +1452,26 @@ export default function EditProductPage() {
       try {
         // Publica el cambio primero: las páginas abiertas actualizan el stock
         // sin esperar a la validación ni a la invalidación de caché.
-        notifyCatalogUpdate(id);
+        const catalogStockUpdate: CatalogStockUpdate = {
+          productId: id,
+          productStock: autoGeneralStock,
+          comboStock: productType === "composite" ? numericComboStock : null,
+          variants: effectiveVariants
+            .map((item) => {
+              const variantId = variantIdMapByTempId[item.tempId] || item.id;
+              if (!variantId) return null;
+
+              return {
+                id: variantId,
+                stock: item.priorityLicenseRows.length,
+                isActive: item.is_active,
+              };
+            })
+            .filter(Boolean) as CatalogStockUpdate["variants"],
+          updatedAt: Date.now(),
+        };
+
+        notifyCatalogUpdate(catalogStockUpdate);
 
         const { data: currentSession } = await supabase.auth.getSession();
         if (currentSession.session?.access_token) {
@@ -1456,9 +1483,15 @@ export default function EditProductPage() {
           }).catch(() => undefined);
         }
 
-        const updateVersion = String(Date.now());
-        window.localStorage.setItem("streamingmayor_catalog_updated_at", updateVersion);
-        window.dispatchEvent(new CustomEvent("streamingmayor:catalog-updated"));
+        window.localStorage.setItem(
+          CATALOG_UPDATED_STORAGE_KEY,
+          JSON.stringify(catalogStockUpdate)
+        );
+        window.dispatchEvent(
+          new CustomEvent("streamingmayor:catalog-updated", {
+            detail: catalogStockUpdate,
+          })
+        );
       } catch {
         // La actualización ya quedó guardada; el evento visual es opcional.
       }

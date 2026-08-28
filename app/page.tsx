@@ -116,6 +116,18 @@ type CategoryItem = {
   count: number;
 };
 
+type CatalogStockUpdate = {
+  productId: string;
+  productStock?: number;
+  comboStock?: number | null;
+  variants?: Array<{
+    id: string;
+    stock: number;
+    isActive?: boolean;
+  }>;
+  updatedAt?: number;
+};
+
 type ReceiptOrderItemRow = {
   id: string;
   order_id: string;
@@ -152,6 +164,7 @@ const ADMIN_ROLE_EVENT = "streamingmayor:admin-role-change";
 const PHOTO_MODE_KEY = "streamingmayor_photo_mode";
 const PHOTO_MODE_EVENT = "streamingmayor:photo-mode-change";
 const CATALOG_UPDATED_EVENT = "streamingmayor:catalog-updated";
+const CATALOG_UPDATED_STORAGE_KEY = "streamingmayor_catalog_updated_at";
 const CATALOG_REALTIME_CHANNEL = "streamingmayor-catalog-stock-live";
 const CATALOG_BROADCAST_CHANNEL = "streamingmayor-catalog-invalidation";
 const CATALOG_REALTIME_EVENT = "catalog-updated";
@@ -1150,11 +1163,61 @@ export default function HomePage() {
       return true;
     };
 
+    const applyCatalogStockUpdate = (value: unknown) => {
+      if (!value || typeof value !== "object") return false;
+
+      const update = value as Partial<CatalogStockUpdate>;
+      const productId =
+        typeof update.productId === "string" ? update.productId : "";
+      if (!productId) return false;
+
+      let applied = false;
+
+      if (
+        typeof update.productStock === "number" &&
+        Number.isFinite(update.productStock)
+      ) {
+        applied =
+          applyProductUpdate({
+            id: productId,
+            stock: Math.max(0, Math.floor(update.productStock)),
+            ...(update.comboStock !== undefined
+              ? { combo_stock: update.comboStock }
+              : {}),
+          }) || applied;
+      }
+
+      if (Array.isArray(update.variants)) {
+        update.variants.forEach((variant) => {
+          if (!variant || typeof variant.id !== "string") return;
+          if (
+            typeof variant.stock !== "number" ||
+            !Number.isFinite(variant.stock)
+          ) {
+            return;
+          }
+
+          applied =
+            applyVariantUpdate({
+              id: variant.id,
+              product_id: productId,
+              stock: Math.max(0, Math.floor(variant.stock)),
+              ...(typeof variant.isActive === "boolean"
+                ? { is_active: variant.isActive }
+                : {}),
+            }) || applied;
+        });
+      }
+
+      return applied;
+    };
+
     const broadcastChannel = supabase
       .channel(CATALOG_BROADCAST_CHANNEL)
-      .on("broadcast", { event: CATALOG_REALTIME_EVENT }, () =>
-        scheduleCatalogRefresh(0)
-      )
+      .on("broadcast", { event: CATALOG_REALTIME_EVENT }, (message) => {
+        const applied = applyCatalogStockUpdate(message?.payload);
+        if (!applied) scheduleCatalogRefresh(0);
+      })
       .subscribe();
 
     const channel = supabase
@@ -1206,13 +1269,32 @@ export default function HomePage() {
       // ningún evento, hacemos una sola resincronización silenciosa.
       scheduleCatalogRefresh(1_500);
     };
-    const handleCatalogUpdated = () => scheduleCatalogRefresh(0);
+    const handleCatalogUpdated = (event: Event) => {
+      const applied = applyCatalogStockUpdate((event as CustomEvent).detail);
+      if (!applied) scheduleCatalogRefresh(0);
+    };
+    const handleCatalogStorageUpdate = (event: StorageEvent) => {
+      if (
+        event.key !== CATALOG_UPDATED_STORAGE_KEY ||
+        !event.newValue
+      ) {
+        return;
+      }
+
+      try {
+        const applied = applyCatalogStockUpdate(JSON.parse(event.newValue));
+        if (!applied) scheduleCatalogRefresh(0);
+      } catch {
+        scheduleCatalogRefresh(0);
+      }
+    };
 
     document.addEventListener("visibilitychange", refreshIfNeeded);
     window.addEventListener("focus", refreshIfNeeded);
     window.addEventListener("online", refreshIfNeeded);
     window.addEventListener("checkout:receipt-ready", handleCheckoutRefresh);
     window.addEventListener(CATALOG_UPDATED_EVENT, handleCatalogUpdated);
+    window.addEventListener("storage", handleCatalogStorageUpdate);
 
     return () => {
       if (refreshTimer !== null) window.clearTimeout(refreshTimer);
@@ -1221,6 +1303,7 @@ export default function HomePage() {
       window.removeEventListener("online", refreshIfNeeded);
       window.removeEventListener("checkout:receipt-ready", handleCheckoutRefresh);
       window.removeEventListener(CATALOG_UPDATED_EVENT, handleCatalogUpdated);
+      window.removeEventListener("storage", handleCatalogStorageUpdate);
       void supabase.removeChannel(channel);
       void supabase.removeChannel(broadcastChannel);
     };
