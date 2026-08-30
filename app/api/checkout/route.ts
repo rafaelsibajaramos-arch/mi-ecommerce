@@ -2,6 +2,24 @@ import { NextRequest, NextResponse } from "next/server";
 import { SupabaseClient, createClient, type User } from "@supabase/supabase-js";
 import { createSupabaseAdmin } from "../../../lib/supabaseAdmin";
 
+const CATALOG_BROADCAST_CHANNEL = "streamingmayor-catalog-invalidation";
+const CATALOG_BROADCAST_EVENT = "catalog-updated";
+
+async function notifyCatalogStockChanged(
+  supabase: SupabaseClient,
+  payload: Record<string, unknown>
+) {
+  const channel = supabase.channel(CATALOG_BROADCAST_CHANNEL);
+
+  try {
+    await channel.httpSend(CATALOG_BROADCAST_EVENT, payload);
+  } catch {
+    // Postgres Realtime y el refresco local del comprador siguen como respaldo.
+  } finally {
+    await supabase.removeChannel(channel).catch(() => undefined);
+  }
+}
+
 type ProductType = "simple" | "variable" | "composite";
 
 type CheckoutCartItem = {
@@ -1801,6 +1819,18 @@ export async function POST(request: NextRequest) {
         };
       }
     );
+
+    await notifyCatalogStockChanged(supabaseAdmin, {
+      source: "checkout",
+      productIds: Array.from(
+        new Set([
+          ...productStockDeltas.keys(),
+          ...comboRequestedUnits.keys(),
+        ])
+      ),
+      variantIds: Array.from(variantStockDeltas.keys()),
+      updatedAt: Date.now(),
+    });
 
     return NextResponse.json({
       ok: true,

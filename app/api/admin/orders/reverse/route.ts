@@ -4,6 +4,25 @@ import { createSupabaseAdmin } from "../../../../../lib/supabaseAdmin";
 
 export const runtime = "nodejs";
 
+const CATALOG_BROADCAST_CHANNEL = "streamingmayor-catalog-invalidation";
+const CATALOG_BROADCAST_EVENT = "catalog-updated";
+
+async function notifyCatalogStockChanged() {
+  const supabaseAdmin = createSupabaseAdmin();
+  const channel = supabaseAdmin.channel(CATALOG_BROADCAST_CHANNEL);
+
+  try {
+    await channel.httpSend(CATALOG_BROADCAST_EVENT, {
+      source: "order-reversal",
+      updatedAt: Date.now(),
+    });
+  } catch {
+    // Los cambios de Postgres Realtime siguen como respaldo.
+  } finally {
+    await supabaseAdmin.removeChannel(channel).catch(() => undefined);
+  }
+}
+
 type CallerProfile = {
   id: string;
   role: string | null;
@@ -99,6 +118,8 @@ export async function POST(request: NextRequest) {
       refund_amount?: number;
       released_licenses?: number;
     };
+
+    await notifyCatalogStockChanged();
 
     return NextResponse.json({
       ok: true,

@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { unstable_cache } from "next/cache";
 import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
@@ -86,8 +85,7 @@ function getVariantStock(product: Product, variant: ProductVariant) {
   );
 }
 
-const loadCatalogSnapshot = unstable_cache(
-  async (): Promise<CatalogSnapshot> => {
+async function loadCatalogSnapshot(): Promise<CatalogSnapshot> {
     const supabase = getSupabase();
 
     const { data: productsData, error: productsError } = await supabase
@@ -298,10 +296,7 @@ const loadCatalogSnapshot = unstable_cache(
       comboChildProductIds: Array.from(comboChildProductIds),
       comboChildVariantIds: Array.from(comboChildVariantIds),
     };
-  },
-  ["public-catalog-v2"],
-  { revalidate: 60, tags: ["public-catalog"] }
-);
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -336,7 +331,11 @@ export async function GET(request: NextRequest) {
       },
       {
         headers: {
-          "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
+          // El stock forma parte de esta respuesta: nunca debe quedar guardado
+          // en el navegador, Next.js ni el CDN entre una compra y otra.
+          "Cache-Control": "no-store, max-age=0",
+          "CDN-Cache-Control": "no-store",
+          "Vercel-CDN-Cache-Control": "no-store",
         },
       }
     );

@@ -1,8 +1,17 @@
 "use client";
 
-import { useEffect, useState, type DragEvent, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useState,
+  type DragEvent,
+  type KeyboardEvent,
+} from "react";
 import Link from "next/link";
 import { supabase } from "../../../lib/supabase";
+
+const CATALOG_BROADCAST_CHANNEL = "streamingmayor-catalog-invalidation";
+const CATALOG_BROADCAST_EVENT = "catalog-updated";
 
 type Product = {
   id: string;
@@ -30,9 +39,11 @@ export default function AdminProductsPage() {
   const [dragOverProductId, setDragOverProductId] = useState<string | null>(null);
   const [positionInputs, setPositionInputs] = useState<Record<string, string>>({});
 
-  const fetchProducts = async () => {
-    setLoading(true);
-    setMessage("");
+  const fetchProducts = useCallback(async (showLoader = true) => {
+    if (showLoader) {
+      setLoading(true);
+      setMessage("");
+    }
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
@@ -56,8 +67,8 @@ export default function AdminProductsPage() {
           }))
         );
 
-        setPositionInputs({});
-        setLoading(false);
+        if (showLoader) setPositionInputs({});
+        if (showLoader) setLoading(false);
         return;
       } catch (error) {
         if (attempt === 0) {
@@ -68,12 +79,14 @@ export default function AdminProductsPage() {
         setMessage(
           "No se pudieron cargar los productos. Revisa la conexión con Supabase y pulsa Actualizar."
         );
-        setProducts([]);
-        setLoading(false);
+        if (showLoader) {
+          setProducts([]);
+          setLoading(false);
+        }
         console.error("[admin/products] Error cargando productos:", error);
       }
     }
-  };
+  }, []);
 
   const saveProductsOrder = async (
     nextProducts: Product[],
@@ -294,7 +307,105 @@ export default function AdminProductsPage() {
     return () => {
       window.clearTimeout(timer);
     };
-  }, []);
+  }, [fetchProducts]);
+
+  useEffect(() => {
+    let refreshTimer: number | null = null;
+
+    const scheduleRefresh = () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => {
+        refreshTimer = null;
+        void fetchProducts(false);
+      }, 0);
+    };
+
+    const applyProductStock = (record: Record<string, unknown>) => {
+      const productId = typeof record.id === "string" ? record.id : "";
+      if (!productId) return false;
+
+      setProducts((current) =>
+        current.map((product) => {
+          if (product.id !== productId) return product;
+
+          return {
+            ...product,
+            ...(record as Partial<Product>),
+            id: productId,
+            stock:
+              record.stock !== undefined
+                ? Number(record.stock || 0)
+                : product.stock,
+            combo_stock:
+              record.combo_stock === null ||
+              typeof record.combo_stock === "number"
+                ? (record.combo_stock as number | null)
+                : product.combo_stock,
+          };
+        })
+      );
+
+      return true;
+    };
+
+    const realtimeChannel = supabase
+      .channel("streamingmayor-admin-product-stock-live")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "products" },
+        (payload) => {
+          if (
+            payload.eventType === "UPDATE" &&
+            applyProductStock(payload.new as Record<string, unknown>)
+          ) {
+            return;
+          }
+
+          scheduleRefresh();
+        }
+      )
+      .subscribe();
+
+    const broadcastChannel = supabase
+      .channel(CATALOG_BROADCAST_CHANNEL)
+      .on("broadcast", { event: CATALOG_BROADCAST_EVENT }, (message) => {
+        const update = message?.payload as
+          | {
+              productId?: unknown;
+              productStock?: unknown;
+              comboStock?: unknown;
+            }
+          | undefined;
+
+        if (
+          typeof update?.productId === "string" &&
+          typeof update.productStock === "number" &&
+          applyProductStock({
+            id: update.productId,
+            stock: update.productStock,
+            ...(update.comboStock === null ||
+            typeof update.comboStock === "number"
+              ? { combo_stock: update.comboStock }
+              : {}),
+          })
+        ) {
+          return;
+        }
+
+        scheduleRefresh();
+      })
+      .subscribe();
+
+    const refreshOnFocus = () => scheduleRefresh();
+    window.addEventListener("focus", refreshOnFocus);
+
+    return () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      window.removeEventListener("focus", refreshOnFocus);
+      void supabase.removeChannel(realtimeChannel);
+      void supabase.removeChannel(broadcastChannel);
+    };
+  }, [fetchProducts]);
 
   const formatPrice = (value: number) => {
     return `$${Number(value || 0).toLocaleString("es-CO")}`;

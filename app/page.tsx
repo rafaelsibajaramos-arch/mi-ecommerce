@@ -1045,7 +1045,6 @@ export default function HomePage() {
         replaceCatalogItems(
           currentItems.filter((item) => item.product.id !== id)
         );
-        catalogDirtyRef.current = false;
         return true;
       }
 
@@ -1076,7 +1075,6 @@ export default function HomePage() {
       });
 
       replaceCatalogItems(nextItems);
-      catalogDirtyRef.current = false;
       return true;
     };
 
@@ -1159,7 +1157,6 @@ export default function HomePage() {
       });
 
       replaceCatalogItems(nextItems);
-      catalogDirtyRef.current = false;
       return true;
     };
 
@@ -1265,9 +1262,9 @@ export default function HomePage() {
     };
 
     const handleCheckoutRefresh = () => {
-      // Realtime suele actualizar el stock antes de este respaldo. Si no llega
-      // ningún evento, hacemos una sola resincronización silenciosa.
-      scheduleCatalogRefresh(1_500);
+      // La respuesta de checkout solo llega después de guardar el nuevo stock.
+      // Resincronizamos inmediatamente como respaldo de Realtime.
+      scheduleCatalogRefresh(0);
     };
     const handleCatalogUpdated = (event: Event) => {
       const applied = applyCatalogStockUpdate((event as CustomEvent).detail);
