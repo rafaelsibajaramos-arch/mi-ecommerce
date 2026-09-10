@@ -47,7 +47,7 @@ type BannerState = {
 type AlertStats = {
   pendingDueCount: number;
   pendingTotalCount: number;
-  completedCount: number;
+  pendingRenewalCount: number;
 };
 
 type AlertPagination = {
@@ -105,7 +105,7 @@ export default function AdminLicenseAlertsPage() {
   const [stats, setStats] = useState<AlertStats>({
     pendingDueCount: 0,
     pendingTotalCount: 0,
-    completedCount: 0,
+    pendingRenewalCount: 0,
   });
   const [pagination, setPagination] = useState<AlertPagination>({
     page: 1,
@@ -162,7 +162,7 @@ export default function AdminLicenseAlertsPage() {
       setStats({
         pendingDueCount: Number(result?.stats?.pendingDueCount || 0),
         pendingTotalCount: Number(result?.stats?.pendingTotalCount || 0),
-        completedCount: Number(result?.stats?.completedCount || 0),
+        pendingRenewalCount: Number(result?.stats?.pendingRenewalCount || 0),
       });
       setPagination({
         page: Number(result?.pagination?.page || page),
@@ -349,14 +349,14 @@ export default function AdminLicenseAlertsPage() {
           <p className="mt-2 text-sm text-slate-500">Incluye próximas alertas.</p>
         </div>
 
-        <div className="rounded-[28px] border border-emerald-200 bg-white p-6 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-500">
-            Realizadas
+        <div className="rounded-[28px] border border-yellow-200 bg-white p-6 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-yellow-600">
+            Renovaciones pendientes
           </p>
-          <p className="mt-3 text-4xl font-black text-emerald-600">
-            {stats.completedCount}
+          <p className="mt-3 text-4xl font-black text-yellow-600">
+            {stats.pendingRenewalCount}
           </p>
-          <p className="mt-2 text-sm text-slate-500">Historial de gestión.</p>
+          <p className="mt-2 text-sm text-slate-500">Cuentas pendientes de renovar.</p>
         </div>
       </div>
 

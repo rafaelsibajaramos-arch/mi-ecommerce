@@ -924,7 +924,7 @@ export async function GET(request: NextRequest) {
       return jsonError(`No se pudieron cargar las alertas: ${error.message}`, 500);
     }
 
-    const [pendingCountResult, dueCountResult, completedCountResult] = await Promise.all([
+    const [pendingCountResult, dueCountResult, pendingRenewalCountResult] = await Promise.all([
       auth.supabaseAdmin
         .from("license_alerts")
         .select("id", { count: "exact", head: true })
@@ -937,8 +937,14 @@ export async function GET(request: NextRequest) {
       auth.supabaseAdmin
         .from("license_alerts")
         .select("id", { count: "exact", head: true })
-        .eq("status", "completed"),
+        .eq("status", "pending")
+        .is("license_id", null)
+        .not("product_id", "is", null),
     ]);
+
+    if (pendingCountResult.error || dueCountResult.error || pendingRenewalCountResult.error) {
+      return jsonError("No se pudieron contar las alertas pendientes.", 500);
+    }
 
     const alerts = (data as LicenseAlertRow[]) || [];
     const productIds = uniqueIds(alerts.map((item) => item.product_id));
@@ -1171,7 +1177,7 @@ export async function GET(request: NextRequest) {
       stats: {
         pendingDueCount: dueCountResult.count || 0,
         pendingTotalCount: pendingCountResult.count || 0,
-        completedCount: completedCountResult.count || 0,
+        pendingRenewalCount: pendingRenewalCountResult.count || 0,
       },
     });
   } catch (error) {
