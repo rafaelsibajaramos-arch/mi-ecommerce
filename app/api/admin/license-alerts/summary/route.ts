@@ -99,7 +99,7 @@ export async function GET(request: NextRequest) {
 
     const now = new Date().toISOString();
 
-    const [pendingDueResult, pendingTotalResult] = await Promise.all([
+    const [pendingDueResult, pendingTotalResult, pendingRenewalResult, pendingOtherDueResult] = await Promise.all([
       auth.supabaseAdmin
         .from("license_alerts")
         .select("id", { count: "exact", head: true })
@@ -109,7 +109,23 @@ export async function GET(request: NextRequest) {
         .from("license_alerts")
         .select("id", { count: "exact", head: true })
         .eq("status", "pending"),
+      auth.supabaseAdmin
+        .from("license_alerts")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "pending")
+        .is("license_id", null)
+        .not("product_id", "is", null),
+      auth.supabaseAdmin
+        .from("license_alerts")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "pending")
+        .lte("due_at", now)
+        .or("license_id.not.is.null,product_id.is.null"),
     ]);
+
+    if (pendingRenewalResult.error || pendingOtherDueResult.error) {
+      return jsonError("No se pudieron contar las alertas por tipo.", 500);
+    }
 
     if (pendingDueResult.error) {
       return jsonError(
@@ -129,6 +145,8 @@ export async function GET(request: NextRequest) {
       ok: true,
       pendingDueCount: pendingDueResult.count || 0,
       pendingTotalCount: pendingTotalResult.count || 0,
+      pendingRenewalCount: pendingRenewalResult.count || 0,
+      pendingOtherDueCount: pendingOtherDueResult.count || 0,
     });
   } catch (error) {
     return jsonError(

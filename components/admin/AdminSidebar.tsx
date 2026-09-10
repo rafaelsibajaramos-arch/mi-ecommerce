@@ -22,6 +22,7 @@ export default function AdminSidebar() {
   const [open, setOpen] = useState(false);
   const [openPathname, setOpenPathname] = useState<string | null>(null);
   const [pendingAlertsCount, setPendingAlertsCount] = useState(0);
+  const [pendingRenewalCount, setPendingRenewalCount] = useState(0);
   const [topupAlertsCount, setTopupAlertsCount] = useState(0); // 👈 NUEVO
 
   const isMenuOpen = open && openPathname === pathname;
@@ -53,7 +54,10 @@ export default function AdminSidebar() {
       } = await supabase.auth.getSession();
 
       if (!session?.access_token) {
-        if (mounted) setPendingAlertsCount(0);
+        if (mounted) {
+          setPendingAlertsCount(0);
+          setPendingRenewalCount(0);
+        }
         return;
       }
 
@@ -70,12 +74,17 @@ export default function AdminSidebar() {
 
         if (!response.ok) {
           setPendingAlertsCount(0);
+          setPendingRenewalCount(0);
           return;
         }
 
-        setPendingAlertsCount(Number(result?.pendingDueCount || 0));
+        setPendingAlertsCount(Number(result?.pendingOtherDueCount || 0));
+        setPendingRenewalCount(Number(result?.pendingRenewalCount || 0));
       } catch {
-        if (mounted) setPendingAlertsCount(0);
+        if (mounted) {
+          setPendingAlertsCount(0);
+          setPendingRenewalCount(0);
+        }
       }
     };
 
@@ -249,12 +258,24 @@ export default function AdminSidebar() {
                   className={`${navClass(item.href)} justify-between gap-3`}
                 >
                   <span>{item.label}</span>
-                  {alertInfo.show ? (
-                    <span
-                      className="h-3 w-3 rounded-full bg-red-500 shadow-[0_0_12px_rgba(239,68,68,0.95)]"
-                      aria-label={`${alertInfo.count} alerta(s) pendiente(s)`}
-                    />
-                  ) : null}
+                  <span className="flex items-center gap-2">
+                    {alertInfo.show ? (
+                      <span
+                        className="h-3 w-3 rounded-full bg-red-500 shadow-[0_0_12px_rgba(239,68,68,0.95)]"
+                        role="img"
+                        aria-label={`${alertInfo.count} alerta(s) pendiente(s)`}
+                        title={`${alertInfo.count} alerta(s) pendiente(s)`}
+                      />
+                    ) : null}
+                    {item.href === "/admin/license-alerts" && pendingRenewalCount > 0 ? (
+                      <span
+                        className="h-3 w-3 rounded-full bg-yellow-400 shadow-[0_0_12px_rgba(250,204,21,0.95)]"
+                        role="img"
+                        aria-label={`${pendingRenewalCount} renovación(es) pendiente(s)`}
+                        title={`${pendingRenewalCount} renovación(es) pendiente(s)`}
+                      />
+                    ) : null}
+                  </span>
                 </Link>
               );
             })}
@@ -295,12 +316,24 @@ export default function AdminSidebar() {
                   className={`${navClass(item.href)} justify-between gap-3`}
                 >
                   <span>{item.label}</span>
-                  {alertInfo.show ? (
-                    <span
-                      className="h-3 w-3 rounded-full bg-red-500 shadow-[0_0_12px_rgba(239,68,68,0.95)]"
-                      aria-label={`${alertInfo.count} alerta(s) pendiente(s)`}
-                    />
-                  ) : null}
+                  <span className="flex items-center gap-2">
+                    {alertInfo.show ? (
+                      <span
+                        className="h-3 w-3 rounded-full bg-red-500 shadow-[0_0_12px_rgba(239,68,68,0.95)]"
+                        role="img"
+                        aria-label={`${alertInfo.count} alerta(s) pendiente(s)`}
+                        title={`${alertInfo.count} alerta(s) pendiente(s)`}
+                      />
+                    ) : null}
+                    {item.href === "/admin/license-alerts" && pendingRenewalCount > 0 ? (
+                      <span
+                        className="h-3 w-3 rounded-full bg-yellow-400 shadow-[0_0_12px_rgba(250,204,21,0.95)]"
+                        role="img"
+                        aria-label={`${pendingRenewalCount} renovación(es) pendiente(s)`}
+                        title={`${pendingRenewalCount} renovación(es) pendiente(s)`}
+                      />
+                    ) : null}
+                  </span>
                 </Link>
               );
             })}

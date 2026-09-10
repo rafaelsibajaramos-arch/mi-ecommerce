@@ -1204,18 +1204,40 @@ export async function POST(request: NextRequest) {
       new Set(fulfillmentRequests.map((requestItem) => requestItem.product.id))
     );
 
-    const { data: assignedHistoryData, error: assignedHistoryError } =
-      await supabaseAdmin
+    const assignedHistoryData: AssignedLicenseHistoryRow[] = [];
+    const repeatCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    // La fecha del pedido mide la compra, no la carga de la licencia al inventario.
+    for (let offset = 0; ; offset += 1000) {
+      const { data: historyPage, error: assignedHistoryError } = await supabaseAdmin
         .from("product_licenses")
-        .select("product_id, license_text")
+        .select("id, product_id, license_text, assigned_order_id")
         .eq("assigned_user_id", checkoutProfile.id)
         .eq("status", "assigned")
-        .in("product_id", fulfillmentProductIds);
+        .in("product_id", fulfillmentProductIds)
+        .order("id")
+        .range(offset, offset + 999);
 
-    if (assignedHistoryError) {
-      return jsonError(
-        "No se pudo validar el historial de licencias del usuario."
-      );
+      if (assignedHistoryError) {
+        return jsonError("No se pudo validar el historial de licencias del usuario.");
+      }
+      const orderIds = Array.from(new Set((historyPage || [])
+        .map((row) => row.assigned_order_id).filter(Boolean)));
+      const recentOrderIds = new Set<string>();
+      for (let i = 0; i < orderIds.length; i += 100) {
+        const { data: recentOrders, error: ordersError } = await supabaseAdmin
+          .from("orders")
+          .select("id")
+          .in("id", orderIds.slice(i, i + 100))
+          .gt("created_at", repeatCutoff);
+        if (ordersError) {
+          return jsonError("No se pudo validar la fecha de las compras anteriores.");
+        }
+        for (const order of recentOrders || []) recentOrderIds.add(order.id);
+      }
+      assignedHistoryData.push(...(historyPage || []).filter((row) =>
+        !row.assigned_order_id || recentOrderIds.has(row.assigned_order_id)
+      ));
+      if (!historyPage || historyPage.length < 1000) break;
     }
 
     const assignedHistoryMap = new Map<string, Set<string>>();

@@ -1745,7 +1745,7 @@ export default function EditProductPage() {
                       onChange={(e) => setAvoidRepeatLicense(e.target.checked)}
                       className={checkboxClass}
                     />
-                    <span>Evitar entregar licencias repetidas al mismo cliente</span>
+                    <span>Evitar repetir licencias al mismo cliente durante 30 días desde su última compra</span>
                   </label>
 
                   <label className="flex items-center gap-3 text-base font-medium text-slate-700">
