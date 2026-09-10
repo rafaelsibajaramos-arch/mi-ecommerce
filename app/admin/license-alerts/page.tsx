@@ -98,7 +98,7 @@ export default function AdminLicenseAlertsPage() {
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [banner, setBanner] = useState<BannerState>(null);
-  const [filter, setFilter] = useState<"pending" | "due" | "renewal" | "renewal_due" | "all">("pending");
+  const [filter, setFilter] = useState<"pending" | "due" | "renewal" | "renewal_due">("pending");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize] = useState(10);
@@ -452,7 +452,6 @@ export default function AdminLicenseAlertsPage() {
               ["due", "Para realizar"],
               ["renewal", "Renovaciones"],
               ["renewal_due", "Renovaciones pendientes"],
-              ["all", "Todas"],
             ] as const).map(([key, label]) => (
               <button
                 key={key}
