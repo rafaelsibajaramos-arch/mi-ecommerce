@@ -98,7 +98,7 @@ export default function AdminLicenseAlertsPage() {
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [banner, setBanner] = useState<BannerState>(null);
-  const [filter, setFilter] = useState<"pending" | "due" | "completed" | "renewal" | "all">("pending");
+  const [filter, setFilter] = useState<"pending" | "due" | "renewal" | "renewal_due" | "all">("pending");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize] = useState(10);
@@ -356,7 +356,7 @@ export default function AdminLicenseAlertsPage() {
           <p className="mt-3 text-4xl font-black text-yellow-600">
             {stats.pendingRenewalCount}
           </p>
-          <p className="mt-2 text-sm text-slate-500">Cuentas pendientes de renovar.</p>
+          <p className="mt-2 text-sm text-slate-500">Renovaciones cuya fecha ya llegó.</p>
         </div>
       </div>
 
@@ -451,7 +451,7 @@ export default function AdminLicenseAlertsPage() {
               ["pending", "Pendientes"],
               ["due", "Para realizar"],
               ["renewal", "Renovaciones"],
-              ["completed", "Realizadas"],
+              ["renewal_due", "Renovaciones pendientes"],
               ["all", "Todas"],
             ] as const).map(([key, label]) => (
               <button

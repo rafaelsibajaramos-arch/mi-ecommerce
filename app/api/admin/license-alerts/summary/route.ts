@@ -114,6 +114,7 @@ export async function GET(request: NextRequest) {
         .select("id", { count: "exact", head: true })
         .eq("status", "pending")
         .is("license_id", null)
+        .lte("due_at", now)
         .not("product_id", "is", null),
       auth.supabaseAdmin
         .from("license_alerts")

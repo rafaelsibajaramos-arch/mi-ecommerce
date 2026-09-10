@@ -860,7 +860,7 @@ export async function GET(request: NextRequest) {
 
     const url = new URL(request.url);
     const filterParam = url.searchParams.get("filter") || "pending";
-    const filter = ["pending", "due", "completed", "renewal", "all"].includes(filterParam)
+    const filter = ["pending", "due", "completed", "renewal", "renewal_due", "all"].includes(filterParam)
       ? filterParam
       : "pending";
     const search = String(url.searchParams.get("search") || "")
@@ -886,6 +886,12 @@ export async function GET(request: NextRequest) {
       alertsQuery = alertsQuery.eq("status", "pending").lte("due_at", nowIso);
     } else if (filter === "completed") {
       alertsQuery = alertsQuery.eq("status", "completed");
+    } else if (filter === "renewal_due") {
+      alertsQuery = alertsQuery
+        .eq("status", "pending")
+        .lte("due_at", nowIso)
+        .is("license_id", null)
+        .not("product_id", "is", null);
     } else if (filter === "renewal") {
       alertsQuery = alertsQuery
         .is("license_id", null)
@@ -939,6 +945,7 @@ export async function GET(request: NextRequest) {
         .select("id", { count: "exact", head: true })
         .eq("status", "pending")
         .is("license_id", null)
+        .lte("due_at", nowIso)
         .not("product_id", "is", null),
     ]);
 
