@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { useCart } from "../context/CartContext";
@@ -49,12 +48,13 @@ function ProductImage({
   }
 
   return (
-    <Image
+    // Product images live in Supabase Storage. Render the public URL directly
+    // so Next's image optimizer cannot reject a valid Storage URL and trigger
+    // the "Sin imagen" fallback.
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
       src={imageSrc}
       alt={alt}
-      width={800}
-      height={600}
-      sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
       loading="lazy"
       onError={() => setFailed(true)}
       className={className}
