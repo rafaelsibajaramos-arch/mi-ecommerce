@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import PublicBrowsingToggle from './PublicBrowsingToggle';
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
@@ -280,6 +281,7 @@ export default function AdminSidebar() {
               );
             })}
           </nav>
+          <PublicBrowsingToggle />
         </div>
 
         <div className="border-t border-white/10 p-4">
@@ -338,6 +340,7 @@ export default function AdminSidebar() {
               );
             })}
           </nav>
+          <PublicBrowsingToggle />
         </div>
 
         <div className="border-t border-white/10 p-4">

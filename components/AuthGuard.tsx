@@ -47,6 +47,13 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
   const [checkingAuth, setCheckingAuth] = useState(true);
+  const [publicBrowsing, setPublicBrowsing] = useState(false);
+  useEffect(() => {
+    const load = () => fetch('/api/public-browsing', { cache: 'no-store' }).then(r => r.json()).then(d => setPublicBrowsing(d.enabled === true)).catch(() => setPublicBrowsing(false));
+    void load();
+    window.addEventListener('focus', load);
+    return () => window.removeEventListener('focus', load);
+  }, []);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [mode, setMode] = useState<AuthMode>("login");
   const [isRecoveryFlow, setIsRecoveryFlow] = useState(false);
@@ -65,7 +72,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const [registerMessage, setRegisterMessage] = useState("");
 
   const publicPaths = ["/reset-password", "/recargas-automaticas"];
-  const isPublicPath = publicPaths.includes(pathname) || isRecoveryFlow;
+  const isPublicPath = publicPaths.includes(pathname) || isRecoveryFlow || (publicBrowsing && ['/', '/contact'].includes(pathname));
 
   const getOwnProfile = async (userId: string): Promise<{ profile: ProfileRow | null; errorMessage: string | null }> => {
     try {

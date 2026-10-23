@@ -72,9 +72,7 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
       try {
         const cachedProfile = window.localStorage.getItem(PROFILE_CACHE_KEY);
 
-        if (cachedProfile) {
-          setProfile(JSON.parse(cachedProfile) as Profile);
-        }
+        // La sesión real determina el menú; no mostrar perfiles de sesiones anteriores.
       } catch {}
 
       void loadProfile();
@@ -159,7 +157,7 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
     router.refresh();
   };
 
-  if (!profile) return null;
+  if (!profile) return <div className="relative"><button type="button" onClick={() => setOpen(!open)} className="rounded-2xl border border-white/10 px-4 py-3 text-white">Mi cuenta</button>{open && <div className="absolute right-0 top-full z-50 mt-2 rounded-2xl bg-black p-4 text-white"><Link href="/">Inicio</Link><Link className="mt-3 block whitespace-nowrap" href="/login" onClick={() => setOpen(false)}>Iniciar sesión</Link></div>}</div>;
 
   const rawBalance = Number(profile.balance || 0);
   const balance = new Intl.NumberFormat("es-CO").format(rawBalance);

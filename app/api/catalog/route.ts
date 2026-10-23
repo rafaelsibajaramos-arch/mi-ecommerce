@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { publicBrowsingEnabled } from '@/lib/publicBrowsing';
+import { createClient as createServerClient } from '@/lib/supabase/server';
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -300,6 +302,11 @@ async function loadCatalogSnapshot(): Promise<CatalogSnapshot> {
 
 export async function GET(request: NextRequest) {
   try {
+    if (!(await publicBrowsingEnabled())) {
+      const auth = await createServerClient();
+      const { data, error } = await auth.auth.getUser();
+      if (error || !data.user) return NextResponse.json({ error: 'Inicia sesión para consultar el catálogo.' }, { status: 401 });
+    }
     const params = request.nextUrl.searchParams;
     const page = Math.max(1, Number(params.get("page") || 1));
     const pageSize = Math.max(1, Math.min(100, Number(params.get("pageSize") || 12)));
