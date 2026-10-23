@@ -56,6 +56,9 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   }, []);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [mode, setMode] = useState<AuthMode>("login");
+  useEffect(() => {
+    setMode(pathname === '/register' ? 'register' : 'login');
+  }, [pathname]);
   const [isRecoveryFlow, setIsRecoveryFlow] = useState(false);
   const [visible, setVisible] = useState(false);
 

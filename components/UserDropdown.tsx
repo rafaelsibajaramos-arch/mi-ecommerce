@@ -157,7 +157,16 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
     router.refresh();
   };
 
-  if (!profile) return <div className="relative"><button type="button" onClick={() => setOpen(!open)} className="rounded-2xl border border-white/10 px-4 py-3 text-white">Mi cuenta</button>{open && <div className="absolute right-0 top-full z-50 mt-2 rounded-2xl bg-black p-4 text-white"><Link href="/">Inicio</Link><Link className="mt-3 block whitespace-nowrap" href="/login" onClick={() => setOpen(false)}>Iniciar sesión</Link></div>}</div>;
+  if (!profile) return <div ref={dropdownRef} className="relative">
+    <button type="button" aria-label="Abrir menú de usuario" aria-expanded={open} onClick={() => setOpen(!open)} className="flex h-11 items-center gap-2 rounded-2xl border border-white/12 bg-white/[0.045] px-3 text-white transition hover:bg-white/[0.08] md:h-[52px]">
+      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="12" cy="8" r="3.5" /><path d="M5 21v-2a7 7 0 0 1 14 0v2" /></svg><span className="hidden text-xs sm:inline">Mi cuenta</span><span className="text-[9px] text-white/40">▼</span>
+    </button>
+    {open && <div className="absolute right-0 top-full z-50 mt-3 w-56 rounded-2xl border border-white/10 bg-[#090b12] p-2 text-sm text-white shadow-2xl">
+      <Link className="block rounded-xl px-3 py-2.5 text-white/65 hover:bg-white/5" href="/" onClick={() => setOpen(false)}>Inicio</Link>
+      <Link className="block rounded-xl px-3 py-2.5 text-white/80 hover:bg-white/5" href="/register" onClick={() => setOpen(false)}>Registrarse</Link>
+      <Link className="mt-1 block rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 font-medium hover:bg-white/10" href="/login" onClick={() => setOpen(false)}>Iniciar sesión</Link>
+    </div>}
+  </div>;
 
   const rawBalance = Number(profile.balance || 0);
   const balance = new Intl.NumberFormat("es-CO").format(rawBalance);

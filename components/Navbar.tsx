@@ -207,7 +207,7 @@ export default function Navbar() {
               )}
             </button>
 
-            {isLoggedIn && <UserDropdown isAdmin={isAdmin} />}
+            <UserDropdown isAdmin={isAdmin} />
           </div>
         </div>
       </header>
