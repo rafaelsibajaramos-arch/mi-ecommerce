@@ -880,9 +880,10 @@ export async function POST(request: NextRequest) {
     const {
       data: { user },
       error: authError,
-    } = await supabaseAuth.auth.getUser();
+    } = await supabaseAuth.auth.getUser(token);
 
     if (authError || !user) {
+      console.warn('[checkout] Falló la validación de sesión', { code: authError?.code, status: authError?.status, message: authError?.message });
       return jsonError("Sesión inválida.", 401);
     }
 

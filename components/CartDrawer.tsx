@@ -92,11 +92,11 @@ export default function CartDrawer() {
         accessToken = refreshed.session.access_token;
       }
 
-      const response = await fetch("/api/checkout", {
+      const submitCheckout = (token: string) => fetch("/api/checkout", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           cart: cart.map((item) => ({
@@ -110,7 +110,24 @@ export default function CartDrawer() {
         }),
       });
 
-      const result = await response.json().catch(() => null);
+      let response = await submitCheckout(accessToken);
+      let result = await response.json().catch(() => null);
+
+      // Un 401 se devuelve antes de crear pedidos o descontar saldo.
+      // Renovar solo en ese caso evita repetir una compra ya procesada.
+      if (response.status === 401) {
+        const { data: refreshed, error } = await supabase.auth.refreshSession();
+        if (!error && refreshed.session?.access_token) {
+          await new Promise(resolve => window.setTimeout(resolve, 1500));
+          response = await submitCheckout(refreshed.session.access_token);
+          result = await response.json().catch(() => null);
+        }
+        if (response.status === 401) {
+          setMessage('No pudimos validar tu sesión. Cierra sesión e inicia nuevamente; tu carrito se conserva.');
+          resetSlider();
+          return;
+        }
+      }
 
       if (!response.ok) {
         setMessage(result?.error || "No se pudo completar la compra.");
