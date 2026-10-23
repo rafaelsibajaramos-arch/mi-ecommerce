@@ -18,8 +18,9 @@ export async function PUT(request: NextRequest) {
     if (profile?.role !== 'admin') return NextResponse.json({ error: 'Sin permisos' }, { status: 403 });
     const body = await request.json();
     if (typeof body.enabled !== 'boolean') return NextResponse.json({ error: 'Valor inválido' }, { status: 400 });
-    const { error: saveError } = await admin.from('site_settings').upsert({ key: 'public_browsing_enabled', value: body.enabled });
+    const { data: saved, error: saveError } = await admin.from('site_settings').update({ public_browsing_enabled: body.enabled }).not('public_browsing_enabled', 'is', null).select('public_browsing_enabled');
     if (saveError) throw saveError;
+    if (!saved?.length) throw new Error('No existe la configuración del sitio.');
     return NextResponse.json({ enabled: body.enabled });
   } catch { return NextResponse.json({ error: 'No se pudo guardar la configuración.' }, { status: 500 }); }
 }
