@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { revalidateTag } from "next/cache";
-import { EXCHANGE_RATE_TAG, fetchOfficialRate, getExchangeRate } from "@/lib/exchangeRate";
+import { EXCHANGE_RATE_TAG, fetchGoogleRate, getExchangeRate } from "@/lib/exchangeRate";
 
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
@@ -9,12 +9,12 @@ export async function GET(request: Request) {
   }
   try {
     // Check the source before invalidating; retain the cached rate on source failure.
-    await fetchOfficialRate();
+    await fetchGoogleRate();
     revalidateTag(EXCHANGE_RATE_TAG, "max");
     await getExchangeRate();
     return NextResponse.json({ ok: true });
   } catch {
-    console.error("No se pudo actualizar la TRM; se conserva la última tasa válida.");
-    return NextResponse.json({ error: "No se pudo actualizar la TRM" }, { status: 503 });
+    console.error("No se pudo actualizar la cotizacion de Google; se conserva la última tasa válida.");
+    return NextResponse.json({ error: "No se pudo actualizar la cotizacion de Google" }, { status: 503 });
   }
 }

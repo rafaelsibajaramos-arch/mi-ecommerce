@@ -9,7 +9,7 @@ export async function GET() {
       headers: { "Cache-Control": "no-store" },
     });
   } catch {
-    return NextResponse.json({ error: "TRM no disponible; los valores siguen en COP." },
+    return NextResponse.json({ error: "cotizacion de Google no disponible; los valores siguen en COP." },
       { status: 503, headers: { "Cache-Control": "no-store" } });
   }
 }

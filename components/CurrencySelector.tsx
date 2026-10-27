@@ -20,7 +20,8 @@ export default function CurrencySelector() {
     {currency === "USD" && rate && <p className="max-w-64 text-right text-[10px]">
       USD de referencia. Operaciones en COP.<br />
       1 USD = $ {rate.copPerUsd.toLocaleString("es-CO")} COP.
-      {rate.validUntil.slice(0, 10) < new Date().toLocaleDateString("en-CA", { timeZone: "America/Bogota" }) && " Última tasa disponible."}
+      <br /><a href="https://www.google.com/finance/quote/USD-COP" target="_blank" rel="noopener noreferrer" className="underline">Fuente: Google Finance</a>.
+      <br />Consulta: {new Date(rate.checkedAt).toLocaleString("es-CO", { timeZone: "America/Bogota" })}.
     </p>}
     {!rate && <span className="text-[10px]">USD no disponible temporalmente</span>}
   </div>;
