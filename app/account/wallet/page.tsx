@@ -1,4 +1,5 @@
 "use client";
+import { useCurrency } from "@/context/CurrencyContext";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -114,16 +115,6 @@ function getTransactionKind(tx: WalletTransaction): "credit" | "debit" {
   return "debit";
 }
 
-function formatMoney(value: number) {
-  return Number(value || 0).toLocaleString("es-CO");
-}
-
-function formatSignedMoney(tx: WalletTransaction) {
-  const amount = Number(tx.amount || 0);
-  const kind = getTransactionKind(tx);
-  return `${kind === "credit" ? "+" : "-"}$ ${formatMoney(amount)}`;
-}
-
 function formatDate(date: string) {
   try {
     return new Date(date).toLocaleString("es-CO", {
@@ -173,6 +164,9 @@ function getTransactionTitle(tx: WalletTransaction) {
 }
 
 export default function WalletPage() {
+  const { formatMoney: displayMoney } = useCurrency();
+  const formatMoney = (value: number) => displayMoney(value, "balance");
+  const formatSignedMoney = (tx: WalletTransaction) => `${getTransactionKind(tx) === "credit" ? "+" : "-"}${formatMoney(Math.abs(Number(tx.amount || 0)))}`;
   const router = useRouter();
   const historySectionRef = useRef<HTMLDivElement | null>(null);
   const initialRange = useMemo(() => getCurrentMonthRange(), []);
@@ -330,7 +324,7 @@ export default function WalletPage() {
               <div className="min-w-0">
                 <p className="text-xs font-semibold text-violet-200/75">Vendido en el período</p>
                 <p className="mt-1 break-words text-3xl font-black text-white sm:text-4xl">
-                  $ {formatMoney(periodSales)}
+                  {formatMoney(periodSales)}
                 </p>
                 <p className="mt-1 truncate text-xs text-white/45 sm:text-sm">{periodLabel}</p>
               </div>
@@ -402,7 +396,7 @@ export default function WalletPage() {
               <p className="text-xs font-semibold">Recargas</p>
             </div>
             <p className="mt-2 break-words text-xl font-black text-white">
-              $ {formatMoney(periodCredits)}
+              {formatMoney(periodCredits)}
             </p>
             <p className="mt-1 text-[11px] text-white/35">{creditCount} movimiento(s)</p>
           </div>

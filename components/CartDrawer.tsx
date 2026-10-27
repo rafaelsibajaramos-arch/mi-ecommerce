@@ -1,4 +1,5 @@
 "use client";
+import { useCurrency } from "@/context/CurrencyContext";
 
 import { useMemo, useRef, useState } from "react";
 import { useCart } from "../context/CartContext";
@@ -28,6 +29,7 @@ type ReceiptOrder = {
 };
 
 export default function CartDrawer() {
+  const { formatMoney, currency } = useCurrency();
   const {
     cart,
     isCartOpen,
@@ -300,7 +302,7 @@ export default function CartDrawer() {
 
                       <div className="mt-3 flex items-center justify-between gap-3">
                         <p className="text-sm text-white/70">
-                          ${Number(item.price).toLocaleString()}
+                          {formatMoney(item.price)}
                         </p>
 
                         <button
@@ -342,8 +344,7 @@ export default function CartDrawer() {
                         </div>
 
                         <p className="text-sm font-semibold text-blue-400">
-                          $
-                          {Number(item.price * item.quantity).toLocaleString()}
+                          {formatMoney(item.price * item.quantity)}
                         </p>
                       </div>
                     </div>
@@ -357,10 +358,11 @@ export default function CartDrawer() {
             <div className="flex items-center justify-between text-lg font-semibold">
               <span>Total</span>
               <span className="text-blue-400">
-                ${Number(total).toLocaleString()}
+                {formatMoney(total)}
               </span>
             </div>
 
+            {currency === "USD" && <p className="text-xs text-white/65">Valores en USD de referencia. Se descontarán $ {total.toLocaleString("es-CO")} COP de tu saldo. Los importes convertidos se redondean por separado.</p>}
             {message && (
               <div className="rounded-2xl border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-200">
                 {message}

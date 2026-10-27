@@ -1,4 +1,6 @@
 "use client";
+import { useCurrency } from "@/context/CurrencyContext";
+import CurrencySelector from "@/components/CurrencySelector";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
@@ -20,6 +22,7 @@ const PHOTO_MODE_KEY = "streamingmayor_photo_mode";
 const PHOTO_MODE_EVENT = "streamingmayor:photo-mode-change";
 
 export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean }) {
+  const { formatMoney, currency } = useCurrency();
   const [open, setOpen] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [photoMode, setPhotoMode] = useState(false);
@@ -162,6 +165,7 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
       <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="12" cy="8" r="3.5" /><path d="M5 21v-2a7 7 0 0 1 14 0v2" /></svg><span className="hidden text-xs sm:inline">Mi cuenta</span><span className="text-[9px] text-white/40">▼</span>
     </button>
     {open && <div className="absolute right-0 top-full z-50 mt-3 w-56 rounded-2xl border border-white/10 bg-[#090b12] p-2 text-sm text-white shadow-2xl">
+      <div className="p-2"><CurrencySelector /></div>
       <Link className="block rounded-xl px-3 py-2.5 text-white/65 hover:bg-white/5" href="/" onClick={() => setOpen(false)}>Inicio</Link>
       <Link className="block rounded-xl px-3 py-2.5 text-white/80 hover:bg-white/5" href="/register" onClick={() => setOpen(false)}>Registrarse</Link>
       <Link className="mt-1 block rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 font-medium hover:bg-white/10" href="/login" onClick={() => setOpen(false)}>Iniciar sesión</Link>
@@ -169,8 +173,8 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
   </div>;
 
   const rawBalance = Number(profile.balance || 0);
-  const balance = new Intl.NumberFormat("es-CO").format(rawBalance);
-  const compactBalance = new Intl.NumberFormat("es-CO", { notation: "compact", maximumFractionDigits: 1 }).format(rawBalance);
+  const balance = formatMoney(rawBalance, "balance");
+  const compactBalance = currency === "USD" ? balance : new Intl.NumberFormat("es-CO", { notation: "compact", maximumFractionDigits: 1 }).format(rawBalance);
   const fullName = profile.full_name || "Usuario";
   const email = profile.email || "Sin correo";
   const canSeeAdmin = isAdmin || profile.role === "admin";
@@ -194,10 +198,10 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
         className="flex h-[44px] max-w-[132px] items-center gap-1.5 rounded-[18px] border border-white/15 bg-white/[0.03] px-2 text-white transition hover:bg-white/[0.06] min-[350px]:max-w-[152px] min-[350px]:px-2.5 min-[390px]:h-[46px] min-[390px]:max-w-[175px] min-[390px]:gap-2 min-[390px]:px-3 min-[430px]:max-w-[220px] md:h-[50px] md:max-w-none md:gap-3 md:px-4"
       >
         <span className="hidden text-[11px] font-semibold text-white/95 min-[350px]:block min-[430px]:hidden">
-          $ {compactBalance}
+          {currency === "COP" ? "$ " : ""}{compactBalance}
         </span>
         <span className="hidden text-[13px] font-semibold text-white/95 min-[430px]:block md:text-[16px]">
-          $ {balance}
+          {balance}
         </span>
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-black min-[390px]:h-9 min-[390px]:w-9">
           <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -246,12 +250,13 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
                 )}
               </div>
 
+              <div className="mt-3"><CurrencySelector /></div>
               {/* Balance — sky-400 streamingmayor dentro de card streamxpress */}
 <div className="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] px-3.5 py-3 min-[390px]:mt-4 min-[390px]:px-4 min-[390px]:py-3.5 md:mt-3 md:px-3.5 md:py-3">                <p className="text-[10px] uppercase tracking-[0.18em] text-white/35 md:text-[10px]">
                   Saldo disponible
                 </p>
                 <p className="mt-1.5 text-lg font-black text-sky-400 min-[390px]:text-xl md:text-xl">
-                  $ {balance}
+                  {balance}
                 </p>
               </div>
             </div>

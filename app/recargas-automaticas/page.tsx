@@ -23,7 +23,7 @@ type PublicTopupPromotion = {
 };
 
 function formatMoney(value: number | null | undefined) {
-  return `$ ${Number(value || 0).toLocaleString("es-CO")}`;
+  return `$ ${Number(value || 0).toLocaleString("es-CO")} COP`;
 }
 
 function normalizeNumber(value: number | string | null | undefined) {

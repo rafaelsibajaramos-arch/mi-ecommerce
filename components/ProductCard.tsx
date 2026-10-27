@@ -1,4 +1,5 @@
 "use client";
+import { useCurrency } from "@/context/CurrencyContext";
 
 import Link from "next/link";
 import Image from "next/image";
@@ -13,6 +14,7 @@ type Product = {
 };
 
 export default function ProductCard({ product }: { product: Product }) {
+  const { formatMoney } = useCurrency();
   const { addToCart } = useCart();
 
   return (
@@ -32,7 +34,7 @@ export default function ProductCard({ product }: { product: Product }) {
           <h3 className="text-lg font-bold text-gray-900 mt-1">
             {product.name}
           </h3>
-          <p className="text-2xl font-extrabold mt-4">${product.price}</p>
+          <p className="text-2xl font-extrabold mt-4">{formatMoney(product.price)}</p>
         </div>
       </Link>
 

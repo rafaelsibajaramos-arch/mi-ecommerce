@@ -1,4 +1,5 @@
 "use client";
+import { useCurrency } from "@/context/CurrencyContext";
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -170,6 +171,7 @@ const CATALOG_BROADCAST_CHANNEL = "streamingmayor-catalog-invalidation";
 const CATALOG_REALTIME_EVENT = "catalog-updated";
 
 export default function HomePage() {
+  const { formatMoney: formatPrice } = useCurrency();
   const { addToCart } = useCart();
 
   const [allCatalogItems, setAllCatalogItems] = useState<CatalogItem[]>([]);
@@ -253,11 +255,6 @@ export default function HomePage() {
 
     return () => window.clearTimeout(timeout);
   }, [search]);
-
-  const formatPrice = (value: number | string | null | undefined) => {
-    const numericValue = Math.round(Number(value || 0));
-    return numericValue.toLocaleString("es-CO");
-  };
 
   useEffect(() => {
     if (!quickViewItem) return;
@@ -888,7 +885,6 @@ export default function HomePage() {
     }
   }, [buildCatalogItems]);
 
-
   const categories = useMemo<CategoryItem[]>(() => {
     const counts = new Map<string, number>();
 
@@ -1410,7 +1406,7 @@ export default function HomePage() {
 
           <div className="mt-auto border-t border-white/10 pt-2 sm:pt-3">
             <p className="text-lg font-black text-white sm:text-xl md:text-[22px]">
-              ${formatPrice(item.displayPrice)}
+              {formatPrice(item.displayPrice)}
             </p>
 
             {showAdminControls && (
@@ -1833,7 +1829,7 @@ export default function HomePage() {
 
                     <div className="space-y-3 py-3">
                       <p className="text-[2.1rem] font-black leading-none text-white sm:text-[2.5rem] md:text-[2.6rem] lg:text-[2.8rem]">
-                        ${formatPrice(quickViewPrice)}
+                        {formatPrice(quickViewPrice)}
                       </p>
 
                       <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 sm:p-4 md:p-3 lg:p-4">

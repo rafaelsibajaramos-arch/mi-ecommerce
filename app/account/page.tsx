@@ -1,4 +1,5 @@
 "use client";
+import { useCurrency } from "@/context/CurrencyContext";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -17,6 +18,7 @@ type TabType = "info" | "security";
 
 // Pantalla principal del perfil del usuario para editar datos y contraseña.
 export default function AccountPage() {
+  const { formatMoney } = useCurrency();
   const router = useRouter();
 
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -263,7 +265,7 @@ export default function AccountPage() {
               <div className="flex items-center justify-between gap-4">
                 <span className="text-white/70">Saldo:</span>
                 <span className="font-semibold text-sky-400">
-                  ${Number(profile.balance ?? 0).toLocaleString("es-CO")}
+                  {formatMoney(profile.balance, "balance")}
                 </span>
               </div>
 

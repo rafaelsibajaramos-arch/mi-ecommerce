@@ -1,4 +1,5 @@
 "use client";
+import { useCurrency } from "@/context/CurrencyContext";
 
 import { useEffect, useState } from "react";
 
@@ -66,9 +67,7 @@ function OrderReceiptModalContent({
     };
   }, [onClose]);
 
-  const formatMoney = (value: number) => {
-    return `$ ${Number(value || 0).toLocaleString("es-CO")}`;
-  };
+  const { formatMoney } = useCurrency();
 
   const formatDate = (date: string) => {
     try {

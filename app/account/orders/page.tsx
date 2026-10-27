@@ -1,4 +1,5 @@
 "use client";
+import { useCurrency } from "@/context/CurrencyContext";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -147,9 +148,7 @@ export default function AccountOrdersPage() {
   };
 
   // Formatea un valor numérico como dinero para mostrarlo en la interfaz.
-  const formatMoney = (value: number) => {
-    return `$ ${Number(value || 0).toLocaleString("es-CO")}`;
-  };
+  const { formatMoney } = useCurrency();
 
   // Convierte una fecha técnica en un texto legible para la interfaz.
   const formatDate = (date: string) => {
