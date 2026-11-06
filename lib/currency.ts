@@ -1,4 +1,4 @@
-export type DisplayCurrency = "COP" | "USD";
+export type DisplayCurrency = "COP" | "USD" | "MXN";
 export type MoneyKind = "price" | "balance";
 
 // Integer arithmetic prevents floating point errors at decimal boundaries.
@@ -27,8 +27,8 @@ export function formatDisplayMoney(
   kind: MoneyKind = "price",
 ) {
   const cop = Number(value || 0);
-  if (currency === "USD" && rate && Number.isFinite(cop)) {
-    return `USD ${usdUnits(cop, rate, kind).toFixed(kind === "price" ? 1 : 2)}`;
+  if (currency !== "COP" && rate && Number.isFinite(cop)) {
+    return `${currency} ${usdUnits(cop, rate, kind).toFixed(kind === "price" ? 1 : 2)}`;
   }
   return `$ ${Number.isFinite(cop) ? cop.toLocaleString("es-CO") : "0"}`;
 }

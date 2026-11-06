@@ -174,7 +174,7 @@ export default function UserDropdown({ isAdmin = false }: { isAdmin?: boolean })
 
   const rawBalance = Number(profile.balance || 0);
   const balance = formatMoney(rawBalance, "balance");
-  const compactBalance = currency === "USD" ? balance : new Intl.NumberFormat("es-CO", { notation: "compact", maximumFractionDigits: 1 }).format(rawBalance);
+  const compactBalance = currency !== "COP" ? balance : new Intl.NumberFormat("es-CO", { notation: "compact", maximumFractionDigits: 1 }).format(rawBalance);
   const fullName = profile.full_name || "Usuario";
   const email = profile.email || "Sin correo";
   const canSeeAdmin = isAdmin || profile.role === "admin";

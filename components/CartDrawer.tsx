@@ -362,7 +362,7 @@ export default function CartDrawer() {
               </span>
             </div>
 
-            {currency === "USD" && <p className="text-xs text-white/65">Valores en USD de referencia. Se descontarán $ {total.toLocaleString("es-CO")} COP de tu saldo. Los importes convertidos se redondean por separado.</p>}
+            {currency !== "COP" && <p className="text-xs text-white/65">Valores en {currency} de referencia. Se descontarán $ {total.toLocaleString("es-CO")} COP de tu saldo. Los importes convertidos se redondean por separado.</p>}
             {message && (
               <div className="rounded-2xl border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-200">
                 {message}

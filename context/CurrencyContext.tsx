@@ -5,24 +5,32 @@ import { usePathname } from "next/navigation";
 import { formatDisplayMoney, type DisplayCurrency, type MoneyKind } from "@/lib/currency";
 
 type Rate = { copPerUsd: number; checkedAt: string; validUntil: string };
+type MxnRate = { copPerMxn: number; checkedAt: string; validUntil: string };
 const KEY = "streamingmayor_display_currency";
 const CurrencyContext = createContext<{
   currency: DisplayCurrency;
   setCurrency: (currency: DisplayCurrency) => void;
   rate: Rate | null;
+  mxnRate: MxnRate | null;
   formatMoney: (value: number | string | null | undefined, kind?: MoneyKind) => string;
 } | null>(null);
 
 export function CurrencyProvider({ children }: { children: React.ReactNode }) {
   const [preferred, setPreferred] = useState<DisplayCurrency>("COP");
   const [rate, setRate] = useState<Rate | null>(null);
+  const [mxnRate, setMxnRate] = useState<MxnRate | null>(null);
   const pathname = usePathname();
-  const currency = preferred === "USD" && rate && !pathname.startsWith("/admin") ? "USD" : "COP";
+  const currency: DisplayCurrency = pathname.startsWith("/admin") ? "COP"
+    : preferred === "USD" && rate ? "USD"
+    : preferred === "MXN" && mxnRate ? "MXN" : "COP";
 
   useEffect(() => {
     const controller = new AbortController();
     const syncPreference = () => {
-      try { setPreferred(localStorage.getItem(KEY) === "USD" ? "USD" : "COP"); } catch {}
+      try {
+        const saved = localStorage.getItem(KEY);
+        setPreferred(saved === "USD" || saved === "MXN" ? saved : "COP");
+      } catch {}
     };
     syncPreference();
     const refresh = async () => {
@@ -31,6 +39,7 @@ export function CurrencyProvider({ children }: { children: React.ReactNode }) {
         if (!response.ok) return;
         const next = await response.json();
         if (Number.isFinite(next.copPerUsd) && next.copPerUsd > 0 && next.checkedAt && next.validUntil) setRate(next);
+        if (Number.isFinite(next.mxn?.copPerMxn) && next.mxn.copPerMxn > 0 && next.mxn.checkedAt && next.mxn.validUntil) setMxnRate(next.mxn);
       } catch { /* Preserve the last valid rate in this session. */ }
     };
     void refresh();
@@ -51,8 +60,8 @@ export function CurrencyProvider({ children }: { children: React.ReactNode }) {
     try { localStorage.setItem(KEY, next); } catch {}
   };
   const formatMoney = useCallback((value: number | string | null | undefined, kind: MoneyKind = "price") =>
-    formatDisplayMoney(value, currency, rate?.copPerUsd ?? null, kind), [currency, rate]);
-  return <CurrencyContext.Provider value={{ currency, setCurrency, rate, formatMoney }}>{children}</CurrencyContext.Provider>;
+    formatDisplayMoney(value, currency, currency === "MXN" ? mxnRate?.copPerMxn ?? null : rate?.copPerUsd ?? null, kind), [currency, rate, mxnRate]);
+  return <CurrencyContext.Provider value={{ currency, setCurrency, rate, mxnRate, formatMoney }}>{children}</CurrencyContext.Provider>;
 }
 
 export function useCurrency() {

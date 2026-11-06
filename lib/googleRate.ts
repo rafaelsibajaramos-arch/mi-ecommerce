@@ -1,7 +1,7 @@
 // Read only the primary quote. Ignore charts, related currencies and scripts.
-export function parseGoogleRate(html: string): number {
-  if (!/<title>USD\/COP Currency Exchange Rate/.test(html)) {
-    throw new Error("Google no devolvió la cotización USD/COP");
+export function parseGoogleRate(html: string, currency: "USD" | "MXN" = "USD"): number {
+  if (!html.includes(`<title>${currency}/COP Currency Exchange Rate`)) {
+    throw new Error(`Google no devolvió la cotización ${currency}/COP`);
   }
   const quote = html.match(/<div\b[^>]*class="N6SYTe"[^>]*>([\s\S]*?)<\/div>/)?.[1]
     ?? html.match(/<div\b[^>]*class="[^"]*\bYMlKec\b[^"]*\bfxKbKc\b[^"]*"[^>]*>([\s\S]*?)<\/div>/)?.[1];
@@ -10,7 +10,7 @@ export function parseGoogleRate(html: string): number {
     throw new Error("No se encontró el precio principal de Google Finance");
   }
   const rate = Number(text.replaceAll(",", ""));
-  if (!Number.isFinite(rate) || rate < 100 || rate > 100000) {
+  if (!Number.isFinite(rate) || rate < (currency === "MXN" ? 1 : 100) || rate > 100000) {
     throw new Error("Google devolvió una tasa fuera de rango");
   }
   return Math.round(rate * 100) / 100;
