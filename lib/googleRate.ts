@@ -1,5 +1,5 @@
 // Read only the primary quote. Ignore charts, related currencies and scripts.
-export function parseGoogleRate(html: string, currency: "USD" | "MXN" = "USD"): number {
+export function parseGoogleRate(html: string, currency: "USD" | "MXN" | "PEN" = "USD"): number {
   if (!html.includes(`<title>${currency}/COP Currency Exchange Rate`)) {
     throw new Error(`Google no devolvió la cotización ${currency}/COP`);
   }

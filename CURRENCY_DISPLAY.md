@@ -1,13 +1,13 @@
-# Visualización COP / USD / MXN
+# Visualización COP / USD / MXN / PEN
 
 Las operaciones, recargas, precios guardados, pedidos y descuentos de saldo siguen en COP. No se alteran las tablas ni las APIs que procesan compras.
 
 ## Uso
 
-En el menú de usuario, seleccionar **Moneda → COP, USD o MXN**, con la bandera correspondiente. La preferencia se guarda en el navegador. En las pantallas administrativas se muestran siempre COP. El selector muestra únicamente la moneda y su bandera.
+En el menú de usuario, seleccionar **Moneda → COP, USD, MXN o PEN**, con la bandera correspondiente. La preferencia se guarda en el navegador. En las pantallas administrativas se muestran siempre COP. El selector muestra únicamente la moneda y su bandera.
 
-- Productos y totales: USD o MXN con un decimal, redondeado hacia arriba.
-- Saldo e historial de billetera: USD o MXN con dos decimales, redondeado hacia abajo sobre el valor absoluto.
+- Productos y totales: USD, MXN o PEN con un decimal, redondeado hacia arriba.
+- Saldo e historial de billetera: USD, MXN o PEN con dos decimales, redondeado hacia abajo sobre el valor absoluto.
 - El carrito muestra también el total exacto en COP que se descontará. Cada importe visual se convierte por separado; la suma de importes redondeados puede diferir del total convertido.
 - Las instrucciones e importes para transferencias de recarga permanecen identificados en COP.
 - Si no hay una tasa válida disponible, USD queda deshabilitado y se muestra COP. Si falla una actualización, la caché conserva la última respuesta válida.
@@ -32,3 +32,5 @@ La caché persistente de Next conserva la última consulta exitosa y revalida al
 La publicación y la ejecución del cron en producción se comprueban después del despliegue.
 
 Google Finance se lee desde su página pública. Si cambia el formato o rechaza la consulta, se conserva la última tasa válida; sin una tasa previa disponible, se muestran COP. No se sustituye por otra fuente silenciosamente.
+
+PEN (sol peruano) usa Google Finance PEN/COP, con cache independiente y las mismas reglas de redondeo y actualizacion diaria.

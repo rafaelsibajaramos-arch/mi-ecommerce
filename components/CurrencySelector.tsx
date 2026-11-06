@@ -4,7 +4,7 @@ import { useCurrency } from "@/context/CurrencyContext";
 import { usePathname } from "next/navigation";
 
 export default function CurrencySelector() {
-  const { currency, setCurrency, rate, mxnRate } = useCurrency();
+  const { currency, setCurrency, rate, mxnRate, penRate } = useCurrency();
   const pathname = usePathname();
   if (pathname.startsWith("/admin")) return null;
   return (
@@ -16,6 +16,9 @@ export default function CurrencySelector() {
             <path fill="#FCD116" d="M0 0h32v11H0z" />
             <path fill="#003893" d="M0 11h32v5.5H0z" />
             <path fill="#CE1126" d="M0 16.5h32V22H0z" />
+          </> : currency === "PEN" ? <>
+            <path fill="#D91023" d="M0 0h32v22H0z" />
+            <path fill="#fff" d="M10.67 0h10.66v22H10.67z" />
           </> : currency === "MXN" ? <>
             <path fill="#fff" d="M0 0h32v22H0z" />
             <path fill="#006847" d="M0 0h10.67v22H0z" />
@@ -32,11 +35,12 @@ export default function CurrencySelector() {
           </>}
         </svg>
         <select aria-label="Moneda para visualizar precios" value={currency}
-          onChange={event => setCurrency(event.target.value === "USD" ? "USD" : event.target.value === "MXN" ? "MXN" : "COP")}
+          onChange={event => setCurrency(event.target.value === "USD" ? "USD" : event.target.value === "MXN" ? "MXN" : event.target.value === "PEN" ? "PEN" : "COP")}
           className="min-h-11 cursor-pointer rounded-xl bg-[#090b12] py-2 pr-2 text-base font-bold text-white outline-none focus-visible:ring-2 focus-visible:ring-sky-400">
           <option value="COP">COP</option>
           <option value="USD" disabled={!rate}>USD</option>
           <option value="MXN" disabled={!mxnRate}>MXN</option>
+          <option value="PEN" disabled={!penRate}>PEN</option>
         </select>
       </span>
     </label>

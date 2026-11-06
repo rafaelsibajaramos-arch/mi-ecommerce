@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { revalidateTag } from "next/cache";
-import { EXCHANGE_RATE_TAG, MXN_EXCHANGE_RATE_TAG, fetchGoogleRate, fetchGoogleMxnRate, getExchangeRate, getMxnExchangeRate } from "@/lib/exchangeRate";
+import { EXCHANGE_RATE_TAG, MXN_EXCHANGE_RATE_TAG, PEN_EXCHANGE_RATE_TAG, fetchGooglePenRate, getPenExchangeRate, fetchGoogleRate, fetchGoogleMxnRate, getExchangeRate, getMxnExchangeRate } from "@/lib/exchangeRate";
 
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
@@ -19,6 +19,11 @@ export async function GET(request: Request) {
         await fetchGoogleMxnRate();
         revalidateTag(MXN_EXCHANGE_RATE_TAG, "max");
         await getMxnExchangeRate();
+      })(),
+      (async () => {
+        await fetchGooglePenRate();
+        revalidateTag(PEN_EXCHANGE_RATE_TAG, "max");
+        await getPenExchangeRate();
       })(),
     ]);
     if (updates.some(update => update.status === "rejected")) {

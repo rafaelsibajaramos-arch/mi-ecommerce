@@ -1,4 +1,4 @@
-export type DisplayCurrency = "COP" | "USD" | "MXN";
+export type DisplayCurrency = "COP" | "USD" | "MXN" | "PEN";
 export type MoneyKind = "price" | "balance";
 
 // Integer arithmetic prevents floating point errors at decimal boundaries.

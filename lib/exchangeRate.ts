@@ -5,6 +5,8 @@ import { parseGoogleRate } from "@/lib/googleRate";
 export const EXCHANGE_RATE_TAG = "google-cop-usd-exchange-rate";
 export const MXN_EXCHANGE_RATE_TAG = "google-cop-mxn-exchange-rate";
 
+export const PEN_EXCHANGE_RATE_TAG = "google-cop-pen-exchange-rate";
+
 export type ExchangeRate = {
   source: string;
   copPerUsd: number;
@@ -18,7 +20,7 @@ export function rateDate(now = new Date()) {
   return new Date(now.getTime() - 13 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
-async function fetchCurrencyRate(currency: "USD" | "MXN") {
+async function fetchCurrencyRate(currency: "USD" | "MXN" | "PEN") {
   const response = await fetch(`https://www.google.com/finance/quote/${currency}-COP?hl=en`, {
     cache: "no-store",
     headers: { "User-Agent": "Mozilla/5.0", "Accept-Language": "en-US,en;q=0.9" },
@@ -65,6 +67,23 @@ export async function getExchangeRate() {
   if (rateDate(new Date(rate.checkedAt)) < rateDate()) {
     revalidateTag(EXCHANGE_RATE_TAG, "max");
     return cachedRate();
+  }
+  return rate;
+}
+
+export async function fetchGooglePenRate() {
+  const { copPerUnit, ...metadata } = await fetchCurrencyRate("PEN");
+  return { ...metadata, copPerPen: copPerUnit };
+}
+
+const cachedPenRate = unstable_cache(fetchGooglePenRate,
+  ["google-finance-pen-cop-v1"], { revalidate: false, tags: [PEN_EXCHANGE_RATE_TAG] });
+
+export async function getPenExchangeRate() {
+  const rate = await cachedPenRate();
+  if (rateDate(new Date(rate.checkedAt)) < rateDate()) {
+    revalidateTag(PEN_EXCHANGE_RATE_TAG, "max");
+    return cachedPenRate();
   }
   return rate;
 }
